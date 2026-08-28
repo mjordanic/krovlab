@@ -1,0 +1,136 @@
+# Context
+
+The shared vocabulary for this project. Glossary only — no implementation
+details, no specs, no decisions. Decisions live in `docs/adr/`.
+
+When a term here has a precise meaning, use it. Where the domain has several
+words for the same thing, the preferred term is given and the synonyms are
+listed as "not:" so we don't drift.
+
+## The building
+
+**Footprint** — the closed, planar polygon the roof must cover, given in plan.
+Always counter-clockwise, always in metres. A footprint may have holes.
+_Not: outline, boundary, plan, slab._
+
+**Hole** — an interior ring of a footprint that the roof does not cover: a
+courtyard, light well or atrium. A footprint with a hole is still one footprint,
+not two.
+
+**Wing** — one connected footprint within a project that has more than one. Two
+wings are separate polygons; a single L-shaped building is one footprint, not
+two wings.
+
+**Eave height** — the height above project datum of the footprint plane, i.e.
+where the roof surface meets the wall. Uniform across a footprint unless stated.
+
+## The roof surface
+
+**Roof** — the set of planar faces covering one footprint. A roof is a
+*terrain*: exactly one height for every point inside the footprint, so it never
+folds back over itself. A geometry that violates this is not a roof, and saying
+so is how we reject bad output.
+
+**Face** — one planar piece of the roof, rising from exactly one footprint edge
+at that edge's pitch. Every face is a plane, never curved, never warped.
+
+**Pitch** — the angle of a face from horizontal, in degrees, `0 < pitch < 90`.
+The single most important design variable. _Not: slope, inclination, fall, rise
+over run._ Where the trade uses "rise:run" or a percentage, convert on input and
+store degrees.
+
+**Plan area** — the area of a face projected onto the horizontal. Sums to the
+footprint area.
+
+**Sloped area** — the true surface area of a face, `plan area / cos(pitch)`.
+This is what covering material is bought by, and the distinction from plan area
+is the reason the whole tool exists. Never say just "area".
+
+## The lines of the roof
+
+Each is a linear quantity that costs money, so each is counted separately.
+
+**Eave** — the bottom edge of a face, coincident with a footprint edge (or its
+overhang offset). Where the gutter goes.
+
+**Ridge** — a horizontal top edge where two faces meet, both sloping away from
+it.
+
+**Hip** — a sloping edge where two faces meet convexly, rising from an outside
+corner of the footprint.
+
+**Valley** — a sloping edge where two faces meet concavely, rising from a
+reflex (inside) corner. Costlier per metre than a hip: it carries water.
+
+**Verge** — the sloping edge at the top of a gable wall, where the roof stops
+rather than turning a corner. _Not: rake (US), barge._
+
+**Overhang** — the horizontal distance the roof projects beyond the footprint.
+Applied by offsetting the footprint outward before the roof is generated, so the
+roof of a footprint with overhang is the roof of a larger footprint.
+
+## Roof types
+
+Named configurations, all expressible as choices on the footprint's edges rather
+than as separate algorithms:
+
+**Hip end** — the edge carries a normal sloping face. The default.
+
+**Gable end** — the edge carries no face; the wall rises to meet two adjacent
+faces at a verge. The alternative to a hip end, and the main discrete design
+variable.
+
+**Shed** — every face but one suppressed; the roof slopes one way only.
+
+**Flat** — pitch at the practical minimum, not literally zero.
+
+Gambrel, mansard and butterfly roofs are out of scope; they need two pitches per
+edge, which the model does not carry.
+
+## The algorithm
+
+**Straight skeleton** — the plan-view diagram traced by the footprint edges
+moving inward at constant speed. Its edges are exactly the ridges, hips and
+valleys. _Not: medial axis_, which is a different construction that produces
+curves.
+
+**Weighted straight skeleton** — the same, with each footprint edge moving at
+its own speed. Speed corresponds to pitch, so this is what allows a different
+pitch per edge. The weighting is what makes the construction fragile; see the
+ADRs.
+
+**Wavefront** — the shrinking polygon at one instant of the propagation.
+
+**Event** — a moment when the wavefront changes combinatorially: an edge
+vanishes, or the wavefront splits in two. Events are where the skeleton's
+topology is decided, and where implementations break.
+
+## Quantities and cost
+
+**Takeoff** — the full list of measured quantities derived from a roof: sloped
+areas by face, linear metres by line type, counts. Physical and objective;
+carries no prices. The takeoff is the tool's primary output and is meaningful
+with no price data entered at all.
+
+**Price book** — the user-supplied mapping from takeoff line items to unit
+rates. Separable from the takeoff, swappable, and regional. _Not: cost model._
+
+**Cost** — a takeoff priced by a price book. Derived, never measured.
+
+**Covering** — the outer material (clay tile, concrete tile, standing-seam
+metal, shingle). Each covering carries a minimum pitch, which is usually the
+binding constraint on the whole design.
+
+## Optimization
+
+**Design variable** — a quantity the optimizer may change: per-edge pitch
+(continuous) and per-edge hip/gable (discrete).
+
+**Constraint** — a bound a design must satisfy to be admissible at all: minimum
+pitch from the covering, maximum ridge height, any pitch range the user locks.
+Distinct from cost: a design that violates a constraint is not expensive, it is
+invalid.
+
+**Binding constraint** — the constraint actually stopping the optimizer from
+going further. Naming it is more useful to the architect than the optimum
+itself, because it tells him what to change.

@@ -1,0 +1,32 @@
+# dependencies / build
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+.vite/
+coverage/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# installed fresh, not vendored: npx skills@latest add mattpocock/skills
+.agents/skills/
+.claude/skills/
+.cursor/
+skills-lock.json
+
+# local agent config
+.claude/settings.local.json
+.claude/worktrees/
+.scratch/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# os / editor
+.DS_Store
+*.local
