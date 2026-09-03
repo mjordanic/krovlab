@@ -28,7 +28,7 @@ bug it is.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** No code prior art — this is the first feature in the repo. Read
 the "Implementation Decisions" and "Testing Decisions" sections of the feature
@@ -38,27 +38,27 @@ for every term used above. Faces, arcs, nodes, pitch, weight, plan area, sloped
 area, ridge, hip, eave and terrain all have exact glossary meanings; use them as
 the names in the returned value.
 
-- [ ] A square at uniform pitch returns a roof whose apex height and four faces
+- [x] A square at uniform pitch returns a roof whose apex height and four faces
       match values computed by hand
-- [ ] A rectangle at uniform pitch returns a roof with one ridge, of the length
+- [x] A rectangle at uniform pitch returns a roof with one ridge, of the length
       and position computed by hand
-- [ ] Every skeleton node is equidistant from its defining footprint edges —
+- [x] Every skeleton node is equidistant from its defining footprint edges —
       the independent oracle available in the uniform-pitch case, asserted
       directly rather than through our own geometry
-- [ ] Face plan areas sum to the footprint area
-- [ ] Each face reports its sloped area as its plan area over the cosine of its
+- [x] Face plan areas sum to the footprint area
+- [x] Each face reports its sloped area as its plan area over the cosine of its
       pitch, and knows which footprint edge it rises from
-- [ ] Each arc is classified ridge, hip or eave, and reports its length
-- [ ] The roof reports every node's height, the overall ridge height, and the
+- [x] Each arc is classified ridge, hip or eave, and reports its length
+- [x] The roof reports every node's height, the overall ridge height, and the
       total sloped area
-- [ ] Node heights come from event times directly — there is no separate lifting
+- [x] Node heights come from event times directly — there is no separate lifting
       step to build
-- [ ] Pitch is converted to weight at the entry point and nowhere else; no
+- [x] Pitch is converted to weight at the entry point and nowhere else; no
       weight appears anywhere in the returned roof
-- [ ] A pitch outside `0 < pitch <= 90` is refused
-- [ ] The tie-breaking rule for simultaneous and co-located events is documented
+- [x] A pitch outside `0 < pitch <= 90` is refused
+- [x] The tie-breaking rule for simultaneous and co-located events is documented
       alongside the code that applies it
-- [ ] A test asserts the core imports nothing outside the standard library, so
+- [x] A test asserts the core imports nothing outside the standard library, so
       the dependency-free promise is enforced rather than hoped for
-- [ ] `shapely` may be used in assertions as a second opinion, never imported by
+- [x] `shapely` may be used in assertions as a second opinion, never imported by
       the core

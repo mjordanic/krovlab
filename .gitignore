@@ -10,6 +10,7 @@ coverage/
 .venv/
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
 
 # installed fresh, not vendored: npx skills@latest add mattpocock/skills
 .agents/skills/
