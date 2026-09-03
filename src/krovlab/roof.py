@@ -4,7 +4,8 @@ Call :func:`roof` with a footprint and a pitch. Everything behind that
 call — the wavefront, the event queue, the conversion of pitch to weight —
 is internal. The returned :class:`Roof` is data: faces, arcs, nodes,
 quantities and a :class:`Validity` result. It has no rendering concepts
-and no weight.
+and no weight. Unroofable input is a :class:`Failure` with a ``kind``,
+never an exception.
 """
 
 from __future__ import annotations
@@ -13,9 +14,28 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
+from krovlab._input import Pitch as Pitch
+from krovlab._input import check_footprint, check_holes, resolve_pitches
 from krovlab._skeleton import skeleton as _skeleton
 
 ArcKind = Literal["ridge", "hip", "eave", "valley"]
+FailureKind = Literal[
+    "invalid_pitch",
+    "pitch_count",
+    "self_intersection",
+    "degenerate",
+    "hole_intersects",
+    "unsupported",
+]
+"""Why :func:`roof` refused.
+
+``invalid_pitch`` — unreadable spelling, or outside ``0 < pitch <= 90``.
+``pitch_count`` — a pitch list whose length is not the number of edges.
+``self_intersection`` — the footprint crosses itself.
+``degenerate`` — a point, a line, coincident consecutive vertices, or no area.
+``hole_intersects`` — a hole touches or crosses the outer ring.
+``unsupported`` — a valid hole, or differing per-edge pitches; not built yet.
+"""
 
 
 @dataclass(frozen=True)
@@ -57,7 +77,11 @@ class Failure:
 
     Exceptions are reserved for programmer error. Unroofable input comes
     back as a value so a caller processing many footprints can keep going.
+    Branch on ``kind``; show ``reason`` to a person.
     """
+
+    kind: FailureKind
+    """Machine-readable class of the refusal, so a caller can branch."""
 
     reason: str
     """Human-readable explanation, suitable to show the architect."""
@@ -151,30 +175,45 @@ class Roof:
     """Result of checking this roof against the terrain invariants."""
 
 
-def roof(footprint: list[tuple[float, float]], pitch: float) -> Roof | Failure:
+def roof(
+    footprint: list[tuple[float, float]],
+    pitch: Pitch | list[Pitch],
+    holes: list[list[tuple[float, float]]] | None = None,
+) -> Roof | Failure:
     """Build a roof over a convex footprint at one uniform pitch.
 
     Parameters
     ----------
     footprint
-        Plan vertices ``(x, y)`` in metres, not closed (do not repeat the
-        first point at the end). Either winding is accepted.
+        Plan vertices ``(x, y)`` in metres. Either winding is accepted;
+        a closing duplicate of the first point is ignored. Mid-ring
+        coincident vertices, a ring with no area, and a self-intersecting
+        ring are refused. Collinear vertices that still enclose area are
+        kept — they are the same building with an extra point on an eave.
     pitch
-        Angle of every face from horizontal, in degrees. Must satisfy
-        ``0 < pitch <= 90``. Ninety degrees is the vertical-face (gable)
-        bound; a fully 90° roof is degenerate.
+        One slope for every face, or a list with one value per edge.
+        Each value is degrees, a ``(rise, run)`` pair, ``"4:12"``, or
+        ``"100%"``. After conversion the angle must satisfy
+        ``0 < pitch <= 90``. A list of mixed spellings of the same slope
+        is the same as a single value; differing slopes are not built yet.
+    holes
+        Interior rings, or ``None``. A hole that touches or crosses the
+        outer ring is refused by name. A valid hole is refused as
+        unsupported until that ticket.
 
     Returns
     -------
     Roof
         Faces, arcs, nodes, quantities, and a :class:`Validity` result
-        that records whether the roof is a terrain.
+        that records whether the roof is a terrain. Every length is
+        metres; every angle is degrees.
     Failure
-        If ``pitch`` is outside ``0 < pitch <= 90``.
+        Named refusal. Branch on ``kind``; show ``reason`` to a person.
+        Nothing this function accepts as input raises.
 
     Examples
     --------
-    >>> from krovlab import Roof, roof
+    >>> from krovlab import Failure, Roof, roof
     >>> result = roof([(0, 0), (10, 0), (10, 10), (0, 10)], 45)
     >>> isinstance(result, Roof)
     True
@@ -182,15 +221,24 @@ def roof(footprint: list[tuple[float, float]], pitch: float) -> Roof | Failure:
     True
     >>> round(result.ridge_height, 6)
     5.0
+    >>> roof([(0, 0), (10, 10), (10, 0), (0, 10)], 45).kind
+    'self_intersection'
     """
-    if not (0.0 < pitch <= 90.0):
-        return Failure("pitch must satisfy 0 < pitch <= 90")
-    ring, edge_map = _ccw_ring(footprint)
+    cleaned = check_footprint(footprint)
+    if isinstance(cleaned, Failure):
+        return cleaned
+    parsed = resolve_pitches(pitch, len(cleaned))
+    if isinstance(parsed, Failure):
+        return parsed
+    hole_problem = check_holes(holes, cleaned)
+    if hole_problem is not None:
+        return hole_problem
+    ring, edge_map = _ccw_ring(cleaned)
     # Weight is the wavefront's plan speed. cot(pitch) so a steeper face
     # moves inward more slowly. Converted here and nowhere else.
-    weight = _pitch_to_weight(pitch)
+    weight = _pitch_to_weight(parsed)
     raw = _skeleton(ring, [weight] * len(ring))
-    return _roof_from_skeleton(ring, pitch, raw.nodes, raw.arcs, edge_map, footprint)
+    return _roof_from_skeleton(ring, parsed, raw.nodes, raw.arcs, edge_map, cleaned)
 
 
 def _pitch_to_weight(pitch: float) -> float:

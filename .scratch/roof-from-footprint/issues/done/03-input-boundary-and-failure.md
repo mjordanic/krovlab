@@ -26,7 +26,7 @@ roof, so the internal representation never surfaces.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** The "Failure is a return value" decision in the feature PRD gives
 the reasoning, and the "Degenerate inputs are tests, not edge cases to handle
@@ -37,15 +37,26 @@ counter-clockwise and always in metres — that is the normalised form this
 boundary produces — and defines `pitch` as degrees with rise:run and percentage
 named as trade conventions to convert on input.
 
-- [ ] A footprint given clockwise and the same footprint given
+- [x] A footprint given clockwise and the same footprint given
       counter-clockwise produce the same roof
-- [ ] Pitch accepts degrees, a rise:run ratio and a percentage, and the three
+- [x] Pitch accepts degrees, a rise:run ratio and a percentage, and the three
       spellings of the same slope produce the same roof
-- [ ] Every value in the returned roof is in metres and degrees
-- [ ] A self-intersecting footprint returns a failure naming self-intersection
-- [ ] Each degenerate input in the list above has a test asserting its decided
+- [x] Every value in the returned roof is in metres and degrees
+- [x] A self-intersecting footprint returns a failure naming self-intersection
+- [x] Each degenerate input in the list above has a test asserting its decided
       outcome, whether that is a roof or a named failure
-- [ ] A pitch list of the wrong length returns a failure saying so
-- [ ] No input, however malformed, raises out of the entry point
-- [ ] The failure value carries a reason a person can read, and enough
+- [x] A pitch list of the wrong length returns a failure saying so
+- [x] No input, however malformed, raises out of the entry point
+- [x] The failure value carries a reason a person can read, and enough
       structure that a caller can branch on the kind of failure
+
+## Comments
+
+Decided outcomes at the boundary:
+
+- A closing duplicate of the first vertex is a closed-ring spelling and is stripped.
+- Mid-ring coincident consecutive vertices are `degenerate`.
+- Collinear vertices that still enclose area are roofed (same building, extra eave point).
+- A zero-area ring (point, line, cancelled bowtie area) is `degenerate`, except a crossing bowtie is `self_intersection` first.
+- A matching-length pitch list of the same slope (any spelling) produces a roof.
+- Differing per-edge pitches, and a geometrically valid hole, are `unsupported` until those tickets.

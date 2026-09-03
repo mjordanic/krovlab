@@ -36,7 +36,7 @@ footprint = [(0, 0), (10, 0), (10, 6), (0, 6)]  # metres, either winding
 result = roof(footprint, 45)                    # degrees
 
 if isinstance(result, Failure):
-    print(result.reason)
+    print(result.kind, result.reason)   # branch on kind; show reason
 else:
     print(result.ridge_height)       # 3.0 m
     print(result.total_sloped_area)  # covering area, m²
@@ -48,8 +48,21 @@ queue, the conversion of pitch to weight — stays behind it.
 
 ### Pitch
 
-Pitch is the angle from horizontal in degrees. It must satisfy
-`0 < pitch <= 90`. Outside that range you get a `Failure`, not an exception.
+Pitch is the angle from horizontal. Write it in whichever convention the
+drawing uses — the three spellings of the same slope produce the same roof:
+
+```python
+roof(footprint, 45)          # degrees
+roof(footprint, (1, 1))      # rise:run  →  atan(1/1) = 45°
+roof(footprint, "1:1")       # same ratio as a string
+roof(footprint, "100%")      # percent    →  atan(1.00) = 45°
+```
+
+A list is one value per footprint edge. The length must match. Today every
+value must convert to the same slope; differing per-edge pitches come later.
+
+After conversion the angle must satisfy `0 < pitch <= 90`. Outside that
+range, or a list of the wrong length, you get a `Failure`, not an exception.
 
 Weight (`cot(pitch)`) is an internal wavefront speed. It never appears on the
 returned roof.
@@ -74,6 +87,25 @@ Each face also splits area in two: `plan_area` (horizontal projection) and
 A `Roof` is checked when it is built. If `validity.is_terrain` is false,
 `validity.reasons` names the invariant that broke — so you find out from the
 value, not on site.
+
+### When `roof` cannot run
+
+Bad input is a `Failure` with a `kind` you can branch on and a `reason` you
+can show. Nothing the entry point accepts raises.
+
+| `kind` | What it means |
+|---|---|
+| `invalid_pitch` | Unreadable spelling, or outside `0 < pitch <= 90`. |
+| `pitch_count` | Pitch list length is not the number of footprint edges. |
+| `self_intersection` | The footprint crosses itself. |
+| `degenerate` | A point, a line, coincident consecutive vertices, or no area. |
+| `hole_intersects` | A hole touches or crosses the outer ring. |
+| `unsupported` | A valid hole, or differing per-edge pitches — not built yet. |
+
+A closed-ring spelling (first point repeated at the end) is accepted. Either
+winding produces the same roof. Collinear vertices that still enclose area
+are roofed; they are the same building with an extra point on an eave.
+Units on the returned roof are metres and degrees.
 
 ## Worked numbers
 
