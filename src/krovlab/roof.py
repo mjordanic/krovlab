@@ -2,8 +2,9 @@
 
 Call :func:`roof` with a footprint and a pitch. Everything behind that
 call — the wavefront, the event queue, the conversion of pitch to weight —
-is internal. The returned :class:`Roof` is data: faces, arcs, nodes and
-quantities. It has no rendering concepts and no weight.
+is internal. The returned :class:`Roof` is data: faces, arcs, nodes,
+quantities and a :class:`Validity` result. It has no rendering concepts
+and no weight.
 """
 
 from __future__ import annotations
@@ -14,7 +15,40 @@ from typing import Literal
 
 from krovlab._skeleton import skeleton as _skeleton
 
-ArcKind = Literal["ridge", "hip", "eave"]
+ArcKind = Literal["ridge", "hip", "eave", "valley"]
+
+
+@dataclass(frozen=True)
+class Validity:
+    """Whether the roof is a terrain that satisfies the geometric invariants.
+
+    Checked when the roof is built, so the architect does not have to
+    discover a folded or double-covered surface on site. ``is_terrain``
+    is true only when every recorded reason is empty.
+    """
+
+    is_terrain: bool
+    """True when plan areas, planarity, drainage and coverage all hold."""
+
+    reasons: tuple[str, ...]
+    """Human-readable failures; empty if and only if ``is_terrain``."""
+
+    @staticmethod
+    def assess(
+        nodes: tuple[Node, ...],
+        faces: tuple[Face, ...],
+        arcs: tuple[Arc, ...],
+        footprint: list[tuple[float, float]],
+    ) -> Validity:
+        """Run the terrain invariants on assembled roof data.
+
+        :func:`roof` calls this before returning. A caller holding faces
+        that did not come from ``roof`` can ask the same question without
+        reaching into the wavefront.
+        """
+        from krovlab._validity import assess as assess_geometry
+
+        return assess_geometry(nodes, faces, arcs, footprint)
 
 
 @dataclass(frozen=True)
@@ -77,7 +111,7 @@ class Face:
 
 @dataclass(frozen=True)
 class Arc:
-    """A named edge of the roof: an eave, a hip, or a ridge."""
+    """A named edge of the roof: an eave, a hip, a valley, or a ridge."""
 
     start: int
     """Index into ``Roof.nodes``."""
@@ -86,8 +120,9 @@ class Arc:
     """Index into ``Roof.nodes``."""
 
     kind: ArcKind
-    """``"eave"``, ``"hip"`` (rising from a convex corner) or ``"ridge"``
-    (horizontal, both ends above the eave)."""
+    """``"eave"``, ``"hip"`` (rising from a convex corner), ``"valley"``
+    (rising from a reflex corner) or ``"ridge"`` (horizontal, both ends
+    above the eave)."""
 
     length: float
     """True 3D length in metres — the figure that is priced per metre."""
@@ -95,7 +130,7 @@ class Arc:
 
 @dataclass(frozen=True)
 class Roof:
-    """A roof as data: faces, arcs, nodes and the quantities they imply."""
+    """A roof as data: faces, arcs, nodes, quantities and a validity result."""
 
     nodes: tuple[Node, ...]
     """Every vertex, including the original footprint corners at height 0."""
@@ -104,13 +139,16 @@ class Roof:
     """One face per footprint edge, in the caller's edge order after mapping."""
 
     arcs: tuple[Arc, ...]
-    """Eaves, hips and ridges, each with a 3D length."""
+    """Eaves, hips, valleys and ridges, each with a 3D length."""
 
     ridge_height: float
     """Highest node on the roof, metres above the eave plane."""
 
     total_sloped_area: float
     """Sum of every face's sloped area — the covering-cost driver."""
+
+    validity: Validity
+    """Result of checking this roof against the terrain invariants."""
 
 
 def roof(footprint: list[tuple[float, float]], pitch: float) -> Roof | Failure:
@@ -129,7 +167,8 @@ def roof(footprint: list[tuple[float, float]], pitch: float) -> Roof | Failure:
     Returns
     -------
     Roof
-        Faces, arcs, nodes and quantities.
+        Faces, arcs, nodes, quantities, and a :class:`Validity` result
+        that records whether the roof is a terrain.
     Failure
         If ``pitch`` is outside ``0 < pitch <= 90``.
 
@@ -138,6 +177,8 @@ def roof(footprint: list[tuple[float, float]], pitch: float) -> Roof | Failure:
     >>> from krovlab import Roof, roof
     >>> result = roof([(0, 0), (10, 0), (10, 10), (0, 10)], 45)
     >>> isinstance(result, Roof)
+    True
+    >>> result.validity.is_terrain
     True
     >>> round(result.ridge_height, 6)
     5.0
@@ -149,7 +190,7 @@ def roof(footprint: list[tuple[float, float]], pitch: float) -> Roof | Failure:
     # moves inward more slowly. Converted here and nowhere else.
     weight = _pitch_to_weight(pitch)
     raw = _skeleton(ring, [weight] * len(ring))
-    return _roof_from_skeleton(ring, pitch, raw.nodes, raw.arcs, edge_map)
+    return _roof_from_skeleton(ring, pitch, raw.nodes, raw.arcs, edge_map, footprint)
 
 
 def _pitch_to_weight(pitch: float) -> float:
@@ -198,6 +239,7 @@ def _roof_from_skeleton(
     raw_nodes: tuple[tuple[float, float, float], ...],
     raw_arcs: tuple[tuple[int, int, int, int], ...],
     edge_map: list[int],
+    footprint: list[tuple[float, float]],
 ) -> Roof:
     """Assemble a :class:`Roof` from the raw skeleton graph."""
     nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
@@ -249,12 +291,15 @@ def _roof_from_skeleton(
             )
         )
 
+    built_faces = tuple(faces)
+    built_arcs = tuple(arcs)
     return Roof(
         nodes=nodes,
-        faces=tuple(faces),
-        arcs=tuple(arcs),
+        faces=built_faces,
+        arcs=built_arcs,
         ridge_height=max(node.height for node in nodes),
         total_sloped_area=sum(face.sloped_area for face in faces),
+        validity=Validity.assess(nodes, built_faces, built_arcs, footprint),
     )
 
 

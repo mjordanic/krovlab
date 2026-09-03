@@ -40,6 +40,7 @@ if isinstance(result, Failure):
 else:
     print(result.ridge_height)       # 3.0 m
     print(result.total_sloped_area)  # covering area, m²
+    print(result.validity.is_terrain)
 ```
 
 `roof` is the only entry point. Everything else — the wavefront, the event
@@ -62,12 +63,17 @@ returned roof.
 | `arcs` | `kind` is `"eave"`, `"hip"` or `"ridge"`; `length` is 3D metres. |
 | `ridge_height` | Highest point above the eave plane. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
+| `validity` | Whether the roof is a terrain. `is_terrain` is true only when plan areas sum to the footprint, every face is planar, sampled plan points have one height, water drains to each face's own eave, and arc labels match the geometry. |
 
 Each face also splits area in two: `plan_area` (horizontal projection) and
 `sloped_area` (`plan_area / cos(pitch)`). Plan areas sum to the footprint area.
 
 `Face.edge_index` `i` is the edge from `footprint[i]` to
 `footprint[(i + 1) % n]`, even if you passed the ring clockwise.
+
+A `Roof` is checked when it is built. If `validity.is_terrain` is false,
+`validity.reasons` names the invariant that broke — so you find out from the
+value, not on site.
 
 ## Worked numbers
 
@@ -93,6 +99,11 @@ uv run pytest
 uv run mypy src tests
 uv run ruff check src tests
 ```
+
+`tests/test_invariants.py` generates convex footprints and asserts the terrain
+invariants (areas, planarity, drainage, arc labels, determinism). Later
+geometry tickets widen `tests/generation.py` rather than copying those
+assertions.
 
 ## Glossary
 

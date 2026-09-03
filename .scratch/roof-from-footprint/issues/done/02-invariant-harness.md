@@ -31,7 +31,7 @@ harness.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** The "Invariants are the primary tests" and "Oracles, where an
 independent one exists" passages of the feature PRD list these properties and
@@ -43,14 +43,14 @@ per-edge pitch lands, which is why these properties must stand on their own.
 `ridge`, `hip`, `valley`, `plan area` and `sloped area` are glossary terms in
 `CONTEXT.md`.
 
-- [ ] Each property above is a named property-based test over generated
+- [x] Each property above is a named property-based test over generated
       footprints, failing with a message that identifies which property broke
-- [ ] The returned roof carries a validity result that reflects these checks,
+- [x] The returned roof carries a validity result that reflects these checks,
       so a caller learns the roof is not a terrain without running the tests
-- [ ] The drainage property is asserted per face against that face's own eave,
+- [x] The drainage property is asserted per face against that face's own eave,
       not against the nearest eave
-- [ ] Determinism is asserted by comparing two runs of the same input for exact
+- [x] Determinism is asserted by comparing two runs of the same input for exact
       equality, not approximate
-- [ ] The generator produces only footprints in the currently supported class,
+- [x] The generator produces only footprints in the currently supported class,
       and is written so later tickets widen it in place
-- [ ] The harness is reusable by later tickets without copying assertions
+- [x] The harness is reusable by later tickets without copying assertions
