@@ -99,6 +99,30 @@ its own speed. Speed corresponds to pitch, so this is what allows a different
 pitch per edge. The weighting is what makes the construction fragile; see the
 ADRs.
 
+**Weight** — an edge's wavefront speed. Always *multiplicative* unless stated,
+and related to pitch by `weight = cot(pitch)`. A larger weight is a flatter
+face. Weights must be strictly positive: at zero or below, the skeleton stops
+being a tree and the roof stops being a terrain.
+
+Pitch is the design variable and weight is its internal representation. Store
+and expose pitch; convert at the boundary. Weight is unbounded as pitch
+approaches zero, so no optimizer should ever see one.
+
+**Vertical face** — the degenerate `weight = 0` case: the edge does not move,
+so the wall rises straight up and the neighbouring faces close over it. This is
+how a gable end is expressed, and it is the only degenerate weight the model
+permits.
+
+**Additive weight** — a delay before an edge starts moving, so the wall rises
+vertically to some height and only then slopes. Would give half-hips and
+knee-walls. Not part of this model, but not foreclosed either; see
+`docs/future-work.md`.
+
+**Time** — how far the wavefront has propagated. Because the wavefront rises at
+unit rate as it moves in, the time at which a skeleton node is created *is* the
+height of that node on the roof. This is why a 2D algorithm produces a 3D roof,
+and why there is no separate "make it 3D" step.
+
 **Wavefront** — the shrinking polygon at one instant of the propagation.
 
 **Event** — a moment when the wavefront changes combinatorially: an edge
