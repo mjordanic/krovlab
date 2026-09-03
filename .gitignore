@@ -20,7 +20,6 @@ skills-lock.json
 # local agent config
 .claude/settings.local.json
 .claude/worktrees/
-.scratch/
 
 # env / secrets
 .env
