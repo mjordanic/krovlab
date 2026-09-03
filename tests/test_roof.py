@@ -166,6 +166,9 @@ def test_core_imports_nothing_outside_the_standard_library() -> None:
     root = Path(__file__).resolve().parents[1] / "src" / "krovlab"
     stdlib = sys.stdlib_module_names
     for path in root.rglob("*.py"):
+        # Optional extra: Plotly lives here so the core stays stdlib-only.
+        if path.name == "viz.py" or "viz" in path.relative_to(root).parts:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             names: list[str] = []

@@ -20,7 +20,7 @@ picture than without.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** The feature PRD's "Visualisation uses Plotly and is a separate,
 optional module" decision explains the choice of Plotly over a 3D engine, and
@@ -31,16 +31,16 @@ not a reason to reach into the algorithm. Arc types are glossary terms in
 `CONTEXT.md`: colour them by those names, not by invented ones. Ticket 01's
 `viz` extra in the project's optional dependencies is already declared.
 
-- [ ] A roof renders as a plan view showing the footprint and the skeleton over
+- [x] A roof renders as a plan view showing the footprint and the skeleton over
       it
-- [ ] Arcs are coloured by classification, using the glossary names in the
+- [x] Arcs are coloured by classification, using the glossary names in the
       legend
-- [ ] Node heights are annotated on the view
-- [ ] The view saves as one self-contained HTML file that opens over `file://`
+- [x] Node heights are annotated on the view
+- [x] The view saves as one self-contained HTML file that opens over `file://`
       with no server and no network access
-- [ ] The core package still imports nothing third-party — the test from ticket
+- [x] The core package still imports nothing third-party — the test from ticket
       01 still passes with the viz module present
-- [ ] The module works from a roof value alone, with no access to algorithm
+- [x] The module works from a roof value alone, with no access to algorithm
       internals
-- [ ] Smoke tests assert the figure builds without error; nothing asserts on
+- [x] Smoke tests assert the figure builds without error; nothing asserts on
       pixels

@@ -10,7 +10,8 @@ The core has no third-party dependencies. It takes data and returns data.
 
 Convex footprints, one pitch for the whole roof. A square becomes a pyramid of
 four triangular faces. A rectangle becomes two trapezoids, two triangles and a
-ridge. L-shapes, holes, gables, overhang and per-edge pitch are not built yet.
+ridge. `krovlab.viz` draws a plan of that roof. L-shapes, holes, gables,
+overhang and per-edge pitch are not built yet.
 
 ## Install
 
@@ -23,7 +24,7 @@ uv sync
 That puts `krovlab` on the path of the project environment. Optional extras:
 
 ```bash
-uv sync --extra viz         # Plotly, for the notebook plan view
+uv sync --extra viz         # Plotly, for krovlab.viz plan views
 uv sync --extra notebooks   # ipykernel + Plotly + nbformat, to run the notebooks
 ```
 
@@ -98,6 +99,23 @@ The return is `(Roof, events)` — the roof is unchanged, and callers that
 omit the flag are not handed debugging state. Each event has a `kind`, a
 `time` (height in metres), the footprint `edges` it involved, and the
 node `vertices` it involved.
+
+### Plan view
+
+`krovlab.viz` is an optional extra. It consumes a `Roof` and returns a
+Plotly figure — the footprint with the skeleton over it, arcs coloured
+by type (ridge, hip, valley, eave, verge), node heights annotated. Save
+the figure as a self-contained HTML file that opens from disk:
+
+```python
+from krovlab.viz import plan_view, write_html
+
+fig = plan_view(result)
+write_html(fig, "roof-plan.html")
+```
+
+The core never imports this module. Without the extra, `import krovlab`
+still works.
 
 ### When `roof` cannot run
 
