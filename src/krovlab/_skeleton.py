@@ -65,17 +65,34 @@ class _Vertex:
 
 
 @dataclass(frozen=True)
+class RawEvent:
+    """One processed wavefront event, before caller edge indices are mapped.
+
+    ``edges`` are original-ring indices: left support, the vanishing edge,
+    right support. ``vertices`` are skeleton-node indices involved: the
+    two sources that traced in, then the node created (or reused).
+    """
+
+    kind: str
+    time: float
+    edges: tuple[int, ...]
+    vertices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class RawSkeleton:
     """Straight skeleton as a graph, before roof quantities are attached.
 
     ``nodes`` are ``(x, y, height)``. ``arcs`` are
     ``(start, end, face_a, face_b)`` — each internal arc bounds two faces
     identified by original-edge index. Eaves are not included; the public
-    layer adds them from the footprint.
+    layer adds them from the footprint. ``events`` is the sequence the
+    wavefront actually processed, in order.
     """
 
     nodes: tuple[tuple[float, float, float], ...]
     arcs: tuple[tuple[int, int, int, int], ...]
+    events: tuple[RawEvent, ...]
 
 
 def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkeleton:
@@ -88,6 +105,7 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
     lines = [_supporting_line(ring[i], ring[(i + 1) % n]) for i in range(n)]
     nodes: list[tuple[float, float, float]] = [(p[0], p[1], 0.0) for p in ring]
     arcs: list[tuple[int, int, int, int]] = []
+    events: list[RawEvent] = []
 
     verts = [_Vertex(p[0], p[1], (i - 1) % n, i, i) for i, p in enumerate(ring)]
     for i, v in enumerate(verts):
@@ -125,6 +143,14 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
             continue
 
         node_idx = _find_or_add_node(nodes, px, py, t2)
+        events.append(
+            RawEvent(
+                kind="edge",
+                time=t2,
+                edges=(va.left_edge, va.right_edge, vb.right_edge),
+                vertices=(va.source_node, vb.source_node, node_idx),
+            )
+        )
         _add_arc(arcs, nodes, va.source_node, node_idx, va.left_edge, va.right_edge)
         _add_arc(arcs, nodes, vb.source_node, node_idx, vb.left_edge, vb.right_edge)
 
@@ -159,7 +185,7 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
         push(nv.prev)
         push(nv)
 
-    return RawSkeleton(nodes=tuple(nodes), arcs=tuple(arcs))
+    return RawSkeleton(nodes=tuple(nodes), arcs=tuple(arcs), events=tuple(events))
 
 
 def _supporting_line(a: tuple[float, float], b: tuple[float, float]) -> _Line:

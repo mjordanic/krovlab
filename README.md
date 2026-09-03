@@ -30,7 +30,7 @@ uv sync --extra notebooks   # ipykernel + Plotly + nbformat, to run the notebook
 ## Quick start
 
 ```python
-from krovlab import Failure, Roof, roof
+from krovlab import Failure, Roof, roof, topology_hash
 
 footprint = [(0, 0), (10, 0), (10, 6), (0, 6)]  # metres, either winding
 result = roof(footprint, 45)                    # degrees
@@ -41,6 +41,7 @@ else:
     print(result.ridge_height)       # 3.0 m
     print(result.total_sloped_area)  # covering area, m²
     print(result.validity.is_terrain)
+    print(topology_hash(result))     # combinatorial structure, not coordinates
 ```
 
 `roof` is the only entry point. Everything else — the wavefront, the event
@@ -87,6 +88,16 @@ Each face also splits area in two: `plan_area` (horizontal projection) and
 A `Roof` is checked when it is built. If `validity.is_terrain` is false,
 `validity.reasons` names the invariant that broke — so you find out from the
 value, not on site.
+
+`topology_hash(roof)` is a stable hash of which faces meet which arcs at
+which nodes, not of their coordinates. Two roofs that differ only in a
+vertex position hash the same; two that differ in which faces meet do not.
+
+To inspect the wavefront events that produced a roof, pass `events=True`.
+The return is `(Roof, events)` — the roof is unchanged, and callers that
+omit the flag are not handed debugging state. Each event has a `kind`, a
+`time` (height in metres), the footprint `edges` it involved, and the
+node `vertices` it involved.
 
 ### When `roof` cannot run
 

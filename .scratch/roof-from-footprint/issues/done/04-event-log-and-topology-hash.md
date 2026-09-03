@@ -19,7 +19,7 @@ meet must not.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** ADR-0001's Consequences section lists the event log and the
 topology hash as things reachable precisely because there is no library
@@ -30,12 +30,12 @@ into a debugging artifact. `event`, `wavefront` and `time` are glossary terms in
 readable against the finished roof. Ticket 02's determinism property is the
 natural companion test for the hash.
 
-- [ ] The events the algorithm processed can be inspected after a roof is
+- [x] The events the algorithm processed can be inspected after a roof is
       produced, in order, each identifying its kind, its time and the wavefront
       vertices or edges it involved
-- [ ] The hash is stable across runs and across processes for the same input
-- [ ] Perturbing a footprint vertex slightly, without changing which faces meet,
+- [x] The hash is stable across runs and across processes for the same input
+- [x] Perturbing a footprint vertex slightly, without changing which faces meet,
       leaves the hash unchanged
-- [ ] Changing the footprint so that different faces meet changes the hash
-- [ ] The event log is opt-in or otherwise kept out of the roof's core meaning,
+- [x] Changing the footprint so that different faces meet changes the hash
+- [x] The event log is opt-in or otherwise kept out of the roof's core meaning,
       so callers computing with a roof are not handed debugging state

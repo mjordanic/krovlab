@@ -5,20 +5,23 @@ call — the wavefront, the event queue, the conversion of pitch to weight —
 is internal. The returned :class:`Roof` is data: faces, arcs, nodes,
 quantities and a :class:`Validity` result. It has no rendering concepts
 and no weight. Unroofable input is a :class:`Failure` with a ``kind``,
-never an exception.
+never an exception. Wavefront events are opt-in via ``events=True``;
+:func:`topology_hash` hashes incidence, not coordinates.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, overload
 
 from krovlab._input import Pitch as Pitch
 from krovlab._input import check_footprint, check_holes, resolve_pitches
 from krovlab._skeleton import skeleton as _skeleton
 
 ArcKind = Literal["ridge", "hip", "eave", "valley"]
+EventKind = Literal["edge"]
 FailureKind = Literal[
     "invalid_pitch",
     "pitch_count",
@@ -153,6 +156,29 @@ class Arc:
 
 
 @dataclass(frozen=True)
+class Event:
+    """One wavefront event the algorithm processed, in order.
+
+    Time is height in metres, so the log can be read against the finished
+    roof. ``edges`` are the caller's footprint-edge indices; ``vertices``
+    are indices into ``Roof.nodes``. Not part of a roof's meaning — only
+    returned when :func:`roof` is asked for ``events=True``.
+    """
+
+    kind: EventKind
+    """``"edge"``: a wavefront edge vanished."""
+
+    time: float
+    """Height at which the event occurred, metres above the eave plane."""
+
+    edges: tuple[int, ...]
+    """Caller footprint-edge indices involved (left, vanishing, right)."""
+
+    vertices: tuple[int, ...]
+    """``Roof.nodes`` indices of the two sources and the resulting node."""
+
+
+@dataclass(frozen=True)
 class Roof:
     """A roof as data: faces, arcs, nodes, quantities and a validity result."""
 
@@ -175,11 +201,74 @@ class Roof:
     """Result of checking this roof against the terrain invariants."""
 
 
+def topology_hash(roof: Roof) -> str:
+    """Stable hash of which faces meet which arcs at which nodes.
+
+    Coordinates, lengths, areas, heights and arc classification are
+    ignored, so a small perturbation that does not change incidence
+    leaves the hash unchanged. Uses SHA-256, so the same roof hashes
+    the same across processes.
+    """
+    incident: dict[int, set[int]] = {}
+    for face in roof.faces:
+        for idx in face.node_indices:
+            incident.setdefault(idx, set()).add(face.edge_index)
+
+    def node_id(index: int) -> tuple[int, ...]:
+        return tuple(sorted(incident.get(index, ())))
+
+    faces: list[tuple[int, tuple[tuple[int, ...], ...]]] = []
+    for face in sorted(roof.faces, key=lambda item: item.edge_index):
+        ids = [node_id(idx) for idx in face.node_indices]
+        faces.append((face.edge_index, _canonical_cycle(ids)))
+
+    arcs: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    for arc in roof.arcs:
+        left, right = node_id(arc.start), node_id(arc.end)
+        if left > right:
+            left, right = right, left
+        arcs.append((left, right))
+    arcs.sort()
+
+    payload = repr((tuple(faces), tuple(arcs))).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _canonical_cycle(
+    ids: list[tuple[int, ...]],
+) -> tuple[tuple[int, ...], ...]:
+    """Rotate a face cycle so it starts at its lexicographically least node."""
+    start = min(range(len(ids)), key=lambda i: ids[i])
+    return tuple(ids[start:] + ids[:start])
+
+
+@overload
 def roof(
     footprint: list[tuple[float, float]],
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
-) -> Roof | Failure:
+    *,
+    events: Literal[False] = False,
+) -> Roof | Failure: ...
+
+
+@overload
+def roof(
+    footprint: list[tuple[float, float]],
+    pitch: Pitch | list[Pitch],
+    holes: list[list[tuple[float, float]]] | None = None,
+    *,
+    events: Literal[True],
+) -> tuple[Roof, tuple[Event, ...]] | Failure: ...
+
+
+def roof(
+    footprint: list[tuple[float, float]],
+    pitch: Pitch | list[Pitch],
+    holes: list[list[tuple[float, float]]] | None = None,
+    *,
+    events: bool = False,
+) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
     """Build a roof over a convex footprint at one uniform pitch.
 
     Parameters
@@ -200,6 +289,10 @@ def roof(
         Interior rings, or ``None``. A hole that touches or crosses the
         outer ring is refused by name. A valid hole is refused as
         unsupported until that ticket.
+    events
+        If true, return ``(Roof, events)`` so the processed wavefront
+        events can be inspected in order. The roof itself is unchanged;
+        callers that omit this flag are not handed debugging state.
 
     Returns
     -------
@@ -207,6 +300,8 @@ def roof(
         Faces, arcs, nodes, quantities, and a :class:`Validity` result
         that records whether the roof is a terrain. Every length is
         metres; every angle is degrees.
+    tuple[Roof, tuple[Event, ...]]
+        The same roof, plus the event log, when ``events=True``.
     Failure
         Named refusal. Branch on ``kind``; show ``reason`` to a person.
         Nothing this function accepts as input raises.
@@ -238,7 +333,19 @@ def roof(
     # moves inward more slowly. Converted here and nowhere else.
     weight = _pitch_to_weight(parsed)
     raw = _skeleton(ring, [weight] * len(ring))
-    return _roof_from_skeleton(ring, parsed, raw.nodes, raw.arcs, edge_map, cleaned)
+    built = _roof_from_skeleton(ring, parsed, raw.nodes, raw.arcs, edge_map, cleaned)
+    if not events:
+        return built
+    log = tuple(
+        Event(
+            kind="edge",
+            time=ev.time,
+            edges=tuple(edge_map[i] for i in ev.edges),
+            vertices=ev.vertices,
+        )
+        for ev in raw.events
+    )
+    return built, log
 
 
 def _pitch_to_weight(pitch: float) -> float:

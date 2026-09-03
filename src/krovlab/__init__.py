@@ -5,10 +5,12 @@ pitch (degrees, rise:run, or a percentage); get back a :class:`Roof` you
 can read quantities off, or a :class:`Failure` with a ``kind`` you can
 branch on. Every roof carries a :class:`Validity` result: the terrain
 invariants have been checked. Units are metres and degrees throughout.
+Pass ``events=True`` to inspect the wavefront events that produced it.
 """
 
 from krovlab.roof import (
     Arc,
+    Event,
     Face,
     Failure,
     FailureKind,
@@ -17,10 +19,12 @@ from krovlab.roof import (
     Roof,
     Validity,
     roof,
+    topology_hash,
 )
 
 __all__ = [
     "Arc",
+    "Event",
     "Face",
     "Failure",
     "FailureKind",
@@ -29,4 +33,5 @@ __all__ = [
     "Roof",
     "Validity",
     "roof",
+    "topology_hash",
 ]

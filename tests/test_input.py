@@ -165,7 +165,7 @@ def test_malformed_input_does_not_raise() -> None:
         (SQUARE, True),
     ]
     for footprint, pitch in cases:
-        result = roof(footprint, pitch)  # type: ignore[arg-type]
+        result = roof(footprint, pitch)  # type: ignore[call-overload]
         assert isinstance(result, Failure), (footprint, pitch, result)
     hole_cases: list[object] = [
         "not rings",
@@ -173,5 +173,5 @@ def test_malformed_input_does_not_raise() -> None:
         [[(-1.0, -1.0), (11.0, -1.0), (11.0, 11.0), (-1.0, 11.0)]],
     ]
     for holes in hole_cases:
-        result = roof(SQUARE, 45.0, holes=holes)  # type: ignore[arg-type]
+        result = roof(SQUARE, 45.0, holes=holes)  # type: ignore[call-overload]
         assert isinstance(result, Failure), holes
