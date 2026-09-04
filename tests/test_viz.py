@@ -195,6 +195,110 @@ def test_solid_view_builds_from_supported_footprint_classes(
     )
 
 
+def test_wavefront_view_builds_from_a_roof_at_a_chosen_time() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import wavefront_view
+
+    built = _rectangle_roof()
+    fig = wavefront_view(built, time=1.5)
+    assert isinstance(fig, Figure)
+    assert fig.data
+    names = {trace.name for trace in fig.data}
+    assert "footprint" in names
+    assert "wavefront" in names
+
+
+def test_wavefront_steps_produces_a_sequence_of_views() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import wavefront_steps
+
+    figs = wavefront_steps(_rectangle_roof())
+    assert len(figs) > 1
+    for fig in figs:
+        assert isinstance(fig, Figure)
+        assert fig.data
+        names = {trace.name for trace in fig.data}
+        assert "footprint" in names
+        assert "wavefront" in names
+
+
+def test_event_times_from_the_log_are_reachable_as_step_points() -> None:
+    from krovlab.viz import wavefront_steps, wavefront_view
+
+    result = roof(RECTANGLE, 45.0, events=True)
+    assert isinstance(result, tuple)
+    built, events = result
+    assert events
+    figs = wavefront_steps(built, events)
+    assert len(figs) == 1 + len({event.time for event in events})
+    for event in events:
+        fig = wavefront_view(built, event.time)
+        assert fig.data
+        names = {trace.name for trace in fig.data}
+        assert "wavefront" in names
+
+
+def test_wavefront_view_accepts_negative_and_past_end_times() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import wavefront_view
+
+    built = _rectangle_roof()
+    for time in (-1.0, built.ridge_height + 10.0):
+        fig = wavefront_view(built, time)
+        assert isinstance(fig, Figure)
+        names = {trace.name for trace in fig.data}
+        assert "footprint" in names
+        assert "wavefront" in names
+        wavefront = next(trace for trace in fig.data if trace.name == "wavefront")
+        assert not any(x == x for x in wavefront.x)
+
+
+def test_wavefront_view_writes_self_contained_html(tmp_path: Path) -> None:
+    from krovlab.viz import wavefront_view, write_html
+
+    path = tmp_path / "wavefront.html"
+    write_html(wavefront_view(_rectangle_roof(), time=1.5), path)
+    html = path.read_text(encoding="utf-8")
+    assert html.lstrip().startswith("<")
+    assert "Plotly" in html
+    sources = re.findall(r"<script[^>]+src=['\"]([^'\"]+)['\"]", html, flags=re.I)
+    assert not any(src.startswith(("http://", "https://", "//")) for src in sources)
+
+
+@pytest.mark.parametrize(
+    ("footprint", "pitch", "roof_kwargs"),
+    [
+        (RECTANGLE, 45.0, {}),
+        (L_SHAPE, 45.0, {}),
+        (SQUARE, 45.0, {"holes": [COURTYARD]}),
+        (RECTANGLE, [45.0, 90.0, 45.0, 45.0], {}),
+        (RECTANGLE, 45.0, {"overhang": 0.5}),
+        (SQUARE, [60.0, 45.0, 60.0, 45.0], {}),
+    ],
+    ids=["convex", "reflex", "holed", "gabled", "overhung", "per-edge-pitch"],
+)
+def test_wavefront_view_builds_from_supported_footprint_classes(
+    footprint: list[tuple[float, float]],
+    pitch: Pitch | list[Pitch],
+    roof_kwargs: dict[str, Any],
+) -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import wavefront_steps, wavefront_view
+
+    result = roof(footprint, pitch, **roof_kwargs)
+    assert isinstance(result, Roof)
+    mid = result.ridge_height / 2.0
+    fig = wavefront_view(result, time=mid)
+    assert isinstance(fig, Figure)
+    assert next(trace for trace in fig.data if trace.name == "wavefront")
+    figs = wavefront_steps(result)
+    assert len(figs) > 1
+
+
 def test_core_does_not_import_viz() -> None:
     import ast
 

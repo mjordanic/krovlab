@@ -11,7 +11,7 @@ height: stepping through times is walking up the roof.
 
 **Blocked by:** 04, 05
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** Ticket 04 exposed the processed event sequence; the times in that
 log are the interesting times to render, so the two should agree on what an
@@ -21,13 +21,13 @@ and ADR-0001 lists exposing the wavefront at intermediate times among the things
 owning the algorithm buys us. `wavefront`, `event` and `time` are glossary terms
 in `CONTEXT.md`, which notes that the time a node is created is its height.
 
-- [ ] The wavefront at a given time renders over the footprint
-- [ ] Stepping through successive times produces a sequence of views a developer
+- [x] The wavefront at a given time renders over the footprint
+- [x] Stepping through successive times produces a sequence of views a developer
       can page through
-- [ ] Event times from ticket 04's log are reachable as step points, so the
+- [x] Event times from ticket 04's log are reachable as step points, so the
       developer can land exactly on an event rather than near it
-- [ ] A time past the end of the propagation, and a negative time, both behave
+- [x] A time past the end of the propagation, and a negative time, both behave
       sensibly rather than erroring
-- [ ] The view saves as a self-contained HTML file, like the other views
-- [ ] The core package still imports nothing third-party
-- [ ] Smoke-tested only: the figures build
+- [x] The view saves as a self-contained HTML file, like the other views
+- [x] The core package still imports nothing third-party
+- [x] Smoke-tested only: the figures build
