@@ -671,3 +671,96 @@ def test_gables_work_with_reflex_corners_and_per_edge_pitch() -> None:
     assert len(verges) == 2
     assert all(v.length > 0.0 for v in verges)
     assert sum(face.plan_area for face in result.faces) == pytest.approx(72.0)
+
+
+OVERHANG_M = 0.5
+
+
+def test_rectangle_with_overhang_has_eaves_outside_the_walls() -> None:
+    from shapely.geometry import JOIN_STYLE, Point, Polygon
+
+    result = roof(RECTANGLE, 45.0, overhang=OVERHANG_M)
+    assert isinstance(result, Roof)
+    walls = Polygon(RECTANGLE)
+    enlarged = walls.buffer(
+        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
+    )
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
+    eaves = [arc for arc in result.arcs if arc.kind == "eave"]
+    assert len(eaves) == 4
+    for arc in eaves:
+        a, b = result.nodes[arc.start], result.nodes[arc.end]
+        mid = Point(0.5 * (a.x + b.x), 0.5 * (a.y + b.y))
+        assert walls.exterior.distance(mid) == pytest.approx(OVERHANG_M)
+        assert not walls.covers(mid)
+
+
+def test_zero_overhang_matches_omitting_the_argument() -> None:
+    omitted = roof(RECTANGLE, 45.0)
+    explicit = roof(RECTANGLE, 45.0, overhang=0.0)
+    assert isinstance(omitted, Roof)
+    assert isinstance(explicit, Roof)
+    assert omitted == explicit
+
+
+def test_l_shape_with_overhang_is_a_valid_roof() -> None:
+    from shapely.geometry import JOIN_STYLE, Polygon
+
+    result = roof(L_SHAPE, 45.0, overhang=OVERHANG_M)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 1
+    enlarged = Polygon(L_SHAPE).buffer(
+        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
+    )
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
+
+
+def test_overhang_offsets_a_hole_inward() -> None:
+    from shapely.geometry import JOIN_STYLE, Point, Polygon
+
+    result = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE], overhang=OVERHANG_M)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    walls = Polygon(SQUARE, [COURTYARD_HOLE])
+    enlarged = walls.buffer(
+        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
+    )
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
+    courtyard = Polygon(COURTYARD_HOLE)
+    inner_eaves = []
+    for arc in result.arcs:
+        if arc.kind != "eave":
+            continue
+        a, b = result.nodes[arc.start], result.nodes[arc.end]
+        mid = Point(0.5 * (a.x + b.x), 0.5 * (a.y + b.y))
+        if courtyard.covers(mid):
+            inner_eaves.append(arc)
+            assert courtyard.exterior.distance(mid) == pytest.approx(OVERHANG_M)
+    assert len(inner_eaves) == 4
+
+
+def test_overhang_that_closes_a_hole_is_a_stated_failure() -> None:
+    # 4 m courtyard; overhang 3 m insets it past a point.
+    result = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE], overhang=3.0)
+    assert isinstance(result, Failure)
+    assert result.kind == "degenerate"
+    assert result.reason
+
+
+def test_overhang_that_collapses_a_concave_footprint_is_a_stated_failure() -> None:
+    # U slot is 4 m wide; overhang 2.5 m drives the inner walls through each other.
+    result = roof(U_SHAPE, 45.0, overhang=2.5)
+    assert isinstance(result, Failure)
+    assert result.kind == "self_intersection"
+    assert result.reason
+
+
+def test_wavefront_and_event_handling_do_not_refer_to_overhang() -> None:
+    from pathlib import Path
+
+    skeleton = (
+        Path(__file__).resolve().parents[1] / "src" / "krovlab" / "_skeleton.py"
+    )
+    assert "overhang" not in skeleton.read_text(encoding="utf-8").lower()

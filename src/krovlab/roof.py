@@ -6,7 +6,8 @@ is internal. The returned :class:`Roof` is data: faces, arcs, nodes,
 quantities and a :class:`Validity` result. It has no rendering concepts
 and no weight. Unroofable input is a :class:`Failure` with a ``kind``,
 never an exception. Wavefront events are opt-in via ``events=True``;
-:func:`topology_hash` hashes incidence, not coordinates.
+:func:`topology_hash` hashes incidence, not coordinates. An ``overhang``
+is applied by offsetting the footprint before the skeleton runs.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from krovlab._input import (
     check_holes,
     resolve_pitches,
 )
+from krovlab._offset import apply_overhang
 from krovlab._skeleton import skeleton as _skeleton
 
 ArcKind = Literal["ridge", "hip", "eave", "valley", "verge"]
@@ -265,6 +267,7 @@ def roof(
     footprint: list[tuple[float, float]],
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
+    overhang: float = 0.0,
     *,
     events: Literal[False] = False,
 ) -> Roof | Failure: ...
@@ -275,6 +278,7 @@ def roof(
     footprint: list[tuple[float, float]],
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
+    overhang: float = 0.0,
     *,
     events: Literal[True],
 ) -> tuple[Roof, tuple[Event, ...]] | Failure: ...
@@ -284,6 +288,7 @@ def roof(
     footprint: list[tuple[float, float]],
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
+    overhang: float = 0.0,
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
@@ -313,6 +318,11 @@ def roof(
         winding is accepted. A hole that touches or crosses the outer
         ring, or another hole, is refused by name. Pitch lists are one
         value per edge of the outer ring then each hole in order.
+    overhang
+        Eaves projection in metres. The footprint is offset outward (holes
+        inward) and the roof of that larger footprint is generated. Zero
+        is the same as omitting the argument. A value that closes a hole
+        or folds the footprint is a named ``Failure``.
     events
         If true, return ``(Roof, events)`` so the processed wavefront
         events can be inspected in order. The roof itself is unchanged;
@@ -350,10 +360,24 @@ def roof(
     cleaned_holes = check_holes(holes, cleaned)
     if isinstance(cleaned_holes, Failure):
         return cleaned_holes
+    if isinstance(overhang, bool) or not isinstance(overhang, (int, float)):
+        return Failure(
+            kind="degenerate",
+            reason="overhang must be a finite number of metres, zero or positive",
+        )
+    if not math.isfinite(overhang) or overhang < 0.0:
+        return Failure(
+            kind="degenerate",
+            reason="overhang must be a finite number of metres, zero or positive",
+        )
     n_edges = len(cleaned) + sum(len(h) for h in cleaned_holes)
     parsed = resolve_pitches(pitch, n_edges)
     if isinstance(parsed, Failure):
         return parsed
+    expanded = apply_overhang(cleaned, cleaned_holes, float(overhang))
+    if isinstance(expanded, Failure):
+        return expanded
+    cleaned, cleaned_holes = expanded
     rings, edge_map = _oriented_rings(cleaned, cleaned_holes)
     # Caller pitches, permuted onto the oriented rings. Weight is the
     # wavefront's plan speed: cot(pitch) so a steeper face moves inward

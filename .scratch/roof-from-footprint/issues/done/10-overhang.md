@@ -17,7 +17,7 @@ overhang. That last case is a stated failure, not a crash.
 
 **Blocked by:** 03, 08
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** The feature PRD's "Overhang is an offset, not a special case"
 decision is the constraint to hold to — if overhang handling starts appearing
@@ -31,15 +31,26 @@ waits for it: the offset must handle holes from the start rather than be
 retrofitted. `shapely` is available in tests as an independent second opinion on
 the offset geometry, and must not be imported by the core.
 
-- [ ] A rectangle with an overhang produces a roof whose eaves sit the overhang
+- [x] A rectangle with an overhang produces a roof whose eaves sit the overhang
       distance outside the footprint, with plan area matching the enlarged
       footprint
-- [ ] An overhang of zero produces exactly the roof produced with no overhang
+- [x] An overhang of zero produces exactly the roof produced with no overhang
       argument at all
-- [ ] A reflex footprint with an overhang produces a valid roof
-- [ ] A footprint with a hole and an overhang offsets the hole inward
-- [ ] An overhang large enough to close a hole or collapse the footprint returns
+- [x] A reflex footprint with an overhang produces a valid roof
+- [x] A footprint with a hole and an overhang offsets the hole inward
+- [x] An overhang large enough to close a hole or collapse the footprint returns
       a stated failure with the reason
-- [ ] No part of the wavefront or event handling refers to overhang
-- [ ] The invariant harness's generator applies overhangs and every property
+- [x] No part of the wavefront or event handling refers to overhang
+- [x] The invariant harness's generator applies overhangs and every property
       from ticket 02 still holds
+
+## Comments
+
+Overhang is a mitered offset at the entry-point boundary (`_offset.py`); the
+wavefront never sees it. Outer rings expand, holes shrink. A U-slot whose
+inner walls cross is `self_intersection`; an inset past a hole's inradius
+(a simple inverted leftover) is `degenerate`. Both kinds are ticket 03's.
+Zero overhang short-circuits to the same roof as omitting the argument.
+The generator draws 0 m or 0.1–0.6 m. Offset vertices use the miter
+formula so axis-aligned edges stay bit-identical.
+

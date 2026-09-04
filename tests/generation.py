@@ -1,7 +1,7 @@
 """Hypothesis strategies for footprints the library currently roofs.
 
 Widen :func:`footprints` and :func:`roof_cases` in place as later tickets
-add overhang and the rest. The invariant tests import these strategies and
+add the rest. The invariant tests import these strategies and
 should not grow their own generators.
 """
 
@@ -13,7 +13,17 @@ from hypothesis import assume
 from hypothesis import strategies as st
 from shapely.geometry import Polygon  # type: ignore[import-untyped]
 
-# Degrees. Away from the 0/90 bounds where weight blows up or faces vanish.
+# Metres. Small enough that generated L/U slots and courtyards stay open.
+OVERHANGS = st.one_of(
+    st.just(0.0),
+    st.floats(
+        min_value=0.1,
+        max_value=0.6,
+        allow_nan=False,
+        allow_infinity=False,
+        allow_subnormal=False,
+    ),
+)
 PITCHES = st.floats(
     min_value=5.0,
     max_value=80.0,
@@ -201,18 +211,21 @@ def roof_cases(
     list[tuple[float, float]],
     float | list[float],
     list[list[tuple[float, float]]],
+    float,
 ]:
     """Uniform pitch on every supported footprint, including courtyards.
 
     Per-edge lists stay on convex polygons without holes: mixed weights
     on reflex or holed shapes are covered by worked examples. Gables
     (``pitch = 90``) are drawn on convex polygons, never on every edge.
+    Overhangs stay small enough that a hole or a thin wing does not close.
     """
+    overhang = draw(OVERHANGS)
     if draw(st.integers(min_value=0, max_value=2)) == 0:
         outer, holes = draw(rectangle_with_hole())
-        return outer, draw(PITCHES), holes
+        return outer, draw(PITCHES), holes, overhang
     if draw(st.booleans()):
-        return draw(footprints()), draw(PITCHES), []
+        return draw(footprints()), draw(PITCHES), [], overhang
     footprint = draw(convex_polygons())
     n = len(footprint)
     if draw(st.booleans()):
@@ -220,7 +233,7 @@ def roof_cases(
         if all(abs(p - pitches[0]) <= 1e-9 for p in pitches):
             other = draw(PER_EDGE_PITCHES.filter(lambda p: abs(p - pitches[0]) > 1.0))
             pitches[draw(st.integers(min_value=0, max_value=n - 1))] = other
-        return footprint, pitches, []
+        return footprint, pitches, [], overhang
     rest = draw(PITCHES)
     pitches = [rest] * n
     n_gables = draw(st.integers(min_value=1, max_value=min(2, n - 1)))
@@ -234,4 +247,4 @@ def roof_cases(
     )
     for i in chosen:
         pitches[i] = 90.0
-    return footprint, pitches, []
+    return footprint, pitches, [], overhang

@@ -15,7 +15,10 @@ and valleys where the two wavefronts meet. A different pitch per edge is
 accepted. `pitch = 90` on an edge is a gable: no face over that edge,
 neighbouring faces meeting the wall at verges. Gabling every edge is
 `incomplete`. Mixed pitch on an L or U can still come back `incomplete`.
-`krovlab.viz` draws a plan. Overhang is not built yet.
+`overhang` (metres) offsets the footprint outward before the roof is
+generated — eaves sit past the walls, and a hole shrinks. An overhang
+that closes a hole or folds a thin wing is a named `Failure`.
+`krovlab.viz` draws a plan.
 
 ## Install
 
@@ -42,6 +45,9 @@ result = roof(footprint, 45)                    # degrees
 
 # A courtyard is a second ring. Pitch lists cover outer edges then hole edges.
 courtyard = roof(footprint, 45, holes=[[(2, 2), (8, 2), (8, 4), (2, 4)]])
+
+# Eaves overhang is metres past the walls. The roof is of the enlarged footprint.
+eaves = roof(footprint, 45, overhang=0.5)
 
 if isinstance(result, Failure):
     print(result.kind, result.reason)   # branch on kind; show reason
@@ -75,6 +81,12 @@ straight skeleton. `pitch = 90` is a gable end: that edge does not
 move, produces no face, and the neighbouring faces meet the wall at
 verges.
 
+`overhang` is metres of eaves projection. The library offsets the
+footprint outward (and each hole inward) and roofs the enlarged polygon.
+Zero overhang is the same roof as omitting the argument. An overhang
+large enough to close a courtyard or fold a concave footprint comes back
+as a `Failure` (`degenerate` or `self_intersection`), not an exception.
+
 After conversion the angle must satisfy `0 < pitch <= 90`. Outside that
 range, or a list of the wrong length, you get a `Failure`, not an exception.
 
@@ -94,7 +106,8 @@ returned roof.
 
 Each face also splits area in two: `plan_area` (horizontal projection) and
 `sloped_area` (`plan_area / cos(pitch)`). Plan areas sum to the footprint
-area with holes excluded.
+area with holes excluded — or to the enlarged footprint when an overhang
+is applied.
 
 `Face.edge_index` `i` is the edge from `footprint[i]` to
 `footprint[(i + 1) % n]` on the outer ring, then continues through each
@@ -183,8 +196,9 @@ uv run ruff check src tests
 `tests/test_invariants.py` generates simple footprints (convex, L, U) and
 rectangles with holes, and asserts the terrain invariants (areas, planarity,
 drainage, arc labels, determinism). Convex cases also draw a different
-pitch per edge. Later geometry tickets widen `tests/generation.py` rather
-than copying those assertions.
+pitch per edge. Generated cases include a modest eaves overhang. Later
+geometry tickets widen `tests/generation.py` rather than copying those
+assertions.
 
 ## Glossary
 
