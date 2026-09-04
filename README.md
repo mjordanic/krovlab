@@ -18,7 +18,7 @@ neighbouring faces meeting the wall at verges. Gabling every edge is
 `overhang` (metres) offsets the footprint outward before the roof is
 generated — eaves sit past the walls, and a hole shrinks. An overhang
 that closes a hole or folds a thin wing is a named `Failure`.
-`krovlab.viz` draws a plan.
+`krovlab.viz` draws a plan and an orbitable 3D solid.
 
 ## Install
 
@@ -31,7 +31,7 @@ uv sync
 That puts `krovlab` on the path of the project environment. Optional extras:
 
 ```bash
-uv sync --extra viz         # Plotly, for krovlab.viz plan views
+uv sync --extra viz         # Plotly, for krovlab.viz plan and 3D views
 uv sync --extra notebooks   # ipykernel + Plotly + nbformat, to run the notebooks
 ```
 
@@ -127,18 +127,22 @@ omit the flag are not handed debugging state. Each event has a `kind`, a
 `time` (height in metres), the footprint `edges` it involved, and the
 node `vertices` it involved.
 
-### Plan view
+### Plan and 3D views
 
 `krovlab.viz` is an optional extra. It consumes a `Roof` and returns a
-Plotly figure — the footprint with the skeleton over it, arcs coloured
-by type (ridge, hip, valley, eave, verge), node heights annotated. Save
-the figure as a self-contained HTML file that opens from disk:
+Plotly figure. The plan view is the footprint with the skeleton over it,
+arcs coloured by type (ridge, hip, valley, eave, verge), node heights
+annotated. The 3D view is the roof solid, orbitable, built from the
+faces and the node heights the roof already carries. Save either as a
+self-contained HTML file that opens from disk:
 
 ```python
-from krovlab.viz import plan_view, write_html
+from krovlab.viz import plan_view, solid_view, write_html
 
 fig = plan_view(result)
 write_html(fig, "roof-plan.html")
+
+write_html(solid_view(result), "roof-solid.html")
 ```
 
 The core never imports this module. Without the extra, `import krovlab`

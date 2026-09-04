@@ -6,16 +6,39 @@ the figure builds and that the public contract is met — not pixels.
 
 import re
 from pathlib import Path
+from typing import Any
 
-from krovlab import Roof, roof
+import pytest
+
+from krovlab import Pitch, Roof, roof
 
 RECTANGLE = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+L_SHAPE = [
+    (0.0, 0.0),
+    (10.0, 0.0),
+    (10.0, 6.0),
+    (3.0, 6.0),
+    (3.0, 10.0),
+    (0.0, 10.0),
+]
+COURTYARD = [(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)]
 
 
 def _rectangle_roof() -> Roof:
     result = roof(RECTANGLE, 45.0)
     assert isinstance(result, Roof)
     return result
+
+
+def _mesh_plan_area(mesh: Any) -> float:
+    total = 0.0
+    for a, b, c in zip(mesh.i, mesh.j, mesh.k, strict=True):
+        ax, ay = float(mesh.x[a]), float(mesh.y[a])
+        bx, by = float(mesh.x[b]), float(mesh.y[b])
+        cx, cy = float(mesh.x[c]), float(mesh.y[c])
+        total += abs(0.5 * ((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)))
+    return total
 
 
 def test_plan_view_builds_from_a_roof() -> None:
@@ -95,6 +118,81 @@ def test_viz_reaches_only_the_roof_value() -> None:
     for name in imported:
         assert name not in internals
         assert not any(name.startswith(f"{mod}.") for mod in internals)
+
+
+def test_solid_view_builds_from_a_roof() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import solid_view
+
+    fig = solid_view(_rectangle_roof())
+    assert isinstance(fig, Figure)
+    assert fig.data
+    assert fig.layout.scene is not None
+
+
+def test_solid_view_face_heights_match_the_roof_nodes() -> None:
+    from krovlab.viz import solid_view
+
+    built = _rectangle_roof()
+    mesh = next(trace for trace in solid_view(built).data if trace.type == "mesh3d")
+    assert list(mesh.z) == [node.height for node in built.nodes]
+    used = set(mesh.i) | set(mesh.j) | set(mesh.k)
+    for face in built.faces:
+        assert set(face.node_indices) <= used
+
+
+def test_solid_view_legend_uses_glossary_arc_names() -> None:
+    from krovlab.viz import solid_view
+
+    names = {trace.name for trace in solid_view(_rectangle_roof()).data}
+    for kind in GLOSSARY_ARC_KINDS:
+        assert kind in names
+
+
+def test_solid_view_writes_self_contained_html(tmp_path: Path) -> None:
+    from krovlab.viz import solid_view, write_html
+
+    path = tmp_path / "solid.html"
+    write_html(solid_view(_rectangle_roof()), path)
+    html = path.read_text(encoding="utf-8")
+    assert html.lstrip().startswith("<")
+    assert "Plotly" in html
+    sources = re.findall(r"<script[^>]+src=['\"]([^'\"]+)['\"]", html, flags=re.I)
+    assert not any(src.startswith(("http://", "https://", "//")) for src in sources)
+
+
+@pytest.mark.parametrize(
+    ("footprint", "pitch", "roof_kwargs"),
+    [
+        (RECTANGLE, 45.0, {}),
+        (L_SHAPE, 45.0, {}),
+        (SQUARE, 45.0, {"holes": [COURTYARD]}),
+        (RECTANGLE, [45.0, 90.0, 45.0, 45.0], {}),
+        (RECTANGLE, 45.0, {"overhang": 0.5}),
+        (SQUARE, [60.0, 45.0, 60.0, 45.0], {}),
+    ],
+    ids=["convex", "reflex", "holed", "gabled", "overhung", "per-edge-pitch"],
+)
+def test_solid_view_builds_from_supported_footprint_classes(
+    footprint: list[tuple[float, float]],
+    pitch: Pitch | list[Pitch],
+    roof_kwargs: dict[str, Any],
+) -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import solid_view
+
+    result = roof(footprint, pitch, **roof_kwargs)
+    assert isinstance(result, Roof)
+    fig = solid_view(result)
+    assert isinstance(fig, Figure)
+    mesh = next(trace for trace in fig.data if trace.type == "mesh3d")
+    assert list(mesh.z) == [node.height for node in result.nodes]
+    assert len(mesh.i) > 0
+    assert _mesh_plan_area(mesh) == pytest.approx(
+        sum(face.plan_area for face in result.faces)
+    )
 
 
 def test_core_does_not_import_viz() -> None:

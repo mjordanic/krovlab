@@ -14,7 +14,7 @@ optional visualisation module, and never reaches past the entry point.
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** Ticket 05 established the visualisation module, its Plotly
 figure-returning shape, its self-contained HTML export and its smoke-test bar —
@@ -24,11 +24,11 @@ why Plotly rather than a 3D engine, and "The third dimension is not a separate
 step" explains why the heights are simply there. Every glossary arc type from
 `CONTEXT.md` should stay legible in 3D.
 
-- [ ] A roof renders as an orbitable 3D solid
-- [ ] The solid's face heights match the node heights the roof reports
-- [ ] The view saves as one self-contained HTML file that opens over `file://`
+- [x] A roof renders as an orbitable 3D solid
+- [x] The solid's face heights match the node heights the roof reports
+- [x] The view saves as one self-contained HTML file that opens over `file://`
       with no server
-- [ ] Roofs from every supported footprint class render: convex, reflex, holed,
+- [x] Roofs from every supported footprint class render: convex, reflex, holed,
       gabled, overhung, per-edge pitch
-- [ ] The core package still imports nothing third-party
-- [ ] Smoke tests assert the figure builds; nothing asserts on pixels
+- [x] The core package still imports nothing third-party
+- [x] Smoke tests assert the figure builds; nothing asserts on pixels
