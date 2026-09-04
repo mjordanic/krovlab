@@ -22,7 +22,7 @@ say plainly in the report how many footprints it covers.
 
 **Blocked by:** 09, 10
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** Ticket 02's invariant harness supplies every assertion this
 ticket needs — the corpus is a fixture set fed through it, not a new set of
@@ -34,14 +34,14 @@ real footprints as regression fixtures" passage is the source, and its "The risk
 is robustness, and it is the whole risk" note in Further Notes explains why the
 pass rate is the headline number. `terrain` is a glossary term in `CONTEXT.md`.
 
-- [ ] Real footprints are committed as fixtures under
+- [x] Real footprints are committed as fixtures under
       `tests/fixtures/footprints/`, in a plain format a person can read and edit
-- [ ] Every fixture is run through the invariant harness from ticket 02
-- [ ] The result is reported as a pass rate, naming which footprints failed and
+- [x] Every fixture is run through the invariant harness from ticket 02
+- [x] The result is reported as a pass rate, naming which footprints failed and
       on which property
-- [ ] The report is written to a committed path under `docs/`
-- [ ] Each passing fixture records its topology hash, so a later change that
+- [x] The report is written to a committed path under `docs/`
+- [x] Each passing fixture records its topology hash, so a later change that
       alters topology while keeping the invariants is caught
-- [ ] A fixture that cannot be roofed records its expected failure reason and is
+- [x] A fixture that cannot be roofed records its expected failure reason and is
       counted separately from a fixture that fails an invariant
-- [ ] Adding a footprint to the corpus requires only dropping in a file
+- [x] Adding a footprint to the corpus requires only dropping in a file

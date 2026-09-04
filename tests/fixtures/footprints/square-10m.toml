@@ -1,0 +1,5 @@
+# 10 m square, uniform 45°. Worked example: pyramid, apex 5 m.
+
+footprint = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+pitch = 45.0
+topology_hash = "fd7abc2a1674ecf1dba62fbd03e05db4025cc894278e811894b7d863ec249591"

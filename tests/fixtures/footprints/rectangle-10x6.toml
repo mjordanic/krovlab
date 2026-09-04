@@ -1,0 +1,5 @@
+# 10 × 6 m rectangle, uniform 45°. Worked example: 4 m ridge at height 3 m.
+
+footprint = [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]]
+pitch = 45.0
+topology_hash = "088246302c173f1a7e33044bf3d79b0379e955c6d371734e4676adab81ba7aa0"

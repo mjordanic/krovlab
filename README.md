@@ -217,6 +217,14 @@ pitch per edge. Generated cases include a modest eaves overhang. Later
 geometry tickets widen `tests/generation.py` rather than copying those
 assertions.
 
+A corpus of footprints lives in `tests/fixtures/footprints/` (plain TOML;
+drop in a file to add one). Each is run through the same invariant
+harness and reported as a pass rate in
+[`docs/footprint-corpus.md`](docs/footprint-corpus.md). Passing fixtures
+record a topology hash so a later change that keeps the invariants but
+alters structure is caught. The files there today are stand-ins from the
+worked examples, not yet the architect's own buildings.
+
 ## Glossary
 
 Terms (`footprint`, `face`, `pitch`, `plan area`, `sloped area`, `ridge`,

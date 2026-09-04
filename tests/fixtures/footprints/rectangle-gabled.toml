@@ -1,0 +1,6 @@
+# 10 × 6 m rectangle, east edge gabled (pitch 90). No face on that wall;
+# neighbouring faces meet it at verges.
+
+footprint = [[0.0, 0.0], [10.0, 0.0], [10.0, 6.0], [0.0, 6.0]]
+pitch = [45.0, 90.0, 45.0, 45.0]
+topology_hash = "f36128464c6da2d8f4c82e3f4e874bd92308c6dfb4bfd2149acc169704e817b8"

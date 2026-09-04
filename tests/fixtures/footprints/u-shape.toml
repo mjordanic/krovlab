@@ -1,0 +1,14 @@
+# U-shape. Two reflex corners, two valleys.
+
+footprint = [
+    [0.0, 0.0],
+    [10.0, 0.0],
+    [10.0, 8.0],
+    [7.0, 8.0],
+    [7.0, 3.0],
+    [3.0, 3.0],
+    [3.0, 8.0],
+    [0.0, 8.0],
+]
+pitch = 45.0
+topology_hash = "b90bc9539bda70808256dd58116540bda78f8e028916f0d43fe2d6e7aab568cc"

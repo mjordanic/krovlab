@@ -1,0 +1,14 @@
+# Same L as l-shape.toml, eaves overhang 0.5 m. The roof is of the
+# enlarged footprint.
+
+footprint = [
+    [0.0, 0.0],
+    [10.0, 0.0],
+    [10.0, 6.0],
+    [3.0, 6.0],
+    [3.0, 10.0],
+    [0.0, 10.0],
+]
+pitch = 45.0
+overhang = 0.5
+topology_hash = "881c6d116216f0ff74ef26dfcf2abe07d65a89f01bb4ddeb3adf7fb01ad3f781"

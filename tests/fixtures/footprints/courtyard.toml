@@ -1,0 +1,7 @@
+# 10 m square with a centred 4 m courtyard. Hips from the outer corners,
+# valleys from the hole, a ridge square where the wavefronts meet.
+
+footprint = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+holes = [[[3.0, 3.0], [7.0, 3.0], [7.0, 7.0], [3.0, 7.0]]]
+pitch = 45.0
+topology_hash = "dfa9660e9c5ccdfcdb7832f6c18baa0e8af97da0b4f58530f32669de8ea48534"
