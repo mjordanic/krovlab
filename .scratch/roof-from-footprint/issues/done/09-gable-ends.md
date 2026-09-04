@@ -17,7 +17,7 @@ faces must still sum to the whole footprint area with nothing left uncovered.
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** The feature PRD's "A gable is `pitch = 90`, not a separate flag"
 decision gives the reasoning; ADR-0001 admits `weight = 0` solely as this case.
@@ -29,14 +29,25 @@ pitch constraint of `0 < pitch <= 90` is deliberately inclusive at 90. Ticket
 02's harness gains verge classification to check; ticket 05's plan view already
 has verge in its colour legend.
 
-- [ ] A rectangle with one edge at `pitch = 90` produces a roof with no face
+- [x] A rectangle with one edge at `pitch = 90` produces a roof with no face
       over that edge and two verges
-- [ ] A rectangle with both short edges gabled produces a simple ridged roof
+- [x] A rectangle with both short edges gabled produces a simple ridged roof
       with four verges
-- [ ] Verges are classified as verges, distinct from hips, and measured
-- [ ] Plan areas still sum to the footprint area with a gabled edge present
-- [ ] The invariant harness's generator produces gabled edges and every property
+- [x] Verges are classified as verges, distinct from hips, and measured
+- [x] Plan areas still sum to the footprint area with a gabled edge present
+- [x] The invariant harness's generator produces gabled edges and every property
       from ticket 02 still holds
-- [ ] Gabling every edge, or enough edges that no roof can close, produces a
+- [x] Gabling every edge, or enough edges that no roof can close, produces a
       stated failure rather than an exception or a broken roof
-- [ ] Gables work together with reflex corners and per-edge pitch
+- [x] Gables work together with reflex corners and per-edge pitch
+
+## Comments
+
+`pitch = 90` is still a valid spelling (`invalid_pitch` starts at `90.1`).
+The skeleton already produced the right geometry at weight 0; assembly
+omits the gabled face and its eave, classifies wall-meeting arcs as
+`verge`, and drops wall-only arcs (both sides gabled). All-gable input
+is `incomplete`. Leftover wavefront vertices on a gabled roof are
+`incomplete` too. The generator draws 1–2 gables on convex polygons;
+reflex + mixed pitch is a worked L-shape. Plan view reconstructs the
+footprint from height-0 nodes when eaves no longer close.

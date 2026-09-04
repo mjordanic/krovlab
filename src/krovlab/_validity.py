@@ -36,7 +36,7 @@ def assess(
     reasons.extend(_sloped_reasons(faces))
     reasons.extend(_terrain_reasons(nodes, faces, footprint, hole_rings))
     reasons.extend(_drainage_reasons(nodes, faces, footprint, hole_rings))
-    reasons.extend(_arc_reasons(nodes, arcs, footprint, hole_rings))
+    reasons.extend(_arc_reasons(nodes, faces, arcs, footprint, hole_rings))
     return Validity(is_terrain=not reasons, reasons=tuple(reasons))
 
 
@@ -102,8 +102,7 @@ def _planar_reasons(nodes: tuple[Node, ...], faces: tuple[Face, ...]) -> list[st
         pts = [_xyz(nodes, i) for i in face.node_indices]
         if len(pts) < 3:
             reasons.append(
-                "every face is planar: "
-                f"face {face.edge_index} has {len(pts)} vertices"
+                f"every face is planar: face {face.edge_index} has {len(pts)} vertices"
             )
             continue
         normal = _face_normal(nodes, face)
@@ -179,9 +178,7 @@ def _point_in_ring(x: float, y: float, ring: list[tuple[float, float]]) -> bool:
     return inside
 
 
-def _plane_height(
-    nodes: tuple[Node, ...], face: Face, x: float, y: float
-) -> float:
+def _plane_height(nodes: tuple[Node, ...], face: Face, x: float, y: float) -> float:
     pts = [_xyz(nodes, i) for i in face.node_indices]
     origin = pts[0]
     normal = _face_normal(nodes, face)
@@ -309,15 +306,11 @@ def _drainage_reasons(
     for face in faces:
         normal = _face_normal(nodes, face)
         if normal is None:
-            reasons.append(
-                f"drainage to own eave: face {face.edge_index} is collinear"
-            )
+            reasons.append(f"drainage to own eave: face {face.edge_index} is collinear")
             continue
         nx, ny, nz = normal
         if abs(nz) < 1e-18:
-            reasons.append(
-                f"drainage to own eave: face {face.edge_index} is vertical"
-            )
+            reasons.append(f"drainage to own eave: face {face.edge_index} is vertical")
             continue
         # z = z0 - (nx(x-x0)+ny(y-y0))/nz  ⇒  grad(z) = (-nx/nz, -ny/nz)
         grad_x, grad_y = -nx / nz, -ny / nz
@@ -369,13 +362,56 @@ def _closest_corner(
     return best_ring, best_vertex
 
 
+def _point_on_segment(
+    px: float,
+    py: float,
+    a: tuple[float, float],
+    b: tuple[float, float],
+    tol: float,
+) -> bool:
+    ax, ay = a
+    bx, by = b
+    abx, aby = bx - ax, by - ay
+    apx, apy = px - ax, py - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 < 1e-24:
+        return math.hypot(apx, apy) <= tol
+    along = (apx * abx + apy * aby) / ab2
+    if along < -1e-9 or along > 1.0 + 1e-9:
+        return False
+    dist = abs(apx * aby - apy * abx) / math.sqrt(ab2)
+    return dist <= tol
+
+
+def _gabled_edge_indices(
+    faces: tuple[Face, ...], rings: list[list[tuple[float, float]]]
+) -> list[int]:
+    n_edges = sum(len(ring) for ring in rings)
+    faced = {face.edge_index for face in faces}
+    return [i for i in range(n_edges) if i not in faced]
+
+
+def _on_gabled_edge(
+    x: float,
+    y: float,
+    rings: list[list[tuple[float, float]]],
+    gabled: list[int],
+    tol: float,
+) -> bool:
+    return any(
+        _point_on_segment(x, y, *_edge_endpoints(rings, idx), tol) for idx in gabled
+    )
+
+
 def _arc_reasons(
     nodes: tuple[Node, ...],
+    faces: tuple[Face, ...],
     arcs: tuple[Arc, ...],
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]],
 ) -> list[str]:
     rings = _caller_rings(footprint, holes)
+    gabled = _gabled_edge_indices(faces, rings)
     reasons: list[str] = []
     for arc in arcs:
         a, b = nodes[arc.start], nodes[arc.end]
@@ -396,6 +432,17 @@ def _arc_reasons(
                     "arc classification matches geometry: "
                     f"eave between nodes {arc.start} and {arc.end} "
                     "leaves the eave plane"
+                )
+        elif arc.kind == "verge":
+            tol = HEIGHT_TOL_M * 10
+            if not (
+                _on_gabled_edge(a.x, a.y, rings, gabled, tol)
+                and _on_gabled_edge(b.x, b.y, rings, gabled, tol)
+            ):
+                reasons.append(
+                    "arc classification matches geometry: "
+                    f"verge between nodes {arc.start} and {arc.end} "
+                    "does not lie on a gable wall"
                 )
         elif arc.kind in ("hip", "valley"):
             if abs(a.height - b.height) <= HEIGHT_TOL_M:

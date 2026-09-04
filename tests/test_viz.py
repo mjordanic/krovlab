@@ -28,6 +28,19 @@ def test_plan_view_builds_from_a_roof() -> None:
     assert fig.data
 
 
+def test_plan_view_builds_from_a_gabled_roof() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab.viz import plan_view
+
+    result = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0])
+    assert isinstance(result, Roof)
+    fig = plan_view(result)
+    assert isinstance(fig, Figure)
+    verge = next(trace for trace in fig.data if trace.name == "verge")
+    assert any(x == x for x in verge.x)
+
+
 GLOSSARY_ARC_KINDS = ("ridge", "hip", "valley", "eave", "verge")
 
 

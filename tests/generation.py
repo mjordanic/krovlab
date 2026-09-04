@@ -1,7 +1,7 @@
 """Hypothesis strategies for footprints the library currently roofs.
 
 Widen :func:`footprints` and :func:`roof_cases` in place as later tickets
-add gables and the rest. The invariant tests import these strategies and
+add overhang and the rest. The invariant tests import these strategies and
 should not grow their own generators.
 """
 
@@ -205,7 +205,8 @@ def roof_cases(
     """Uniform pitch on every supported footprint, including courtyards.
 
     Per-edge lists stay on convex polygons without holes: mixed weights
-    on reflex or holed shapes are covered by worked examples.
+    on reflex or holed shapes are covered by worked examples. Gables
+    (``pitch = 90``) are drawn on convex polygons, never on every edge.
     """
     if draw(st.integers(min_value=0, max_value=2)) == 0:
         outer, holes = draw(rectangle_with_hole())
@@ -214,8 +215,23 @@ def roof_cases(
         return draw(footprints()), draw(PITCHES), []
     footprint = draw(convex_polygons())
     n = len(footprint)
-    pitches = [draw(PER_EDGE_PITCHES) for _ in range(n)]
-    if all(abs(p - pitches[0]) <= 1e-9 for p in pitches):
-        other = draw(PER_EDGE_PITCHES.filter(lambda p: abs(p - pitches[0]) > 1.0))
-        pitches[draw(st.integers(min_value=0, max_value=n - 1))] = other
+    if draw(st.booleans()):
+        pitches = [draw(PER_EDGE_PITCHES) for _ in range(n)]
+        if all(abs(p - pitches[0]) <= 1e-9 for p in pitches):
+            other = draw(PER_EDGE_PITCHES.filter(lambda p: abs(p - pitches[0]) > 1.0))
+            pitches[draw(st.integers(min_value=0, max_value=n - 1))] = other
+        return footprint, pitches, []
+    rest = draw(PITCHES)
+    pitches = [rest] * n
+    n_gables = draw(st.integers(min_value=1, max_value=min(2, n - 1)))
+    chosen = draw(
+        st.lists(
+            st.integers(min_value=0, max_value=n - 1),
+            min_size=n_gables,
+            max_size=n_gables,
+            unique=True,
+        )
+    )
+    for i in chosen:
+        pitches[i] = 90.0
     return footprint, pitches, []

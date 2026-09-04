@@ -25,7 +25,7 @@ from krovlab._input import (
 )
 from krovlab._skeleton import skeleton as _skeleton
 
-ArcKind = Literal["ridge", "hip", "eave", "valley"]
+ArcKind = Literal["ridge", "hip", "eave", "valley", "verge"]
 EventKind = Literal["edge", "split"]
 FailureKind = Literal[
     "invalid_pitch",
@@ -45,7 +45,8 @@ FailureKind = Literal[
 ``hole_intersects`` — a hole touches or crosses the outer ring, or another hole.
 ``unsupported`` — adjacent parallel edges of differing pitch (no unique
     skeleton).
-``incomplete`` — the wavefront stopped before the skeleton finished.
+``incomplete`` — the wavefront stopped before the skeleton finished,
+    including when every edge is a gable.
 """
 
 
@@ -159,8 +160,8 @@ class Arc:
 
     kind: ArcKind
     """``"eave"``, ``"hip"`` (rising from a convex corner), ``"valley"``
-    (rising from a reflex corner) or ``"ridge"`` (horizontal, both ends
-    above the eave)."""
+    (rising from a reflex corner), ``"ridge"`` (horizontal, both ends
+    above the eave), or ``"verge"`` (the roof meeting a gable wall)."""
 
     length: float
     """True 3D length in metres — the figure that is priced per metre."""
@@ -203,10 +204,10 @@ class Roof:
     """Every vertex, including the original footprint corners at height 0."""
 
     faces: tuple[Face, ...]
-    """One face per footprint edge, in the caller's edge order after mapping."""
+    """One face per non-gabled footprint edge, in the caller's edge order."""
 
     arcs: tuple[Arc, ...]
-    """Eaves, hips, valleys and ridges, each with a 3D length."""
+    """Eaves, hips, valleys, ridges and verges, each with a 3D length."""
 
     ridge_height: float
     """Highest node on the roof, metres above the eave plane."""
@@ -300,10 +301,13 @@ def roof(
         One slope for every face, or a list with one value per edge.
         Each value is degrees, a ``(rise, run)`` pair, ``"4:12"``, or
         ``"100%"``. After conversion the angle must satisfy
-        ``0 < pitch <= 90``. A list of mixed spellings of the same slope
-        is the same as a single value. Differing pitches weight the
-        wavefront; adjacent parallel edges of differing pitch are
-        refused (no unique skeleton).
+        ``0 < pitch <= 90``. ``pitch = 90`` is a gable: that edge
+        produces no face, and the neighbouring faces meet the wall at
+        verges. A list of mixed spellings of the same slope is the same
+        as a single value. Differing pitches weight the wavefront;
+        adjacent parallel edges of differing pitch are refused (no
+        unique skeleton). Gabling every edge, or enough that the roof
+        cannot close, is ``incomplete``.
     holes
         Interior rings the roof does not cover, or ``None``. Either
         winding is accepted. A hole that touches or crosses the outer
@@ -320,6 +324,7 @@ def roof(
         Faces, arcs, nodes, quantities, and a :class:`Validity` result
         that records whether the roof is a terrain. Every length is
         metres; every angle is degrees. Reflex corners produce valleys.
+        A gabled edge (``pitch = 90``) produces no face and two verges.
     tuple[Roof, tuple[Event, ...]]
         The same roof, plus the event log, when ``events=True``.
     Failure
@@ -364,6 +369,11 @@ def roof(
             return conflict
         offset += m
     weights = [_pitch_to_weight(p) for p in ring_pitches]
+    if all(w == 0.0 for w in weights):
+        return Failure(
+            kind="incomplete",
+            reason="every edge is a gable (pitch = 90); no roof can close",
+        )
     raw = _skeleton(rings, weights)
     if not raw.complete:
         return Failure(
@@ -473,6 +483,7 @@ def _roof_from_skeleton(
     nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
     next_idx = _next_indices(rings)
     n = len(next_idx)
+    gabled = [p >= 90.0 for p in pitches]
     # Per-face adjacency of node indices, used to walk each face cycle.
     adj: list[dict[int, list[int]]] = [{} for _ in range(n)]
 
@@ -487,6 +498,8 @@ def _roof_from_skeleton(
     arcs: list[Arc] = []
     for i in range(n):
         a, b = i, next_idx[i]
+        if gabled[i]:
+            continue
         _link(i, a, b)
         arcs.append(
             Arc(start=a, end=b, kind="eave", length=_node_distance(nodes[a], nodes[b]))
@@ -494,15 +507,24 @@ def _roof_from_skeleton(
 
     height_tol = 1e-9
     for a, b, face_a, face_b in raw_arcs:
-        _link(face_a, a, b)
-        _link(face_b, a, b)
-        kind = _classify_arc(nodes[a], nodes[b], rings, height_tol)
+        if gabled[face_a] and gabled[face_b]:
+            continue
+        if not gabled[face_a]:
+            _link(face_a, a, b)
+        if not gabled[face_b]:
+            _link(face_b, a, b)
+        if gabled[face_a] or gabled[face_b]:
+            kind: ArcKind = "verge"
+        else:
+            kind = _classify_arc(nodes[a], nodes[b], rings, height_tol)
         arcs.append(
             Arc(start=a, end=b, kind=kind, length=_node_distance(nodes[a], nodes[b]))
         )
 
     faces: list[Face] = []
     for i in range(n):
+        if gabled[i]:
+            continue
         cycle = _walk_cycle(adj[i], i, next_idx[i])
         plan_area = abs(_signed_area([(nodes[j].x, nodes[j].y) for j in cycle]))
         cos_pitch = math.cos(math.radians(pitches[i]))

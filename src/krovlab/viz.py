@@ -111,14 +111,39 @@ def write_html(fig: go.Figure, path: str | Path) -> Path:
     return destination
 
 
-def _footprint_ring(roof: Roof) -> list[tuple[float, float]]:
-    """Walk eave arcs into a closed plan ring. Uses only the roof value."""
+def _eave_ring(roof: Roof) -> list[tuple[float, float]] | None:
+    """Closed plan ring from eave arcs, or None if they do not form a cycle."""
     eaves = [arc for arc in roof.arcs if arc.kind == "eave"]
+    if not eaves:
+        return None
     successor = {arc.start: arc.end for arc in eaves}
     start = eaves[0].start
     order = [start]
-    current = successor[start]
-    for _ in range(len(eaves) - 1):
-        order.append(current)
-        current = successor[current]
-    return [(roof.nodes[i].x, roof.nodes[i].y) for i in order]
+    current = start
+    for _ in range(len(eaves)):
+        nxt = successor.get(current)
+        if nxt is None:
+            return None
+        if nxt == start:
+            return [(roof.nodes[i].x, roof.nodes[i].y) for i in order]
+        order.append(nxt)
+        current = nxt
+    return None
+
+
+def _footprint_ring(roof: Roof) -> list[tuple[float, float]]:
+    """Plan ring of the footprint, reconstructed from the roof value.
+
+    Eaves close the ring on a fully hipped roof. Gabled edges have no
+    eave, so fall back to the original vertices (height-0 nodes, which
+    the skeleton records first).
+    """
+    closed = _eave_ring(roof)
+    if closed is not None:
+        return closed
+    outer: list[tuple[float, float]] = []
+    for node in roof.nodes:
+        if node.height > 1e-9:
+            break
+        outer.append((node.x, node.y))
+    return outer

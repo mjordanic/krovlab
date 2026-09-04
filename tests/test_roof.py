@@ -13,7 +13,10 @@ def test_pitch_outside_open_zero_to_closed_ninety_is_refused() -> None:
     for pitch in (0.0, -10.0, 90.1):
         result = roof(SQUARE, pitch)
         assert isinstance(result, Failure)
-    assert not isinstance(roof(SQUARE, 90.0), Failure)
+        assert result.kind == "invalid_pitch"
+    # 90 is in range: it names a gable, not an invalid pitch.
+    gabled = roof(SQUARE, [45.0, 90.0, 45.0, 45.0])
+    assert isinstance(gabled, Roof)
 
 
 def test_square_at_forty_five_has_hand_computed_apex_height() -> None:
@@ -582,3 +585,89 @@ def test_a_hole_that_cannot_close_is_a_stated_failure() -> None:
             100.0 - 9.98 * 9.98
         )
         assert result.ridge_height == pytest.approx(0.005)
+
+
+# 10 x 6 m rectangle. East (the 6 m edge at x = 10) gabled; the rest 45.
+# The east wall does not move. South and north meet it at (10, 3, 3).
+# West still hips in to (3, 3, 3). Ridge 7 m. Two verges of length 3*sqrt(2).
+ONE_GABLE: list[Pitch] = [45.0, 90.0, 45.0, 45.0]
+
+
+def test_rectangle_with_one_gabled_edge_has_no_face_there_and_two_verges() -> None:
+    result = roof(RECTANGLE, ONE_GABLE)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    by_edge = {face.edge_index: face for face in result.faces}
+    assert 1 not in by_edge
+    assert sorted(by_edge) == [0, 2, 3]
+    verges = [arc for arc in result.arcs if arc.kind == "verge"]
+    assert len(verges) == 2
+    verge_3d = 3.0 * math.sqrt(2.0)
+    assert sorted(arc.length for arc in verges) == pytest.approx([verge_3d, verge_3d])
+    hips = [arc for arc in result.arcs if arc.kind == "hip"]
+    assert len(hips) == 2
+    eaves = [arc for arc in result.arcs if arc.kind == "eave"]
+    assert len(eaves) == 3
+    assert result.ridge_height == pytest.approx(3.0)
+
+
+BOTH_SHORT_GABLES: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
+
+
+def test_rectangle_with_both_short_edges_gabled_is_a_ridged_roof() -> None:
+    result = roof(RECTANGLE, BOTH_SHORT_GABLES)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert sorted(face.edge_index for face in result.faces) == [0, 2]
+    for face in result.faces:
+        assert face.plan_area == pytest.approx(30.0)
+    verges = [arc for arc in result.arcs if arc.kind == "verge"]
+    assert len(verges) == 4
+    verge_3d = 3.0 * math.sqrt(2.0)
+    assert sorted(arc.length for arc in verges) == pytest.approx(
+        [verge_3d, verge_3d, verge_3d, verge_3d]
+    )
+    assert [arc for arc in result.arcs if arc.kind == "hip"] == []
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    assert len(ridges) == 1
+    assert ridges[0].length == pytest.approx(10.0)
+    eaves = [arc for arc in result.arcs if arc.kind == "eave"]
+    assert sorted(arc.length for arc in eaves) == pytest.approx([10.0, 10.0])
+    assert result.ridge_height == pytest.approx(3.0)
+
+
+def test_gabled_plan_areas_sum_to_the_footprint_area() -> None:
+    from shapely.geometry import Polygon
+
+    result = roof(RECTANGLE, ONE_GABLE)
+    assert isinstance(result, Roof)
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(
+        Polygon(RECTANGLE).area
+    )
+
+
+def test_gabling_every_edge_is_a_stated_failure() -> None:
+    result = roof(SQUARE, 90.0)
+    assert isinstance(result, Failure)
+    assert result.kind == "incomplete"
+    assert result.reason
+    listed = roof(RECTANGLE, [90.0, 90.0, 90.0, 90.0])
+    assert isinstance(listed, Failure)
+    assert listed.kind == "incomplete"
+
+
+def test_gables_work_with_reflex_corners_and_per_edge_pitch() -> None:
+    # East end of the L gabled; mixed pitch on the remaining edges.
+    pitches: list[Pitch] = [45.0, 90.0, 30.0, 45.0, 45.0, 30.0]
+    result = roof(L_SHAPE, pitches)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    by_edge = {face.edge_index: face.pitch for face in result.faces}
+    assert 1 not in by_edge
+    assert by_edge == {0: 45.0, 2: 30.0, 3: 45.0, 4: 45.0, 5: 30.0}
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 1
+    verges = [arc for arc in result.arcs if arc.kind == "verge"]
+    assert len(verges) == 2
+    assert all(v.length > 0.0 for v in verges)
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(72.0)

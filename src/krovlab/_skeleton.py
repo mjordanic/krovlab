@@ -38,6 +38,14 @@ Each hole is a second LAV, oriented clockwise so the roofed region stays
 on the left. A reflex vertex hitting an edge of a *different* LAV merges
 the two wavefronts (the mirror of a split). The pointer surgery is the
 same as a split; only the cycle count goes 2→1 instead of 1→2.
+
+Gables
+------
+``weight = 0`` is a vertical face: that edge does not move. Neighbouring
+faces close over it. Leftover wavefront vertices then mean the roof
+could not close (every edge gabled, or enough that nothing remains to
+meet), so ``complete`` is false. The public layer omits the gabled face
+and classifies the wall-meeting arcs as verges.
 """
 
 from __future__ import annotations
@@ -172,9 +180,7 @@ def skeleton(
         v.prev = verts[prev_of[i]]
         v.next = verts[next_idx[i]]
 
-    heap: list[
-        tuple[float, int, float, float, float, float, int, _Vertex, int]
-    ] = []
+    heap: list[tuple[float, int, float, float, float, float, int, _Vertex, int]] = []
     seq = 0
 
     def push(
@@ -369,7 +375,8 @@ def skeleton(
                 break
 
     leftover = any(v.valid for v in verts)
-    complete = not leftover if len(rings) > 1 else True
+    has_gable = any(w <= 0.0 for w in weights)
+    complete = not leftover if (len(rings) > 1 or has_gable) else True
     return RawSkeleton(
         nodes=tuple(nodes),
         arcs=tuple(arcs),

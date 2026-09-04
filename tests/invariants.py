@@ -43,9 +43,7 @@ def plan_areas_sum_to_footprint_area(
         poly = Polygon(
             [(built.nodes[i].x, built.nodes[i].y) for i in face.node_indices]
         )
-        assert math.isclose(
-            face.plan_area, poly.area, rel_tol=0.0, abs_tol=AREA_TOL
-        ), (
+        assert math.isclose(face.plan_area, poly.area, rel_tol=0.0, abs_tol=AREA_TOL), (
             "plan areas sum to footprint area: "
             f"face {face.edge_index} reports {face.plan_area} m², "
             f"shapely measures {poly.area} m²"
@@ -119,9 +117,7 @@ def sloped_area_is_at_least_plan_area(built: Roof) -> None:
             )
 
 
-def _plane_height(
-    pts: list[tuple[float, float, float]], x: float, y: float
-) -> float:
+def _plane_height(pts: list[tuple[float, float, float]], x: float, y: float) -> float:
     """Height on the face plane at a plan point. pts must not be collinear."""
     origin = pts[0]
     normal = None
@@ -176,8 +172,7 @@ def roof_is_a_terrain(
         ref = heights[0]
         for h in heights[1:]:
             assert math.isclose(h, ref, rel_tol=0.0, abs_tol=HEIGHT_TOL_M * 10), (
-                "roof is a terrain: "
-                f"point ({x:.4f}, {y:.4f}) has heights {heights}"
+                f"roof is a terrain: point ({x:.4f}, {y:.4f}) has heights {heights}"
             )
 
 
@@ -283,13 +278,37 @@ def _closest_corner(
     return best_ring, best_vertex
 
 
+def _point_on_segment(
+    px: float,
+    py: float,
+    a: tuple[float, float],
+    b: tuple[float, float],
+    tol: float,
+) -> bool:
+    ax, ay = a
+    bx, by = b
+    abx, aby = bx - ax, by - ay
+    apx, apy = px - ax, py - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 < 1e-24:
+        return math.hypot(apx, apy) <= tol
+    along = (apx * abx + apy * aby) / ab2
+    if along < -1e-9 or along > 1.0 + 1e-9:
+        return False
+    dist = abs(apx * aby - apy * abx) / math.sqrt(ab2)
+    return dist <= tol
+
+
 def arc_classification_matches_geometry(
     built: Roof,
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]] | None = None,
 ) -> None:
-    """Ridges are horizontal; hips rise from convex corners; valleys from reflex."""
+    """Ridges horizontal; hips convex; valleys reflex; verges on gable walls."""
     rings = _caller_rings(footprint, holes)
+    n_edges = sum(len(ring) for ring in rings)
+    faced = {face.edge_index for face in built.faces}
+    gabled = [i for i in range(n_edges) if i not in faced]
     for arc in built.arcs:
         a, b = built.nodes[arc.start], built.nodes[arc.end]
         if arc.kind == "ridge":
@@ -305,6 +324,21 @@ def arc_classification_matches_geometry(
             assert a.height <= HEIGHT_TOL_M and b.height <= HEIGHT_TOL_M, (
                 "arc classification matches geometry: "
                 f"eave between nodes {arc.start} and {arc.end} leaves the eave plane"
+            )
+        elif arc.kind == "verge":
+            on_gable = all(
+                any(
+                    _point_on_segment(
+                        end.x, end.y, *_edge_endpoints(rings, idx), HEIGHT_TOL_M * 10
+                    )
+                    for idx in gabled
+                )
+                for end in (a, b)
+            )
+            assert on_gable, (
+                "arc classification matches geometry: "
+                f"verge between nodes {arc.start} and {arc.end} "
+                "does not lie on a gable wall"
             )
         elif arc.kind in ("hip", "valley"):
             # Sloping. The first segment of a hip/valley meets a footprint

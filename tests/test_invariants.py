@@ -2,7 +2,7 @@
 
 Each test is one property. Later tickets widen the generator in
 ``tests/generation.py``; they should not copy these assertions.
-Per-edge pitch is drawn by :func:`generation.roof_cases`. Holes are too.
+Per-edge pitch, holes and gables are drawn by :func:`generation.roof_cases`.
 """
 
 from typing import cast

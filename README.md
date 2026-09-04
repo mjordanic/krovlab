@@ -12,8 +12,10 @@ Simple footprints (convex, L, U) and footprints with holes. A square at
 one pitch becomes a pyramid of four triangular faces; a rectangle gets a
 ridge; an L-shape produces one valley; a courtyard produces inward eaves
 and valleys where the two wavefronts meet. A different pitch per edge is
-accepted. Mixed pitch on an L or U can still come back `incomplete`.
-`krovlab.viz` draws a plan. Gables and overhang are not built yet.
+accepted. `pitch = 90` on an edge is a gable: no face over that edge,
+neighbouring faces meeting the wall at verges. Gabling every edge is
+`incomplete`. Mixed pitch on an L or U can still come back `incomplete`.
+`krovlab.viz` draws a plan. Overhang is not built yet.
 
 ## Install
 
@@ -69,7 +71,9 @@ A list is one value per footprint edge. The length must match — outer
 ring first, then each hole in order. Differing pitches weight the
 wavefront so each face rises at its own pitch. Adjacent parallel edges
 of differing pitch are refused: that configuration has no unique
-straight skeleton.
+straight skeleton. `pitch = 90` is a gable end: that edge does not
+move, produces no face, and the neighbouring faces meet the wall at
+verges.
 
 After conversion the angle must satisfy `0 < pitch <= 90`. Outside that
 range, or a list of the wrong length, you get a `Failure`, not an exception.
@@ -82,8 +86,8 @@ returned roof.
 | Attribute | What it is |
 |---|---|
 | `nodes` | Every vertex. Footprint corners have `height == 0`. |
-| `faces` | One face per footprint edge. `edge_index` is the edge you passed in. |
-| `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"` or `"ridge"`; `length` is 3D metres. |
+| `faces` | One face per non-gabled footprint edge. `edge_index` is the edge you passed in. |
+| `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"`, `"ridge"` or `"verge"`; `length` is 3D metres. |
 | `ridge_height` | Highest point above the eave plane. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
 | `validity` | Whether the roof is a terrain. `is_terrain` is true only when plan areas sum to the footprint, every face is planar, sampled plan points have one height, water drains to each face's own eave, and arc labels match the geometry. |
@@ -140,7 +144,7 @@ can show. Nothing the entry point accepts raises.
 | `degenerate` | A point, a line, coincident consecutive vertices, or no area. |
 | `hole_intersects` | A hole touches or crosses the outer ring, or another hole. |
 | `unsupported` | Adjacent parallel edges of differing pitch (no unique skeleton). |
-| `incomplete` | The wavefront stopped before the skeleton finished. |
+| `incomplete` | The wavefront stopped before the skeleton finished, including when every edge is a gable. |
 
 A closed-ring spelling (first point repeated at the end) is accepted. Either
 winding produces the same roof. Collinear vertices that still enclose area
