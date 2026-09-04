@@ -182,10 +182,7 @@ Ranked by how much they'd change adoption:
 
 ---
 
-## 5. Honest limitation to document
+## 5. Honest limitation
 
-Ren et al. (SIGGRAPH Asia 2021) show the straight skeleton cannot represent a
-roof face spanning multiple outline edges, and invents spurious vertices near
-some outlines. Roofs with the same outline can have different valid styles. Our
-search space is a strict subset of buildable roofs, and the documentation should
-say so rather than implying completeness.
+Documented for the reader in [`docs/limitations.md`](limitations.md).
+The three inherent limits come from Ren et al. (SIGGRAPH Asia 2021).

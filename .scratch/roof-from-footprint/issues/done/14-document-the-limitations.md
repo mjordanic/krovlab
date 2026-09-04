@@ -19,7 +19,7 @@ README.
 
 **Blocked by:** 13
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** The feature PRD's Further Notes closes with "A limitation to
 document rather than hide", which is this ticket's brief almost verbatim, and
@@ -32,10 +32,10 @@ reasoning behind the parked work, so link to it rather than restating it.
 report is the empirical companion to this prose: what fails, next to what cannot
 be represented at all.
 
-- [ ] A limitations document exists at a committed path under `docs/`, linked
+- [x] A limitations document exists at a committed path under `docs/`, linked
       from the README
-- [ ] It states the three straight-skeleton limitations above in terms an
+- [x] It states the three straight-skeleton limitations above in terms an
       architect reads, not in terms of the algorithm
-- [ ] It lists the roof types out of scope and distinguishes deferred from
+- [x] It lists the roof types out of scope and distinguishes deferred from
       permanent, pointing at `docs/future-work.md` for the reasoning
-- [ ] It does not imply completeness anywhere
+- [x] It does not imply completeness anywhere

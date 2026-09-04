@@ -4,6 +4,10 @@ Roof geometry from a building footprint. You give a polygon in metres and a
 pitch in degrees; you get back the faces, hips, ridges and quantities of a
 hipped roof.
 
+The roofs it generates are a strict subset of buildable roofs. Read
+[what it cannot represent](docs/limitations.md) before deciding whether
+it covers a given building.
+
 The core has no third-party dependencies. It takes data and returns data.
 
 ## What it does today
@@ -230,3 +234,5 @@ worked examples, not yet the architect's own buildings.
 Terms (`footprint`, `face`, `pitch`, `plan area`, `sloped area`, `ridge`,
 `hip`, `valley`, `eave`) are defined in [`CONTEXT.md`](CONTEXT.md). The algorithm
 choice is recorded in [`docs/adr/0001-own-weighted-straight-skeleton-in-python.md`](docs/adr/0001-own-weighted-straight-skeleton-in-python.md).
+What the library cannot represent is in
+[`docs/limitations.md`](docs/limitations.md).
