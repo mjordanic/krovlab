@@ -24,12 +24,11 @@ def _failure(kind: FailureKind, reason: str) -> Failure:
     return Failure(kind=kind, reason=reason)
 
 
-def resolve_pitches(pitch: object, n_edges: int) -> float | Failure:
-    """Return one uniform pitch in degrees, or name why the list cannot be used.
+def resolve_pitches(pitch: object, n_edges: int) -> list[float] | Failure:
+    """Return one pitch in degrees per footprint edge, or name why not.
 
-    A list must have one value per footprint edge. Mixed spellings of the
-    same slope are fine. Differing slopes are ``unsupported`` until the
-    per-edge-pitch ticket.
+    A scalar is repeated for every edge. A list must have one value per
+    edge; mixed spellings are converted independently.
     """
     if isinstance(pitch, list):
         if len(pitch) != n_edges:
@@ -44,15 +43,46 @@ def resolve_pitches(pitch: object, n_edges: int) -> float | Failure:
             if not isinstance(degrees, float):
                 return degrees
             parsed.append(degrees)
-        first = parsed[0]
-        if any(abs(p - first) > 1e-9 for p in parsed[1:]):
-            return _failure(
-                "unsupported",
-                "per-edge pitch is not yet supported; every edge must have "
-                "the same pitch",
-            )
-        return first
-    return degrees_from_pitch(pitch)
+        return parsed
+    degrees = degrees_from_pitch(pitch)
+    if not isinstance(degrees, float):
+        return degrees
+    return [degrees] * n_edges
+
+
+def check_adjacent_parallel_pitches(
+    ring: list[tuple[float, float]], pitches: list[float]
+) -> Failure | None:
+    """Refuse adjacent collinear edges that would move at different speeds.
+
+    Consecutive parallel edges share a supporting line. Differing weights
+    then have no intersection for t > 0, so there is no unique skeleton.
+    Same-pitch collinear vertices are the extra-eave-point case and pass.
+    """
+    n = len(ring)
+    for i in range(n):
+        ax, ay = ring[(i - 1) % n]
+        bx, by = ring[i]
+        cx, cy = ring[(i + 1) % n]
+        dx1, dy1 = bx - ax, by - ay
+        dx2, dy2 = cx - bx, cy - by
+        len1 = math.hypot(dx1, dy1)
+        len2 = math.hypot(dx2, dy2)
+        if len1 < 1e-18 or len2 < 1e-18:
+            continue
+        sin_turn = (dx1 * dy2 - dy1 * dx2) / (len1 * len2)
+        if abs(sin_turn) > 1e-9:
+            continue
+        left, right = (i - 1) % n, i
+        if abs(pitches[left] - pitches[right]) <= 1e-9:
+            continue
+        return _failure(
+            "unsupported",
+            "adjacent parallel edges of differing pitch have no unique "
+            "straight skeleton; give those edges the same pitch or remove "
+            "the collinear vertex",
+        )
+    return None
 
 
 def degrees_from_pitch(value: object) -> float | Failure:

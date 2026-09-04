@@ -23,6 +23,14 @@ skeleton node at the same height, that node is reused. A square's four
 coincident edge events therefore share one apex rather than four
 overlapping nodes. Symmetric footprints whose split events collide at one
 point reuse that node the same way.
+
+Adjacent parallel edges of differing weight
+-------------------------------------------
+Consecutive edges that share a supporting line (a collinear vertex) have
+no unique weighted skeleton if their weights differ: the two offset
+lines stay parallel and never meet. The public entry point refuses that
+input rather than picking an arbitrary answer. Same-weight collinear
+vertices are kept — they are one eave with an extra point.
 """
 
 from __future__ import annotations
@@ -38,6 +46,8 @@ _EVENT_SPLIT = 0
 _EVENT_EDGE = 1
 _ALONG_TOL = 1e-5
 _DIST_TOL_M = 1e-4
+_PARALLEL_DIST_M = 5e-3
+"""Metres. Looser meet-test when a vertex's supports have just coincided."""
 _REGION_TOL = 1e-12
 
 
@@ -320,6 +330,14 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
             push_edge(v2.prev)
             push_all(v2)
 
+    drained = True
+    while drained:
+        drained = False
+        for v in verts:
+            if v.valid and finish_if_small(v):
+                drained = True
+                break
+
     return RawSkeleton(
         nodes=tuple(nodes), arcs=tuple(arcs), events=tuple(events), complete=True
     )
@@ -459,11 +477,9 @@ def _position_at(
     )
     if pos is not None:
         return pos
-    # Antiparallel supports coincide at one instant: the vertex sits on
-    # that collapsed line at its birth point and does not trace further.
-    if abs(t - vertex.birth) <= 1e-9 and _offsets_coincide(
-        vertex.left_edge, vertex.right_edge, t, lines, weights
-    ):
+    # Parallel supports coincide at one instant: the vertex sits on that
+    # collapsed line. Unique motion is undefined, so keep the birth point.
+    if _offsets_coincide(vertex.left_edge, vertex.right_edge, t, lines, weights):
         return (vertex.x, vertex.y)
     return None
 
@@ -473,10 +489,14 @@ def _offsets_coincide(
 ) -> bool:
     """True if original edges ``i`` and ``j`` have met as a single offset line."""
     a, b = lines[i], lines[j]
-    if a.nx * b.nx + a.ny * b.ny > -0.999:
-        return False
-    gap = abs(a.c + b.c)
-    return abs(gap - (weights[i] + weights[j]) * t) <= 1e-9
+    dot = a.nx * b.nx + a.ny * b.ny
+    if dot < -0.999:
+        gap = abs(a.c + b.c)
+        return abs(gap - (weights[i] + weights[j]) * t) <= 1e-9
+    if dot > 0.999:
+        # Same-direction parallels: the faster edge catches the slower.
+        return abs((a.c + weights[i] * t) - (b.c + weights[j] * t)) <= 1e-9
+    return False
 
 
 def _vertices_meet(
@@ -493,9 +513,14 @@ def _vertices_meet(
     pb = _position_at(vb, t, lines, weights)
     if pa is None or pb is None:
         return False
+    tol = _DIST_TOL_M
+    if _offsets_coincide(
+        va.left_edge, va.right_edge, t, lines, weights
+    ) or _offsets_coincide(vb.left_edge, vb.right_edge, t, lines, weights):
+        tol = _PARALLEL_DIST_M
     return (
-        math.hypot(pa[0] - px, pa[1] - py) < _DIST_TOL_M
-        and math.hypot(pb[0] - px, pb[1] - py) < _DIST_TOL_M
+        math.hypot(pa[0] - px, pa[1] - py) < tol
+        and math.hypot(pb[0] - px, pb[1] - py) < tol
     )
 
 

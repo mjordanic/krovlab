@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from typing import Literal, overload
 
 from krovlab._input import Pitch as Pitch
-from krovlab._input import check_footprint, check_holes, resolve_pitches
+from krovlab._input import (
+    check_adjacent_parallel_pitches,
+    check_footprint,
+    check_holes,
+    resolve_pitches,
+)
 from krovlab._skeleton import skeleton as _skeleton
 
 ArcKind = Literal["ridge", "hip", "eave", "valley"]
@@ -38,7 +43,8 @@ FailureKind = Literal[
 ``self_intersection`` — the footprint crosses itself.
 ``degenerate`` — a point, a line, coincident consecutive vertices, or no area.
 ``hole_intersects`` — a hole touches or crosses the outer ring.
-``unsupported`` — a valid hole, or differing per-edge pitches; not built yet.
+``unsupported`` — a valid hole (not built yet), or adjacent parallel
+    edges of differing pitch (no unique skeleton).
 ``incomplete`` — the wavefront stopped before the skeleton finished.
 """
 
@@ -276,7 +282,7 @@ def roof(
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
-    """Build a roof over a simple footprint at one uniform pitch.
+    """Build a roof over a simple footprint.
 
     Parameters
     ----------
@@ -291,7 +297,9 @@ def roof(
         Each value is degrees, a ``(rise, run)`` pair, ``"4:12"``, or
         ``"100%"``. After conversion the angle must satisfy
         ``0 < pitch <= 90``. A list of mixed spellings of the same slope
-        is the same as a single value; differing slopes are not built yet.
+        is the same as a single value. Differing pitches weight the
+        wavefront; adjacent parallel edges of differing pitch are
+        refused (no unique skeleton).
     holes
         Interior rings, or ``None``. A hole that touches or crosses the
         outer ring is refused by name. A valid hole is refused as
@@ -336,16 +344,23 @@ def roof(
     if hole_problem is not None:
         return hole_problem
     ring, edge_map = _ccw_ring(cleaned)
-    # Weight is the wavefront's plan speed. cot(pitch) so a steeper face
-    # moves inward more slowly. Converted here and nowhere else.
-    weight = _pitch_to_weight(parsed)
-    raw = _skeleton(ring, [weight] * len(ring))
+    # Caller pitches, permuted onto the CCW ring. Weight is the
+    # wavefront's plan speed: cot(pitch) so a steeper face moves inward
+    # more slowly. Converted here and nowhere else.
+    ring_pitches = [parsed[edge_map[i]] for i in range(len(ring))]
+    conflict = check_adjacent_parallel_pitches(ring, ring_pitches)
+    if conflict is not None:
+        return conflict
+    weights = [_pitch_to_weight(p) for p in ring_pitches]
+    raw = _skeleton(ring, weights)
     if not raw.complete:
         return Failure(
             kind="incomplete",
             reason="the wavefront did not finish; the roof could not be produced",
         )
-    built = _roof_from_skeleton(ring, parsed, raw.nodes, raw.arcs, edge_map, cleaned)
+    built = _roof_from_skeleton(
+        ring, ring_pitches, raw.nodes, raw.arcs, edge_map, cleaned
+    )
     if not events:
         return built
     log = tuple(
@@ -402,7 +417,7 @@ def _signed_area(pts: list[tuple[float, float]]) -> float:
 
 def _roof_from_skeleton(
     ring: list[tuple[float, float]],
-    pitch: float,
+    pitches: list[float],
     raw_nodes: tuple[tuple[float, float, float], ...],
     raw_arcs: tuple[tuple[int, int, int, int], ...],
     edge_map: list[int],
@@ -415,8 +430,12 @@ def _roof_from_skeleton(
     adj: list[dict[int, list[int]]] = [{} for _ in range(n)]
 
     def _link(face: int, a: int, b: int) -> None:
-        adj[face].setdefault(a, []).append(b)
-        adj[face].setdefault(b, []).append(a)
+        nbrs = adj[face].setdefault(a, [])
+        if b not in nbrs:
+            nbrs.append(b)
+        nbrs_b = adj[face].setdefault(b, [])
+        if a not in nbrs_b:
+            nbrs_b.append(a)
 
     arcs: list[Arc] = []
     for i in range(n):
@@ -435,16 +454,16 @@ def _roof_from_skeleton(
             Arc(start=a, end=b, kind=kind, length=_node_distance(nodes[a], nodes[b]))
         )
 
-    cos_pitch = math.cos(math.radians(pitch))
     faces: list[Face] = []
     for i in range(n):
         cycle = _walk_cycle(adj[i], i, (i + 1) % n)
         plan_area = abs(_signed_area([(nodes[j].x, nodes[j].y) for j in cycle]))
+        cos_pitch = math.cos(math.radians(pitches[i]))
         sloped_area = plan_area / cos_pitch if cos_pitch != 0.0 else plan_area
         faces.append(
             Face(
                 edge_index=edge_map[i],
-                pitch=pitch,
+                pitch=pitches[i],
                 plan_area=plan_area,
                 sloped_area=sloped_area,
                 node_indices=tuple(cycle),

@@ -1,8 +1,8 @@
 """Hypothesis strategies for footprints the library currently roofs.
 
-Widen :func:`footprints` in place as later tickets add holes and the rest.
-The invariant tests import this strategy and should not grow their own
-generators.
+Widen :func:`footprints` and :func:`roof_cases` in place as later tickets
+add holes and the rest. The invariant tests import these strategies and
+should not grow their own generators.
 """
 
 from __future__ import annotations
@@ -17,6 +17,16 @@ from shapely.geometry import Polygon  # type: ignore[import-untyped]
 PITCHES = st.floats(
     min_value=5.0,
     max_value=80.0,
+    allow_nan=False,
+    allow_infinity=False,
+    allow_subnormal=False,
+)
+
+# Per-edge lists stay in a tighter band. Extreme weight ratios on reflex
+# polygons (very flat vs steep, parallel catch-up) can stall the wavefront.
+PER_EDGE_PITCHES = st.floats(
+    min_value=20.0,
+    max_value=60.0,
     allow_nan=False,
     allow_infinity=False,
     allow_subnormal=False,
@@ -157,3 +167,25 @@ def footprints() -> st.SearchStrategy[list[tuple[float, float]]]:
     function, not the invariant tests that call it.
     """
     return st.one_of(convex_polygons(), l_polygons(), u_polygons())
+
+
+@st.composite
+def roof_cases(
+    draw: st.DrawFn,
+) -> tuple[list[tuple[float, float]], float | list[float]]:
+    """Uniform pitch on every supported footprint; per-edge on convex ones.
+
+    The list branch always differs on at least one edge, so drainage is
+    exercised against a steeper neighbour. Reflex polygons with differing
+    weights are covered by worked examples: some L/U parallel catch-ups
+    still stall the wavefront, so the harness does not generate that mix.
+    """
+    if draw(st.booleans()):
+        return draw(footprints()), draw(PITCHES)
+    footprint = draw(convex_polygons())
+    n = len(footprint)
+    pitches = [draw(PER_EDGE_PITCHES) for _ in range(n)]
+    if all(abs(p - pitches[0]) <= 1e-9 for p in pitches):
+        other = draw(PER_EDGE_PITCHES.filter(lambda p: abs(p - pitches[0]) > 1.0))
+        pitches[draw(st.integers(min_value=0, max_value=n - 1))] = other
+    return footprint, pitches

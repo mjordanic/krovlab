@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from krovlab import Arc, Face, Failure, Node, Roof, roof
+from krovlab import Arc, Face, Failure, Node, Pitch, Roof, roof
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 
@@ -156,6 +156,78 @@ def test_returned_roof_carries_no_weight() -> None:
     assert isinstance(result, Roof)
     dumped = str(result)
     assert "weight" not in dumped
+    mixed_pitches: list[Pitch] = [60.0, 45.0, 60.0, 45.0]
+    mixed = roof(SQUARE, mixed_pitches)
+    assert isinstance(mixed, Roof)
+    assert "weight" not in str(mixed)
+
+
+def test_uniform_pitch_list_matches_the_same_pitch_as_a_scalar() -> None:
+    as_scalar = roof(SQUARE, 45.0)
+    uniform: list[Pitch] = [45.0, 45.0, 45.0, 45.0]
+    as_list = roof(SQUARE, uniform)
+    assert isinstance(as_scalar, Roof)
+    assert isinstance(as_list, Roof)
+    assert as_scalar == as_list
+
+
+def test_each_face_carries_its_own_pitch_and_names_its_edge() -> None:
+    pitches: list[Pitch] = [60.0, 45.0, 30.0, 45.0]
+    result = roof(SQUARE, pitches)
+    assert isinstance(result, Roof)
+    by_edge = {face.edge_index: face for face in result.faces}
+    assert sorted(by_edge) == [0, 1, 2, 3]
+    for i, pitch in enumerate(pitches):
+        assert by_edge[i].pitch == pytest.approx(pitch)
+
+
+def test_clockwise_per_edge_pitches_follow_the_caller_edge_indices() -> None:
+    clockwise = list(reversed(SQUARE))
+    pitches: list[Pitch] = [60.0, 45.0, 30.0, 20.0]
+    result = roof(clockwise, pitches)
+    assert isinstance(result, Roof)
+    by_edge = {face.edge_index: face for face in result.faces}
+    for i, pitch in enumerate(pitches):
+        assert by_edge[i].pitch == pytest.approx(pitch)
+
+
+# Opposite sides 60°, adjacent sides 45°. East and west (weight 1) meet
+# first at t = 5 m; south and north (weight 1/√3) only reach y = 5/√3.
+SQUARE_ALT_PITCHES: list[Pitch] = [60.0, 45.0, 60.0, 45.0]
+
+
+def test_weighted_square_has_hand_computed_ridge() -> None:
+    result = roof(SQUARE, SQUARE_ALT_PITCHES)
+    assert isinstance(result, Roof)
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    assert len(ridges) == 1
+    ridge = ridges[0]
+    inset = 5.0 / math.sqrt(3.0)
+    assert ridge.length == pytest.approx(10.0 - 2.0 * inset)
+    ends = sorted(
+        (n.x, n.y, n.height)
+        for n in (result.nodes[ridge.start], result.nodes[ridge.end])
+    )
+    expected = sorted([(5.0, inset, 5.0), (5.0, 10.0 - inset, 5.0)])
+    for (gx, gy, gz), (ex, ey, ez) in zip(ends, expected, strict=True):
+        assert gx == pytest.approx(ex)
+        assert gy == pytest.approx(ey)
+        assert gz == pytest.approx(ez)
+    assert result.ridge_height == pytest.approx(5.0)
+    assert result.validity.is_terrain is True
+
+
+def test_steeper_face_has_the_larger_sloped_over_plan_excess() -> None:
+    result = roof(SQUARE, SQUARE_ALT_PITCHES)
+    assert isinstance(result, Roof)
+    by_edge = {face.edge_index: face for face in result.faces}
+    for face in result.faces:
+        assert face.sloped_area > face.plan_area
+    steep = by_edge[0].sloped_area / by_edge[0].plan_area
+    shallow = by_edge[1].sloped_area / by_edge[1].plan_area
+    assert steep == pytest.approx(1.0 / math.cos(math.radians(60.0)))
+    assert shallow == pytest.approx(1.0 / math.cos(math.radians(45.0)))
+    assert steep > shallow
 
 
 def test_core_imports_nothing_outside_the_standard_library() -> None:
@@ -190,6 +262,15 @@ def test_tie_breaking_rule_is_documented_next_to_the_queue() -> None:
     assert "split events before edge" in doc
     assert "event point" in doc
     assert "COLLOCATION_M" in doc
+
+
+def test_adjacent_parallel_weight_ambiguity_is_documented() -> None:
+    import krovlab._skeleton as wavefront
+
+    doc = wavefront.__doc__
+    assert doc is not None
+    assert "adjacent parallel" in doc.lower()
+    assert "differing" in doc.lower()
 
 
 def test_clockwise_square_preserves_caller_edge_indices() -> None:
@@ -249,6 +330,17 @@ def test_l_shape_at_uniform_pitch_has_exactly_one_valley() -> None:
     assert hips
     assert all(h.length > 0.0 for h in hips)
     assert result.validity.is_terrain is True
+
+
+def test_l_shape_with_per_edge_pitch_is_a_terrain_with_a_valley() -> None:
+    pitches: list[Pitch] = [45.0, 30.0, 45.0, 60.0, 45.0, 30.0]
+    result = roof(L_SHAPE, pitches)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 1
+    by_edge = {face.edge_index: face.pitch for face in result.faces}
+    assert by_edge == {i: pitches[i] for i in range(6)}
 
 
 T_SHAPE = [

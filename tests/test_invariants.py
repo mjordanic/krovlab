@@ -2,11 +2,14 @@
 
 Each test is one property. Later tickets widen the generator in
 ``tests/generation.py``; they should not copy these assertions.
+Per-edge pitch is drawn by :func:`generation.roof_cases`.
 """
+
+from typing import cast
 
 from hypothesis import given, settings
 
-from generation import PITCHES, footprints
+from generation import footprints, roof_cases
 from invariants import (
     arc_classification_matches_geometry,
     drainage_runs_to_each_faces_own_eave,
@@ -15,15 +18,19 @@ from invariants import (
     roof_is_a_terrain,
     sloped_area_is_at_least_plan_area,
 )
-from krovlab import Roof, Validity, roof
+from krovlab import Pitch, Roof, Validity, roof
+
+RoofCase = tuple[list[tuple[float, float]], float | list[float]]
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 
 _SETTINGS = settings(max_examples=40, deadline=None)
 
 
-def _built(footprint: list[tuple[float, float]], pitch: float) -> Roof:
-    result = roof(footprint, pitch)
+def _built(
+    footprint: list[tuple[float, float]], pitch: float | list[float]
+) -> Roof:
+    result = roof(footprint, cast(float | list[Pitch], pitch))
     assert isinstance(result, Roof), getattr(result, "reason", result)
     return result
 
@@ -50,63 +57,70 @@ def test_generator_produces_simple_polygons(
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_plan_areas_sum_to_the_footprint_area(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     built = _built(footprint, pitch)
     plan_areas_sum_to_footprint_area(built, footprint)
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_every_face_is_planar(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     built = _built(footprint, pitch)
     every_face_is_planar(built)
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_sloped_area_is_at_least_plan_area(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     sloped_area_is_at_least_plan_area(_built(footprint, pitch))
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_roof_is_a_terrain(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     built = _built(footprint, pitch)
     roof_is_a_terrain(built, footprint)
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_drainage_runs_to_each_faces_own_eave(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     built = _built(footprint, pitch)
     drainage_runs_to_each_faces_own_eave(built, footprint)
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_arc_classification_matches_geometry(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     built = _built(footprint, pitch)
     arc_classification_matches_geometry(built, footprint)
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_same_input_yields_byte_identical_roofs(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     first = _built(footprint, pitch)
     second = _built(footprint, pitch)
     assert first == second, (
@@ -115,10 +129,11 @@ def test_same_input_yields_byte_identical_roofs(
 
 
 @_SETTINGS
-@given(footprints(), PITCHES)
+@given(roof_cases())
 def test_generated_roofs_are_reported_valid(
-    footprint: list[tuple[float, float]], pitch: float
+    case: RoofCase,
 ) -> None:
+    footprint, pitch = case
     built = _built(footprint, pitch)
     assert built.validity.is_terrain is True, built.validity.reasons
 

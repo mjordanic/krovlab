@@ -7,7 +7,7 @@ winding flip are implementation.
 
 import pytest
 
-from krovlab import Failure, Roof, roof
+from krovlab import Failure, Pitch, Roof, roof
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 
@@ -109,6 +109,19 @@ def test_collinear_edges_that_leave_area_are_roofable() -> None:
     assert result.ridge_height == pytest.approx(3.0)
 
 
+def test_adjacent_parallel_edges_of_differing_pitch_are_refused() -> None:
+    # Collinear south eave split at the midpoint; the two halves disagree.
+    ring = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+    pitches: list[Pitch] = [45.0, 30.0, 45.0, 45.0, 45.0]
+    first = roof(ring, pitches)
+    second = roof(ring, pitches)
+    assert isinstance(first, Failure)
+    assert first == second
+    assert first.kind == "unsupported"
+    assert "parallel" in first.reason.lower()
+    assert "pitch" in first.reason.lower()
+
+
 def test_pitch_list_of_wrong_length_is_pitch_count_failure() -> None:
     result = roof(SQUARE, [45.0, 45.0, 45.0])
     assert isinstance(result, Failure)
@@ -123,11 +136,9 @@ def test_uniform_pitch_list_matching_edges_produces_a_roof() -> None:
     assert result.ridge_height == pytest.approx(5.0)
 
 
-def test_differing_pitch_list_is_unsupported() -> None:
+def test_differing_pitch_list_produces_a_roof() -> None:
     result = roof(SQUARE, [45.0, 30.0, 45.0, 45.0])
-    assert isinstance(result, Failure)
-    assert result.kind == "unsupported"
-    assert "per-edge" in result.reason.lower() or "pitch" in result.reason.lower()
+    assert isinstance(result, Roof)
 
 
 def test_hole_touching_outer_ring_is_hole_intersects() -> None:

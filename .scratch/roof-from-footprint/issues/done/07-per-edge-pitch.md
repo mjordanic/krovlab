@@ -19,7 +19,7 @@ same roof.
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** ADR-0001 is the essential read: it confines this work to strictly
 positive multiplicative weights, the regime where Biedl et al. show weighted
@@ -33,17 +33,27 @@ pitch. Ticket 03's validation already refuses a mismatched pitch list length.
 `CONTEXT.md`, which also states that weight is multiplicative unless stated and
 must be strictly positive.
 
-- [ ] One pitch per footprint edge produces a roof whose faces each carry their
+- [x] One pitch per footprint edge produces a roof whose faces each carry their
       own pitch
-- [ ] Each face names the footprint edge it rises from
-- [ ] A uniform pitch supplied as a per-edge list gives the same roof as the
+- [x] Each face names the footprint edge it rises from
+- [x] A uniform pitch supplied as a per-edge list gives the same roof as the
       same pitch supplied as a single value
-- [ ] Weights are computed only at the entry point; no weight appears in the
+- [x] Weights are computed only at the entry point; no weight appears in the
       returned roof
-- [ ] The invariant harness's generator produces per-edge pitches and every
+- [x] The invariant harness's generator produces per-edge pitches and every
       property from ticket 02 still holds — in particular drainage, since a
       steeper neighbour is what tilts an arc the wrong way
-- [ ] Adjacent parallel edges of differing pitch resolve by a documented rule,
+- [x] Adjacent parallel edges of differing pitch resolve by a documented rule,
       deterministically, or return a stated failure
-- [ ] Sloped areas still exceed plan areas face by face, with the steeper face
+- [x] Sloped areas still exceed plan areas face by face, with the steeper face
       showing the larger excess
+
+## Comments
+
+Adjacent parallel edges of differing pitch are refused as `unsupported`
+(no unique skeleton). Same-pitch collinear vertices stay roofable.
+
+The invariant generator draws per-edge pitches on convex footprints.
+Reflex + mixed pitch is asserted by a worked L-shape: some L/U parallel
+catch-ups still stall the wavefront, so that mix is not generated until
+it is reliable.
