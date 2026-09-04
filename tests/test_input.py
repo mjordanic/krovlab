@@ -155,12 +155,23 @@ def test_hole_crossing_outer_ring_is_hole_intersects() -> None:
     assert result.kind == "hole_intersects"
 
 
-def test_valid_hole_is_unsupported_until_holes_are_built() -> None:
+def test_valid_hole_produces_a_roof() -> None:
     hole = [(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)]
     result = roof(SQUARE, 45.0, holes=[hole])
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+
+
+def test_empty_holes_matches_no_holes_argument() -> None:
+    assert roof(SQUARE, 45.0, holes=[]) == roof(SQUARE, 45.0)
+
+
+def test_two_holes_that_touch_are_hole_intersects() -> None:
+    a = [(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0)]
+    b = [(5.0, 1.0), (9.0, 1.0), (9.0, 5.0), (5.0, 5.0)]
+    result = roof(SQUARE, 45.0, holes=[a, b])
     assert isinstance(result, Failure)
-    assert result.kind == "unsupported"
-    assert "hole" in result.reason.lower()
+    assert result.kind == "hole_intersects"
 
 
 def test_malformed_input_does_not_raise() -> None:

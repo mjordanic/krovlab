@@ -189,21 +189,23 @@ def check_footprint(footprint: object) -> list[tuple[float, float]] | Failure:
 
 def check_holes(
     holes: object, outer: list[tuple[float, float]]
-) -> Failure | None:
-    """Name a hole that touches, crosses, or is otherwise unusable.
+) -> list[list[tuple[float, float]]] | Failure:
+    """Return cleaned interior rings, or name why a hole is unusable.
 
-    A geometrically valid interior hole is ``unsupported`` until the holes
-    ticket roofs it. ``None`` or an empty list means no holes.
+    ``None`` or an empty list means no holes. A hole that touches or
+    crosses the outer ring, or another hole, is ``hole_intersects``.
+    Either winding is accepted; the caller orients rings for the wavefront.
     """
     if holes is None:
-        return None
+        return []
     if isinstance(holes, (str, bytes)):
         return _failure("degenerate", "holes must be a list of rings")
     if not isinstance(holes, Iterable):
         return _failure("degenerate", "holes must be a list of rings")
     rings_in = list(holes)
     if not rings_in:
-        return None
+        return []
+    cleaned: list[list[tuple[float, float]]] = []
     for i, hole in enumerate(rings_in):
         ring = _closed_simple_ring(hole, f"hole {i}")
         if not isinstance(ring, list):
@@ -218,7 +220,19 @@ def check_holes(
                 "degenerate",
                 f"hole {i} is not inside the footprint",
             )
-    return _failure("unsupported", "holes are not yet supported")
+        for j, other in enumerate(cleaned):
+            if _rings_touch_or_cross(other, ring):
+                return _failure(
+                    "hole_intersects",
+                    f"hole {i} touches or crosses hole {j}",
+                )
+            if _ring_inside(ring, other) or _ring_inside(other, ring):
+                return _failure(
+                    "degenerate",
+                    f"hole {i} overlaps hole {j}",
+                )
+        cleaned.append(ring)
+    return cleaned
 
 
 def _closed_simple_ring(

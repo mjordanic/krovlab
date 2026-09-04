@@ -8,11 +8,12 @@ The core has no third-party dependencies. It takes data and returns data.
 
 ## What it does today
 
-Simple footprints (convex, L, U). A square at one pitch becomes a pyramid
-of four triangular faces; a rectangle gets a ridge; an L-shape produces
-one valley. A different pitch per edge is accepted. Mixed pitch on an L
-or U can still come back `incomplete`. `krovlab.viz` draws a plan.
-Holes, gables and overhang are not built yet.
+Simple footprints (convex, L, U) and footprints with holes. A square at
+one pitch becomes a pyramid of four triangular faces; a rectangle gets a
+ridge; an L-shape produces one valley; a courtyard produces inward eaves
+and valleys where the two wavefronts meet. A different pitch per edge is
+accepted. Mixed pitch on an L or U can still come back `incomplete`.
+`krovlab.viz` draws a plan. Gables and overhang are not built yet.
 
 ## Install
 
@@ -36,6 +37,9 @@ from krovlab import Failure, Roof, roof, topology_hash
 
 footprint = [(0, 0), (10, 0), (10, 6), (0, 6)]  # metres, either winding
 result = roof(footprint, 45)                    # degrees
+
+# A courtyard is a second ring. Pitch lists cover outer edges then hole edges.
+courtyard = roof(footprint, 45, holes=[[(2, 2), (8, 2), (8, 4), (2, 4)]])
 
 if isinstance(result, Failure):
     print(result.kind, result.reason)   # branch on kind; show reason
@@ -61,10 +65,11 @@ roof(footprint, "1:1")       # same ratio as a string
 roof(footprint, "100%")      # percent    →  atan(1.00) = 45°
 ```
 
-A list is one value per footprint edge. The length must match. Differing
-pitches weight the wavefront so each face rises at its own pitch. Adjacent
-parallel edges of differing pitch are refused: that configuration has no
-unique straight skeleton.
+A list is one value per footprint edge. The length must match — outer
+ring first, then each hole in order. Differing pitches weight the
+wavefront so each face rises at its own pitch. Adjacent parallel edges
+of differing pitch are refused: that configuration has no unique
+straight skeleton.
 
 After conversion the angle must satisfy `0 < pitch <= 90`. Outside that
 range, or a list of the wrong length, you get a `Failure`, not an exception.
@@ -84,10 +89,12 @@ returned roof.
 | `validity` | Whether the roof is a terrain. `is_terrain` is true only when plan areas sum to the footprint, every face is planar, sampled plan points have one height, water drains to each face's own eave, and arc labels match the geometry. |
 
 Each face also splits area in two: `plan_area` (horizontal projection) and
-`sloped_area` (`plan_area / cos(pitch)`). Plan areas sum to the footprint area.
+`sloped_area` (`plan_area / cos(pitch)`). Plan areas sum to the footprint
+area with holes excluded.
 
 `Face.edge_index` `i` is the edge from `footprint[i]` to
-`footprint[(i + 1) % n]`, even if you passed the ring clockwise.
+`footprint[(i + 1) % n]` on the outer ring, then continues through each
+hole in order, even if you passed a ring clockwise.
 
 A `Roof` is checked when it is built. If `validity.is_terrain` is false,
 `validity.reasons` names the invariant that broke — so you find out from the
@@ -131,8 +138,8 @@ can show. Nothing the entry point accepts raises.
 | `pitch_count` | Pitch list length is not the number of footprint edges. |
 | `self_intersection` | The footprint crosses itself. |
 | `degenerate` | A point, a line, coincident consecutive vertices, or no area. |
-| `hole_intersects` | A hole touches or crosses the outer ring. |
-| `unsupported` | A valid hole (not built yet), or adjacent parallel edges of differing pitch. |
+| `hole_intersects` | A hole touches or crosses the outer ring, or another hole. |
+| `unsupported` | Adjacent parallel edges of differing pitch (no unique skeleton). |
 | `incomplete` | The wavefront stopped before the skeleton finished. |
 
 A closed-ring spelling (first point repeated at the end) is accepted. Either
@@ -146,6 +153,9 @@ A 10 m square at 45° has apex height 5 m and four faces of 25 m² plan /
 `25 / cos(45°)` sloped. A 10 x 6 m rectangle at 45° has a 4 m ridge at
 height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. A 10 m square with pitches
 `[60, 45, 60, 45]` has a 5 m ridge along `x = 5` of length `10 - 10/√3`.
+A 10 m square with a centred 4 m courtyard at 45° has ridge height 1.5 m
+and plan area 84 m²: four hips from the outer corners, four valleys from
+the courtyard corners, and a 7 m ridge square where the wavefronts meet.
 
 ## Notebooks
 
@@ -167,10 +177,10 @@ uv run ruff check src tests
 ```
 
 `tests/test_invariants.py` generates simple footprints (convex, L, U) and
-asserts the terrain invariants (areas, planarity, drainage, arc labels,
-determinism). Convex cases also draw a different pitch per edge. Later
-geometry tickets widen `tests/generation.py` rather than copying those
-assertions.
+rectangles with holes, and asserts the terrain invariants (areas, planarity,
+drainage, arc labels, determinism). Convex cases also draw a different
+pitch per edge. Later geometry tickets widen `tests/generation.py` rather
+than copying those assertions.
 
 ## Glossary
 

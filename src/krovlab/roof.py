@@ -42,9 +42,9 @@ FailureKind = Literal[
 ``pitch_count`` — a pitch list whose length is not the number of edges.
 ``self_intersection`` — the footprint crosses itself.
 ``degenerate`` — a point, a line, coincident consecutive vertices, or no area.
-``hole_intersects`` — a hole touches or crosses the outer ring.
-``unsupported`` — a valid hole (not built yet), or adjacent parallel
-    edges of differing pitch (no unique skeleton).
+``hole_intersects`` — a hole touches or crosses the outer ring, or another hole.
+``unsupported`` — adjacent parallel edges of differing pitch (no unique
+    skeleton).
 ``incomplete`` — the wavefront stopped before the skeleton finished.
 """
 
@@ -70,16 +70,18 @@ class Validity:
         faces: tuple[Face, ...],
         arcs: tuple[Arc, ...],
         footprint: list[tuple[float, float]],
+        holes: list[list[tuple[float, float]]] | None = None,
     ) -> Validity:
         """Run the terrain invariants on assembled roof data.
 
         :func:`roof` calls this before returning. A caller holding faces
         that did not come from ``roof`` can ask the same question without
-        reaching into the wavefront.
+        reaching into the wavefront. ``holes`` are subtracted from the
+        footprint area and from terrain sampling.
         """
         from krovlab._validity import assess as assess_geometry
 
-        return assess_geometry(nodes, faces, arcs, footprint)
+        return assess_geometry(nodes, faces, arcs, footprint, holes)
 
 
 @dataclass(frozen=True)
@@ -124,8 +126,9 @@ class Face:
     edge_index: int
     """Index of the caller's footprint edge this face rises from.
 
-    Edge ``i`` runs from ``footprint[i]`` to ``footprint[(i + 1) % n]``,
-    even if the ring was reversed internally to make it counter-clockwise.
+    Edge ``i`` runs from ``footprint[i]`` to ``footprint[(i + 1) % n]``
+    on the outer ring, then continues through each hole in order, even
+    if a ring was reversed internally to put the roofed region on the left.
     """
 
     pitch: float
@@ -175,7 +178,8 @@ class Event:
 
     kind: EventKind
     """``"edge"``: a wavefront edge vanished. ``"split"``: a reflex
-    vertex hit an opposite edge and the wavefront divided in two."""
+    vertex hit an opposite edge and the wavefront divided, or two
+    wavefronts merged (a hole meeting the outer ring)."""
 
     time: float
     """Height at which the event occurred, metres above the eave plane."""
@@ -282,7 +286,7 @@ def roof(
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
-    """Build a roof over a simple footprint.
+    """Build a roof over a footprint, including any holes.
 
     Parameters
     ----------
@@ -301,9 +305,10 @@ def roof(
         wavefront; adjacent parallel edges of differing pitch are
         refused (no unique skeleton).
     holes
-        Interior rings, or ``None``. A hole that touches or crosses the
-        outer ring is refused by name. A valid hole is refused as
-        unsupported until that ticket.
+        Interior rings the roof does not cover, or ``None``. Either
+        winding is accepted. A hole that touches or crosses the outer
+        ring, or another hole, is refused by name. Pitch lists are one
+        value per edge of the outer ring then each hole in order.
     events
         If true, return ``(Roof, events)`` so the processed wavefront
         events can be inspected in order. The roof itself is unchanged;
@@ -337,29 +342,36 @@ def roof(
     cleaned = check_footprint(footprint)
     if isinstance(cleaned, Failure):
         return cleaned
-    parsed = resolve_pitches(pitch, len(cleaned))
+    cleaned_holes = check_holes(holes, cleaned)
+    if isinstance(cleaned_holes, Failure):
+        return cleaned_holes
+    n_edges = len(cleaned) + sum(len(h) for h in cleaned_holes)
+    parsed = resolve_pitches(pitch, n_edges)
     if isinstance(parsed, Failure):
         return parsed
-    hole_problem = check_holes(holes, cleaned)
-    if hole_problem is not None:
-        return hole_problem
-    ring, edge_map = _ccw_ring(cleaned)
-    # Caller pitches, permuted onto the CCW ring. Weight is the
+    rings, edge_map = _oriented_rings(cleaned, cleaned_holes)
+    # Caller pitches, permuted onto the oriented rings. Weight is the
     # wavefront's plan speed: cot(pitch) so a steeper face moves inward
     # more slowly. Converted here and nowhere else.
-    ring_pitches = [parsed[edge_map[i]] for i in range(len(ring))]
-    conflict = check_adjacent_parallel_pitches(ring, ring_pitches)
-    if conflict is not None:
-        return conflict
+    ring_pitches = [parsed[edge_map[i]] for i in range(len(edge_map))]
+    offset = 0
+    for ring in rings:
+        m = len(ring)
+        conflict = check_adjacent_parallel_pitches(
+            ring, ring_pitches[offset : offset + m]
+        )
+        if conflict is not None:
+            return conflict
+        offset += m
     weights = [_pitch_to_weight(p) for p in ring_pitches]
-    raw = _skeleton(ring, weights)
+    raw = _skeleton(rings, weights)
     if not raw.complete:
         return Failure(
             kind="incomplete",
             reason="the wavefront did not finish; the roof could not be produced",
         )
     built = _roof_from_skeleton(
-        ring, ring_pitches, raw.nodes, raw.arcs, edge_map, cleaned
+        rings, ring_pitches, raw.nodes, raw.arcs, edge_map, cleaned, cleaned_holes
     )
     if not events:
         return built
@@ -386,22 +398,45 @@ def _pitch_to_weight(pitch: float) -> float:
     return 1.0 / math.tan(math.radians(pitch))
 
 
-def _ccw_ring(
-    footprint: list[tuple[float, float]],
+def _oriented_ring(
+    footprint: list[tuple[float, float]], *, clockwise: bool
 ) -> tuple[list[tuple[float, float]], list[int]]:
-    """Return a counter-clockwise ring and a map back to the caller's edges.
+    """Orient a ring and map skeleton edges back to the caller's order.
 
-    The skeleton always walks CCW (interior on the left). If the input is
-    clockwise we reverse it, but ``edge_map[i]`` still names the caller's
-    original edge so ``Face.edge_index`` matches the list they passed in.
+    The skeleton walks with the roofed region on the left: outer rings
+    counter-clockwise, holes clockwise. If the input winding disagrees
+    we reverse it, but ``edge_map[i]`` still names the caller's original
+    edge so ``Face.edge_index`` matches the list they passed in.
     """
     pts = list(footprint)
     n = len(pts)
     edge_map = list(range(n))
-    if _signed_area(pts) < 0.0:
+    area = _signed_area(pts)
+    needs_reverse = (area > 0.0) if clockwise else (area < 0.0)
+    if needs_reverse:
         pts = [pts[0], *reversed(pts[1:])]
         edge_map = [(n - 1 - i) % n for i in range(n)]
     return pts, edge_map
+
+
+def _oriented_rings(
+    outer: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+) -> tuple[list[list[tuple[float, float]]], list[int]]:
+    """Outer CCW then holes CW, with a concatenated caller edge map."""
+    rings: list[list[tuple[float, float]]] = []
+    edge_map: list[int] = []
+    caller_offset = 0
+    ring, emap = _oriented_ring(outer, clockwise=False)
+    rings.append(ring)
+    edge_map.extend(caller_offset + i for i in emap)
+    caller_offset += len(outer)
+    for hole in holes:
+        ring, emap = _oriented_ring(hole, clockwise=True)
+        rings.append(ring)
+        edge_map.extend(caller_offset + i for i in emap)
+        caller_offset += len(hole)
+    return rings, edge_map
 
 
 def _signed_area(pts: list[tuple[float, float]]) -> float:
@@ -415,17 +450,29 @@ def _signed_area(pts: list[tuple[float, float]]) -> float:
     return 0.5 * total
 
 
+def _next_indices(rings: list[list[tuple[float, float]]]) -> list[int]:
+    """Concatenated next-vertex index, wrapping inside each ring."""
+    next_idx: list[int] = []
+    for ring in rings:
+        origin = len(next_idx)
+        m = len(ring)
+        next_idx.extend(origin + (j + 1) % m for j in range(m))
+    return next_idx
+
+
 def _roof_from_skeleton(
-    ring: list[tuple[float, float]],
+    rings: list[list[tuple[float, float]]],
     pitches: list[float],
     raw_nodes: tuple[tuple[float, float, float], ...],
     raw_arcs: tuple[tuple[int, int, int, int], ...],
     edge_map: list[int],
     footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
 ) -> Roof:
     """Assemble a :class:`Roof` from the raw skeleton graph."""
     nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
-    n = len(ring)
+    next_idx = _next_indices(rings)
+    n = len(next_idx)
     # Per-face adjacency of node indices, used to walk each face cycle.
     adj: list[dict[int, list[int]]] = [{} for _ in range(n)]
 
@@ -439,7 +486,7 @@ def _roof_from_skeleton(
 
     arcs: list[Arc] = []
     for i in range(n):
-        a, b = i, (i + 1) % n
+        a, b = i, next_idx[i]
         _link(i, a, b)
         arcs.append(
             Arc(start=a, end=b, kind="eave", length=_node_distance(nodes[a], nodes[b]))
@@ -449,14 +496,14 @@ def _roof_from_skeleton(
     for a, b, face_a, face_b in raw_arcs:
         _link(face_a, a, b)
         _link(face_b, a, b)
-        kind = _classify_arc(nodes[a], nodes[b], ring, height_tol)
+        kind = _classify_arc(nodes[a], nodes[b], rings, height_tol)
         arcs.append(
             Arc(start=a, end=b, kind=kind, length=_node_distance(nodes[a], nodes[b]))
         )
 
     faces: list[Face] = []
     for i in range(n):
-        cycle = _walk_cycle(adj[i], i, (i + 1) % n)
+        cycle = _walk_cycle(adj[i], i, next_idx[i])
         plan_area = abs(_signed_area([(nodes[j].x, nodes[j].y) for j in cycle]))
         cos_pitch = math.cos(math.radians(pitches[i]))
         sloped_area = plan_area / cos_pitch if cos_pitch != 0.0 else plan_area
@@ -478,12 +525,15 @@ def _roof_from_skeleton(
         arcs=built_arcs,
         ridge_height=max(node.height for node in nodes),
         total_sloped_area=sum(face.sloped_area for face in faces),
-        validity=Validity.assess(nodes, built_faces, built_arcs, footprint),
+        validity=Validity.assess(nodes, built_faces, built_arcs, footprint, holes),
     )
 
 
 def _classify_arc(
-    a: Node, b: Node, ring: list[tuple[float, float]], height_tol: float
+    a: Node,
+    b: Node,
+    rings: list[list[tuple[float, float]]],
+    height_tol: float,
 ) -> ArcKind:
     """Ridge if level and above the eave; hip/valley from the eave-end corner."""
     if min(a.height, b.height) > height_tol and abs(a.height - b.height) <= height_tol:
@@ -491,16 +541,22 @@ def _classify_arc(
     for end in (a, b):
         if end.height > height_tol:
             continue
-        corner = min(
-            range(len(ring)),
-            key=lambda i: math.hypot(ring[i][0] - end.x, ring[i][1] - end.y),
-        )
-        return "hip" if _ring_vertex_is_convex(ring, corner) else "valley"
+        best_ring = rings[0]
+        best_corner = 0
+        best_dist = float("inf")
+        for ring in rings:
+            for i, (x, y) in enumerate(ring):
+                dist = math.hypot(x - end.x, y - end.y)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_ring = ring
+                    best_corner = i
+        return "hip" if _ring_vertex_is_convex(best_ring, best_corner) else "valley"
     return "hip"
 
 
 def _ring_vertex_is_convex(ring: list[tuple[float, float]], index: int) -> bool:
-    """True if the CCW ring turns left at ``index``."""
+    """True if the ring turns toward the roofed region (left) at ``index``."""
     n = len(ring)
     ax, ay = ring[(index - 1) % n]
     bx, by = ring[index]

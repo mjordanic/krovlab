@@ -2,7 +2,7 @@
 
 Each test is one property. Later tickets widen the generator in
 ``tests/generation.py``; they should not copy these assertions.
-Per-edge pitch is drawn by :func:`generation.roof_cases`.
+Per-edge pitch is drawn by :func:`generation.roof_cases`. Holes are too.
 """
 
 from typing import cast
@@ -20,7 +20,11 @@ from invariants import (
 )
 from krovlab import Pitch, Roof, Validity, roof
 
-RoofCase = tuple[list[tuple[float, float]], float | list[float]]
+RoofCase = tuple[
+    list[tuple[float, float]],
+    float | list[float],
+    list[list[tuple[float, float]]],
+]
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 
@@ -28,9 +32,15 @@ _SETTINGS = settings(max_examples=40, deadline=None)
 
 
 def _built(
-    footprint: list[tuple[float, float]], pitch: float | list[float]
+    footprint: list[tuple[float, float]],
+    pitch: float | list[float],
+    holes: list[list[tuple[float, float]]],
 ) -> Roof:
-    result = roof(footprint, cast(float | list[Pitch], pitch))
+    result = roof(
+        footprint,
+        cast(float | list[Pitch], pitch),
+        holes=holes or None,
+    )
     assert isinstance(result, Roof), getattr(result, "reason", result)
     return result
 
@@ -61,9 +71,9 @@ def test_generator_produces_simple_polygons(
 def test_plan_areas_sum_to_the_footprint_area(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    built = _built(footprint, pitch)
-    plan_areas_sum_to_footprint_area(built, footprint)
+    footprint, pitch, holes = case
+    built = _built(footprint, pitch, holes)
+    plan_areas_sum_to_footprint_area(built, footprint, holes)
 
 
 @_SETTINGS
@@ -71,8 +81,8 @@ def test_plan_areas_sum_to_the_footprint_area(
 def test_every_face_is_planar(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    built = _built(footprint, pitch)
+    footprint, pitch, holes = case
+    built = _built(footprint, pitch, holes)
     every_face_is_planar(built)
 
 
@@ -81,8 +91,8 @@ def test_every_face_is_planar(
 def test_sloped_area_is_at_least_plan_area(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    sloped_area_is_at_least_plan_area(_built(footprint, pitch))
+    footprint, pitch, holes = case
+    sloped_area_is_at_least_plan_area(_built(footprint, pitch, holes))
 
 
 @_SETTINGS
@@ -90,9 +100,9 @@ def test_sloped_area_is_at_least_plan_area(
 def test_roof_is_a_terrain(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    built = _built(footprint, pitch)
-    roof_is_a_terrain(built, footprint)
+    footprint, pitch, holes = case
+    built = _built(footprint, pitch, holes)
+    roof_is_a_terrain(built, footprint, holes)
 
 
 @_SETTINGS
@@ -100,9 +110,9 @@ def test_roof_is_a_terrain(
 def test_drainage_runs_to_each_faces_own_eave(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    built = _built(footprint, pitch)
-    drainage_runs_to_each_faces_own_eave(built, footprint)
+    footprint, pitch, holes = case
+    built = _built(footprint, pitch, holes)
+    drainage_runs_to_each_faces_own_eave(built, footprint, holes)
 
 
 @_SETTINGS
@@ -110,9 +120,9 @@ def test_drainage_runs_to_each_faces_own_eave(
 def test_arc_classification_matches_geometry(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    built = _built(footprint, pitch)
-    arc_classification_matches_geometry(built, footprint)
+    footprint, pitch, holes = case
+    built = _built(footprint, pitch, holes)
+    arc_classification_matches_geometry(built, footprint, holes)
 
 
 @_SETTINGS
@@ -120,9 +130,9 @@ def test_arc_classification_matches_geometry(
 def test_same_input_yields_byte_identical_roofs(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    first = _built(footprint, pitch)
-    second = _built(footprint, pitch)
+    footprint, pitch, holes = case
+    first = _built(footprint, pitch, holes)
+    second = _built(footprint, pitch, holes)
     assert first == second, (
         "same input yields a byte-identical roof: two runs of roof() differed"
     )
@@ -133,15 +143,15 @@ def test_same_input_yields_byte_identical_roofs(
 def test_generated_roofs_are_reported_valid(
     case: RoofCase,
 ) -> None:
-    footprint, pitch = case
-    built = _built(footprint, pitch)
+    footprint, pitch, holes = case
+    built = _built(footprint, pitch, holes)
     assert built.validity.is_terrain is True, built.validity.reasons
 
 
 def test_validity_reports_the_property_that_broke() -> None:
     from dataclasses import replace
 
-    built = _built(SQUARE, 45.0)
+    built = _built(SQUARE, 45.0, [])
     broken_face = replace(built.faces[0], plan_area=0.0)
     broken_faces = (broken_face, *built.faces[1:])
     validity = Validity.assess(built.nodes, broken_faces, built.arcs, SQUARE)

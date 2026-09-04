@@ -24,17 +24,19 @@ def assess(
     faces: tuple[Face, ...],
     arcs: tuple[Arc, ...],
     footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]] | None = None,
 ) -> Validity:
     """Return the validity of a roof assembled from ``nodes`` / ``faces`` / ``arcs``."""
     from krovlab.roof import Validity
 
+    hole_rings = holes or []
     reasons: list[str] = []
-    reasons.extend(_plan_area_reasons(nodes, faces, footprint))
+    reasons.extend(_plan_area_reasons(nodes, faces, footprint, hole_rings))
     reasons.extend(_planar_reasons(nodes, faces))
     reasons.extend(_sloped_reasons(faces))
-    reasons.extend(_terrain_reasons(nodes, faces, footprint))
-    reasons.extend(_drainage_reasons(nodes, faces, footprint))
-    reasons.extend(_arc_reasons(nodes, arcs, footprint))
+    reasons.extend(_terrain_reasons(nodes, faces, footprint, hole_rings))
+    reasons.extend(_drainage_reasons(nodes, faces, footprint, hole_rings))
+    reasons.extend(_arc_reasons(nodes, arcs, footprint, hole_rings))
     return Validity(is_terrain=not reasons, reasons=tuple(reasons))
 
 
@@ -49,8 +51,9 @@ def _plan_area_reasons(
     nodes: tuple[Node, ...],
     faces: tuple[Face, ...],
     footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
 ) -> list[str]:
-    footprint_area = abs(_area(footprint))
+    footprint_area = abs(_area(footprint)) - sum(abs(_area(h)) for h in holes)
     total = sum(face.plan_area for face in faces)
     if not math.isclose(total, footprint_area, rel_tol=0.0, abs_tol=AREA_TOL):
         return [
@@ -190,6 +193,18 @@ def _plane_height(
     return origin[2] - (nx * (x - origin[0]) + ny * (y - origin[1])) / nz
 
 
+def _in_footprint(
+    x: float,
+    y: float,
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+) -> bool:
+    """True if the point is inside the outer ring and outside every hole."""
+    if not _point_in_ring(x, y, footprint):
+        return False
+    return all(not _point_in_ring(x, y, hole) for hole in holes)
+
+
 def _centroid(pts: list[tuple[float, float]]) -> tuple[float, float]:
     """Polygon centroid; falls back to the vertex mean if area is ~0."""
     n = len(pts)
@@ -211,10 +226,31 @@ def _centroid(pts: list[tuple[float, float]]) -> tuple[float, float]:
     return cx / (6.0 * a), cy / (6.0 * a)
 
 
+def _caller_rings(
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    return [footprint, *holes]
+
+
+def _edge_endpoints(
+    rings: list[list[tuple[float, float]]], edge_index: int
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Caller-edge endpoints. Edges are outer first, then each hole."""
+    remaining = edge_index
+    for ring in rings:
+        n = len(ring)
+        if remaining < n:
+            return ring[remaining], ring[(remaining + 1) % n]
+        remaining -= n
+    raise IndexError(f"edge_index {edge_index} is past the footprint edges")
+
+
 def _terrain_reasons(
     nodes: tuple[Node, ...],
     faces: tuple[Face, ...],
     footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
 ) -> list[str]:
     xs = [p[0] for p in footprint]
     ys = [p[1] for p in footprint]
@@ -226,11 +262,18 @@ def _terrain_reasons(
         for j in range(grid):
             x = minx + (i + 0.5) / grid * (maxx - minx)
             y = miny + (j + 0.5) / grid * (maxy - miny)
-            if _point_in_ring(x, y, footprint):
+            if _in_footprint(x, y, footprint, holes):
                 samples.append((x, y))
     cx, cy = _centroid(footprint)
-    if _point_in_ring(cx, cy, footprint):
+    if _in_footprint(cx, cy, footprint, holes):
         samples.append((cx, cy))
+    for face in faces:
+        ring = [(nodes[i].x, nodes[i].y) for i in face.node_indices]
+        if len(ring) < 3:
+            continue
+        fx, fy = _centroid(ring)
+        if _in_footprint(fx, fy, footprint, holes):
+            samples.append((fx, fy))
     if not samples:
         return ["roof is a terrain: no sample points landed inside the footprint"]
     reasons: list[str] = []
@@ -258,9 +301,10 @@ def _drainage_reasons(
     nodes: tuple[Node, ...],
     faces: tuple[Face, ...],
     footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
 ) -> list[str]:
     """Steepest descent on each face must point toward that face's own eave."""
-    n = len(footprint)
+    rings = _caller_rings(footprint, holes)
     reasons: list[str] = []
     for face in faces:
         normal = _face_normal(nodes, face)
@@ -277,8 +321,7 @@ def _drainage_reasons(
             continue
         # z = z0 - (nx(x-x0)+ny(y-y0))/nz  ⇒  grad(z) = (-nx/nz, -ny/nz)
         grad_x, grad_y = -nx / nz, -ny / nz
-        a = footprint[face.edge_index]
-        b = footprint[(face.edge_index + 1) % n]
+        a, b = _edge_endpoints(rings, face.edge_index)
         mx, my = 0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])
         pts = [nodes[i] for i in face.node_indices]
         cx = sum(p.x for p in pts) / len(pts)
@@ -309,19 +352,30 @@ def _vertex_is_convex(
     return cross > 0.0 if ccw else cross < 0.0
 
 
-def _closest_vertex(footprint: list[tuple[float, float]], x: float, y: float) -> int:
-    return min(
-        range(len(footprint)),
-        key=lambda i: math.hypot(footprint[i][0] - x, footprint[i][1] - y),
-    )
+def _closest_corner(
+    rings: list[list[tuple[float, float]]], x: float, y: float
+) -> tuple[int, int]:
+    """Return (ring_index, vertex_index) of the nearest footprint corner."""
+    best_ring = 0
+    best_vertex = 0
+    best_dist = float("inf")
+    for ri, ring in enumerate(rings):
+        for i, (vx, vy) in enumerate(ring):
+            dist = math.hypot(vx - x, vy - y)
+            if dist < best_dist:
+                best_dist = dist
+                best_ring = ri
+                best_vertex = i
+    return best_ring, best_vertex
 
 
 def _arc_reasons(
     nodes: tuple[Node, ...],
     arcs: tuple[Arc, ...],
     footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
 ) -> list[str]:
-    ccw = _area(footprint) > 0.0
+    rings = _caller_rings(footprint, holes)
     reasons: list[str] = []
     for arc in arcs:
         a, b = nodes[arc.start], nodes[arc.end]
@@ -354,15 +408,20 @@ def _arc_reasons(
             for end in (a, b):
                 if end.height > HEIGHT_TOL_M:
                     continue
-                corner = _closest_vertex(footprint, end.x, end.y)
-                vx, vy = footprint[corner]
+                ri, corner = _closest_corner(rings, end.x, end.y)
+                ring = rings[ri]
+                vx, vy = ring[corner]
                 if math.hypot(end.x - vx, end.y - vy) > HEIGHT_TOL_M * 10:
                     reasons.append(
                         "arc classification matches geometry: "
                         f"{arc.kind} meets the eave away from a footprint corner"
                     )
                     continue
-                convex = _vertex_is_convex(footprint, corner, ccw)
+                ccw = _area(ring) > 0.0
+                convex = _vertex_is_convex(ring, corner, ccw)
+                # A convex hole-polygon corner is reflex for the roofed region.
+                if ri > 0:
+                    convex = not convex
                 if arc.kind == "hip" and not convex:
                     reasons.append(
                         "arc classification matches geometry: "

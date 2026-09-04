@@ -15,7 +15,7 @@ meet and merge — the mirror image of the split events from ticket 06.
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** `CONTEXT.md` defines `hole` as an interior ring the roof does not
 cover and is explicit that a footprint with a hole is one footprint. Ticket 02's
@@ -27,13 +27,27 @@ that touches or crosses the outer ring, so this ticket can assume disjoint
 rings; if that refusal turns out to be wrong, say so rather than working around
 it. The feature PRD's degenerate-input list names a hole touching the outline.
 
-- [ ] A rectangular footprint with a rectangular hole produces a valid roof
-- [ ] Plan areas sum to the footprint area less the hole area
-- [ ] Arcs around the hole are classified and measured like any others
-- [ ] Multiple holes work
-- [ ] The invariant harness's generator produces footprints with holes and every
+- [x] A rectangular footprint with a rectangular hole produces a valid roof
+- [x] Plan areas sum to the footprint area less the hole area
+- [x] Arcs around the hole are classified and measured like any others
+- [x] Multiple holes work
+- [x] The invariant harness's generator produces footprints with holes and every
       property from ticket 02 still holds, drainage included — water in a
       courtyard roof drains to the courtyard's own eaves
-- [ ] A hole large enough that the roof cannot close produces a stated failure,
+- [x] A hole large enough that the roof cannot close produces a stated failure,
       not an exception
-- [ ] Holes work together with per-edge pitch from ticket 07
+- [x] Holes work together with per-edge pitch from ticket 07
+
+## Comments
+
+Hole rings are oriented clockwise so the roofed region stays on the left of
+every edge. A merge is the same pointer surgery as a split (logged as
+`split`); leftover wavefront vertices on a multi-ring skeleton are
+`incomplete`. Pitch lists are concatenated: outer edges, then each hole in
+order. Ticket 03's `hole_intersects` refusal still holds, and now also
+covers holes that touch each other.
+
+A 1 cm courtyard strip in a 10 m square still roofs (ridge 5 mm, plan area
+matches). `incomplete` is reserved for a wavefront that stalls with leftover
+vertices on a multi-ring skeleton. Nested holes that do not touch are
+`degenerate`.

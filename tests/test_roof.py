@@ -473,3 +473,112 @@ def test_notched_rectangle_event_log_records_a_split() -> None:
     assert any(event.kind == "split" for event in events)
     times = [event.time for event in events]
     assert times == sorted(times)
+
+
+# 10 m square, 4 m courtyard centred. At 45° both wavefronts move at
+# 1 m/m of height, so they meet halfway across the 3 m strip: ridge 1.5 m.
+# Plan area is 100 - 16 = 84 m2, eight faces (four outer, four inward).
+COURTYARD_HOLE = [(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)]
+
+
+def test_rectangular_footprint_with_rectangular_hole_is_a_valid_roof() -> None:
+    result = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE])
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert result.ridge_height == pytest.approx(1.5)
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(84.0)
+    assert len(result.faces) == 8
+
+
+def test_courtyard_arcs_are_classified_and_measured() -> None:
+    result = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE])
+    assert isinstance(result, Roof)
+    by_kind: dict[str, list[float]] = {"ridge": [], "hip": [], "valley": [], "eave": []}
+    for arc in result.arcs:
+        assert arc.length > 0.0
+        by_kind[arc.kind].append(arc.length)
+    # Four outer eaves of 10 m, four courtyard eaves of 4 m.
+    assert sorted(by_kind["eave"]) == pytest.approx(
+        [4.0, 4.0, 4.0, 4.0, 10.0, 10.0, 10.0, 10.0]
+    )
+    # Ridge square of side 7 m where the two wavefronts meet.
+    assert by_kind["ridge"] == pytest.approx([7.0, 7.0, 7.0, 7.0])
+    hip_3d = 1.5 * math.sqrt(3.0)
+    assert by_kind["hip"] == pytest.approx([hip_3d, hip_3d, hip_3d, hip_3d])
+    assert by_kind["valley"] == pytest.approx([hip_3d, hip_3d, hip_3d, hip_3d])
+    valley_eaves = [
+        result.nodes[end]
+        for arc in result.arcs
+        if arc.kind == "valley"
+        for end in (arc.start, arc.end)
+        if result.nodes[end].height <= 1e-9
+    ]
+    hole_corners = {(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)}
+    got = {(round(n.x, 9), round(n.y, 9)) for n in valley_eaves}
+    assert got == hole_corners
+
+
+TWO_HOLES = [
+    [(1.5, 1.5), (4.0, 1.5), (4.0, 4.0), (1.5, 4.0)],
+    [(6.0, 6.0), (8.5, 6.0), (8.5, 8.5), (6.0, 8.5)],
+]
+
+
+def test_two_holes_produce_a_valid_roof() -> None:
+    result = roof(SQUARE, 45.0, holes=TWO_HOLES)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(
+        100.0 - 2 * 6.25
+    )
+    assert len(result.faces) == 12
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 8
+    assert all(v.length > 0.0 for v in valleys)
+
+
+def test_clockwise_hole_matches_counterclockwise_hole() -> None:
+    ccw = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE])
+    cw = roof(SQUARE, 45.0, holes=[list(reversed(COURTYARD_HOLE))])
+    assert isinstance(ccw, Roof)
+    assert isinstance(cw, Roof)
+    assert ccw.ridge_height == pytest.approx(cw.ridge_height)
+    assert sum(f.plan_area for f in ccw.faces) == pytest.approx(
+        sum(f.plan_area for f in cw.faces)
+    )
+
+
+def test_holes_work_with_per_edge_pitch() -> None:
+    # Outer south 60°, courtyard south 30°, the rest 45°. Concatenated
+    # pitch list is outer edges then hole edges.
+    pitches: list[Pitch] = [60.0, 45.0, 45.0, 45.0, 30.0, 45.0, 45.0, 45.0]
+    result = roof(SQUARE, pitches, holes=[COURTYARD_HOLE])
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    by_edge = {face.edge_index: face.pitch for face in result.faces}
+    assert by_edge == {i: pitches[i] for i in range(8)}
+    hole_faces = [face for face in result.faces if face.edge_index >= 4]
+    assert hole_faces
+    assert all(face.plan_area > 0.0 for face in hole_faces)
+
+
+def test_pitch_list_for_a_holed_footprint_must_cover_every_edge() -> None:
+    result = roof(SQUARE, [45.0, 45.0, 45.0, 45.0], holes=[COURTYARD_HOLE])
+    assert isinstance(result, Failure)
+    assert result.kind == "pitch_count"
+
+
+def test_a_hole_that_cannot_close_is_a_stated_failure() -> None:
+    # A 1 cm courtyard strip still roofs (ridge 5 mm). If the wavefront
+    # stalls the result is Failure(incomplete), never an exception.
+    huge = [(0.01, 0.01), (9.99, 0.01), (9.99, 9.99), (0.01, 9.99)]
+    result = roof(SQUARE, 45.0, holes=[huge])
+    assert isinstance(result, (Roof, Failure))
+    if isinstance(result, Failure):
+        assert result.kind == "incomplete"
+        assert result.reason
+    else:
+        assert sum(face.plan_area for face in result.faces) == pytest.approx(
+            100.0 - 9.98 * 9.98
+        )
+        assert result.ridge_height == pytest.approx(0.005)

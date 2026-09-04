@@ -31,6 +31,13 @@ no unique weighted skeleton if their weights differ: the two offset
 lines stay parallel and never meet. The public entry point refuses that
 input rather than picking an arbitrary answer. Same-weight collinear
 vertices are kept — they are one eave with an extra point.
+
+Holes
+-----
+Each hole is a second LAV, oriented clockwise so the roofed region stays
+on the left. A reflex vertex hitting an edge of a *different* LAV merges
+the two wavefronts (the mirror of a split). The pointer surgery is the
+same as a split; only the cycle count goes 2→1 instead of 1→2.
 """
 
 from __future__ import annotations
@@ -125,26 +132,45 @@ class RawSkeleton:
     complete: bool = True
 
 
-def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkeleton:
-    """Grow the straight skeleton of a counter-clockwise simple ring.
+def skeleton(
+    rings: list[list[tuple[float, float]]],
+    weights: list[float],
+) -> RawSkeleton:
+    """Grow the straight skeleton of one or more oriented rings.
 
-    ``weights[i]`` is the plan speed of edge ``i``. Event time equals
-    height because the wavefront rises at unit rate as it moves in.
-    Reflex vertices emit split events; convex footprints never do.
+    The first ring is the outer footprint, counter-clockwise. Further
+    rings are holes, clockwise, so the roofed region stays to the left
+    of every edge. ``weights[i]`` is the plan speed of concatenated
+    edge ``i``. Each ring is its own LAV; a reflex vertex hitting an
+    edge of another LAV merges the two wavefronts — the same pointer
+    surgery as a split, 2→1 cycles instead of 1→2.
+
+    Event time equals height because the wavefront rises at unit rate
+    as it moves in.
     """
-    n = len(ring)
-    lines = [_supporting_line(ring[i], ring[(i + 1) % n]) for i in range(n)]
-    nodes: list[tuple[float, float, float]] = [(p[0], p[1], 0.0) for p in ring]
+    pts: list[tuple[float, float]] = []
+    next_idx: list[int] = []
+    for ring in rings:
+        origin = len(pts)
+        m = len(ring)
+        pts.extend(ring)
+        next_idx.extend(origin + (j + 1) % m for j in range(m))
+    n = len(pts)
+    prev_of = [0] * n
+    for i, nxt in enumerate(next_idx):
+        prev_of[nxt] = i
+    lines = [_supporting_line(pts[i], pts[next_idx[i]]) for i in range(n)]
+    nodes: list[tuple[float, float, float]] = [(p[0], p[1], 0.0) for p in pts]
     arcs: list[tuple[int, int, int, int]] = []
     events: list[RawEvent] = []
-    bisectors = _original_bisectors(ring, lines, weights)
+    bisectors = _original_bisectors(prev_of, lines, weights)
 
     verts = [
-        _Vertex(p[0], p[1], (i - 1) % n, i, i, birth=0.0) for i, p in enumerate(ring)
+        _Vertex(p[0], p[1], prev_of[i], i, i, birth=0.0) for i, p in enumerate(pts)
     ]
     for i, v in enumerate(verts):
-        v.prev = verts[(i - 1) % n]
-        v.next = verts[(i + 1) % n]
+        v.prev = verts[prev_of[i]]
+        v.next = verts[next_idx[i]]
 
     heap: list[
         tuple[float, int, float, float, float, float, int, _Vertex, int]
@@ -179,7 +205,9 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
         if not _is_reflex(vertex, lines):
             return
         for opp in range(n):
-            cand = _split_candidate(vertex, opp, lines, weights, ring, bisectors)
+            cand = _split_candidate(
+                vertex, opp, lines, weights, pts, next_idx, bisectors
+            )
             if cand is None:
                 continue
             t, px, py = cand
@@ -280,7 +308,9 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
                 push_all(nv)
             continue
 
-        cand = _split_candidate(va, edge_index, lines, weights, ring, bisectors)
+        cand = _split_candidate(
+            va, edge_index, lines, weights, pts, next_idx, bisectors
+        )
         if cand is None:
             continue
         t2, px, py = cand
@@ -338,8 +368,13 @@ def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkelet
                 drained = True
                 break
 
+    leftover = any(v.valid for v in verts)
+    complete = not leftover if len(rings) > 1 else True
     return RawSkeleton(
-        nodes=tuple(nodes), arcs=tuple(arcs), events=tuple(events), complete=True
+        nodes=tuple(nodes),
+        arcs=tuple(arcs),
+        events=tuple(events),
+        complete=complete,
     )
 
 
@@ -360,16 +395,17 @@ def _is_reflex(vertex: _Vertex, lines: list[_Line]) -> bool:
 
 
 def _original_bisectors(
-    ring: list[tuple[float, float]], lines: list[_Line], weights: list[float]
+    prev_of: list[int], lines: list[_Line], weights: list[float]
 ) -> list[tuple[float, float]]:
     """Unit direction each original vertex moves as the wavefront advances."""
-    n = len(ring)
+    n = len(prev_of)
     out: list[tuple[float, float]] = []
-    for i, _p in enumerate(ring):
+    for i in range(n):
+        left = prev_of[i]
         vel = _solve2(
-            lines[(i - 1) % n].nx,
-            lines[(i - 1) % n].ny,
-            weights[(i - 1) % n],
+            lines[left].nx,
+            lines[left].ny,
+            weights[left],
             lines[i].nx,
             lines[i].ny,
             weights[i],
@@ -386,7 +422,8 @@ def _in_felkel_region(
     px: float,
     py: float,
     edge_i: int,
-    ring: list[tuple[float, float]],
+    pts: list[tuple[float, float]],
+    next_idx: list[int],
     bisectors: list[tuple[float, float]],
 ) -> bool:
     """True if ``(px, py)`` lies in the opposite edge's influence region.
@@ -396,16 +433,15 @@ def _in_felkel_region(
     that rejects a bisector hitting the supporting line *behind* the edge
     or in a neighbour's region.
     """
-    n = len(ring)
-    a = ring[edge_i]
-    b = ring[(edge_i + 1) % n]
+    a = pts[edge_i]
+    b = pts[next_idx[edge_i]]
     ex, ey = b[0] - a[0], b[1] - a[1]
     if ex * (py - a[1]) - ey * (px - a[0]) <= _REGION_TOL:
         return False
     ldx, ldy = bisectors[edge_i]
     if ldx * (py - a[1]) - ldy * (px - a[0]) >= _REGION_TOL:
         return False
-    rdx, rdy = bisectors[(edge_i + 1) % n]
+    rdx, rdy = bisectors[next_idx[edge_i]]
     return rdx * (py - b[1]) - rdy * (px - b[0]) > -_REGION_TOL
 
 
@@ -414,7 +450,8 @@ def _split_candidate(
     opp: int,
     lines: list[_Line],
     weights: list[float],
-    ring: list[tuple[float, float]],
+    pts: list[tuple[float, float]],
+    next_idx: list[int],
     bisectors: list[tuple[float, float]],
 ) -> tuple[float, float, float] | None:
     """Time and point at which ``vertex`` hits original edge ``opp``, if ever."""
@@ -435,7 +472,7 @@ def _split_candidate(
         return None
     if t < 0.0:
         t = 0.0
-    if not _in_felkel_region(px, py, opp, ring, bisectors):
+    if not _in_felkel_region(px, py, opp, pts, next_idx, bisectors):
         return None
     return t, px, py
 

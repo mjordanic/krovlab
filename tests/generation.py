@@ -1,7 +1,7 @@
 """Hypothesis strategies for footprints the library currently roofs.
 
 Widen :func:`footprints` and :func:`roof_cases` in place as later tickets
-add holes and the rest. The invariant tests import these strategies and
+add gables and the rest. The invariant tests import these strategies and
 should not grow their own generators.
 """
 
@@ -163,29 +163,59 @@ def footprints() -> st.SearchStrategy[list[tuple[float, float]]]:
     Simple polygons, including L and U shapes with reflex corners.
     T-shapes are covered by worked examples rather than generation:
     their two reflex corners often event at the same instant, which is
-    pitch-sensitive. Later tickets add holes. Change the body of this
-    function, not the invariant tests that call it.
+    pitch-sensitive. Holes are drawn by :func:`roof_cases`, not here —
+    this strategy stays a single ring so polygon checks stay simple.
     """
     return st.one_of(convex_polygons(), l_polygons(), u_polygons())
 
 
 @st.composite
+def rectangle_with_hole(
+    draw: st.DrawFn,
+) -> tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]:
+    """Axis-aligned rectangle with a rectangular courtyard, both thick enough."""
+    w = draw(st.floats(min_value=12.0, max_value=18.0, allow_nan=False))
+    h = draw(st.floats(min_value=12.0, max_value=18.0, allow_nan=False))
+    inset = draw(st.floats(min_value=2.5, max_value=4.0, allow_nan=False))
+    hole_w = w - 2.0 * inset
+    hole_h = h - 2.0 * inset
+    assume(hole_w >= 2.5 and hole_h >= 2.5)
+    pose = _draw_rigid(draw)
+    outer = _accept(_affine([(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)], *pose))
+    hole = _affine(
+        [
+            (inset, inset),
+            (inset + hole_w, inset),
+            (inset + hole_w, inset + hole_h),
+            (inset, inset + hole_h),
+        ],
+        *pose,
+    )
+    return outer, [hole]
+
+
+@st.composite
 def roof_cases(
     draw: st.DrawFn,
-) -> tuple[list[tuple[float, float]], float | list[float]]:
-    """Uniform pitch on every supported footprint; per-edge on convex ones.
+) -> tuple[
+    list[tuple[float, float]],
+    float | list[float],
+    list[list[tuple[float, float]]],
+]:
+    """Uniform pitch on every supported footprint, including courtyards.
 
-    The list branch always differs on at least one edge, so drainage is
-    exercised against a steeper neighbour. Reflex polygons with differing
-    weights are covered by worked examples: some L/U parallel catch-ups
-    still stall the wavefront, so the harness does not generate that mix.
+    Per-edge lists stay on convex polygons without holes: mixed weights
+    on reflex or holed shapes are covered by worked examples.
     """
+    if draw(st.integers(min_value=0, max_value=2)) == 0:
+        outer, holes = draw(rectangle_with_hole())
+        return outer, draw(PITCHES), holes
     if draw(st.booleans()):
-        return draw(footprints()), draw(PITCHES)
+        return draw(footprints()), draw(PITCHES), []
     footprint = draw(convex_polygons())
     n = len(footprint)
     pitches = [draw(PER_EDGE_PITCHES) for _ in range(n)]
     if all(abs(p - pitches[0]) <= 1e-9 for p in pitches):
         other = draw(PER_EDGE_PITCHES.filter(lambda p: abs(p - pitches[0]) > 1.0))
         pitches[draw(st.integers(min_value=0, max_value=n - 1))] = other
-    return footprint, pitches
+    return footprint, pitches, []

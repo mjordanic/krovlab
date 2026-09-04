@@ -28,10 +28,12 @@ SLOPE_TOL = 1e-9
 
 
 def plan_areas_sum_to_footprint_area(
-    built: Roof, footprint: list[tuple[float, float]]
+    built: Roof,
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]] | None = None,
 ) -> None:
     """Face plan areas sum to the footprint area — nothing unroofed or doubled."""
-    footprint_area = Polygon(footprint).area
+    footprint_area = Polygon(footprint, holes or []).area
     total = sum(face.plan_area for face in built.faces)
     assert math.isclose(total, footprint_area, rel_tol=0.0, abs_tol=AREA_TOL), (
         "plan areas sum to footprint area: "
@@ -135,9 +137,13 @@ def _plane_height(
     return origin[2] - (nx * (x - origin[0]) + ny * (y - origin[1])) / nz
 
 
-def roof_is_a_terrain(built: Roof, footprint: list[tuple[float, float]]) -> None:
+def roof_is_a_terrain(
+    built: Roof,
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]] | None = None,
+) -> None:
     """Sampled plan points inside the footprint have exactly one height."""
-    poly = Polygon(footprint)
+    poly = Polygon(footprint, holes or [])
     minx, miny, maxx, maxy = poly.bounds
     nx_s, ny_s = 7, 7
     samples: list[tuple[float, float]] = []
@@ -175,15 +181,39 @@ def roof_is_a_terrain(built: Roof, footprint: list[tuple[float, float]]) -> None
             )
 
 
+def _caller_rings(
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]] | None,
+) -> list[list[tuple[float, float]]]:
+    return [footprint, *(holes or [])]
+
+
+def _edge_endpoints(
+    rings: list[list[tuple[float, float]]], edge_index: int
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    remaining = edge_index
+    for ring in rings:
+        n = len(ring)
+        if remaining < n:
+            return ring[remaining], ring[(remaining + 1) % n]
+        remaining -= n
+    raise AssertionError(
+        f"drainage to own eave: edge_index {edge_index} is past the footprint edges"
+    )
+
+
 def drainage_runs_to_each_faces_own_eave(
-    built: Roof, footprint: list[tuple[float, float]]
+    built: Roof,
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]] | None = None,
 ) -> None:
     """Steepest descent on every face points toward that face's own eave.
 
     The eave is the one named by ``face.edge_index`` on the caller's
-    footprint, not whichever footprint edge happens to be nearest.
+    footprint (outer ring, then holes), not whichever footprint edge
+    happens to be nearest.
     """
-    n = len(footprint)
+    rings = _caller_rings(footprint, holes)
     for face in built.faces:
         pts = [
             (built.nodes[i].x, built.nodes[i].y, built.nodes[i].height)
@@ -204,8 +234,7 @@ def drainage_runs_to_each_faces_own_eave(
             continue
         grad_x, grad_y = -nx / nz, -ny / nz
         # Inward: from this face's eave into the face (and so into the building).
-        a = footprint[face.edge_index]
-        b = footprint[(face.edge_index + 1) % n]
+        a, b = _edge_endpoints(rings, face.edge_index)
         mx, my = 0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])
         nodes = [built.nodes[i] for i in face.node_indices]
         cx = sum(p.x for p in nodes) / len(nodes)
@@ -238,26 +267,29 @@ def _vertex_is_convex(
     return cross > 0.0 if ccw else cross < 0.0
 
 
-def _closest_footprint_vertex(
-    footprint: list[tuple[float, float]], x: float, y: float
-) -> int:
-    return min(
-        range(len(footprint)),
-        key=lambda i: math.hypot(footprint[i][0] - x, footprint[i][1] - y),
-    )
+def _closest_corner(
+    rings: list[list[tuple[float, float]]], x: float, y: float
+) -> tuple[int, int]:
+    best_ring = 0
+    best_vertex = 0
+    best_dist = float("inf")
+    for ri, ring in enumerate(rings):
+        for i, (vx, vy) in enumerate(ring):
+            dist = math.hypot(vx - x, vy - y)
+            if dist < best_dist:
+                best_dist = dist
+                best_ring = ri
+                best_vertex = i
+    return best_ring, best_vertex
 
 
 def arc_classification_matches_geometry(
-    built: Roof, footprint: list[tuple[float, float]]
+    built: Roof,
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]] | None = None,
 ) -> None:
     """Ridges are horizontal; hips rise from convex corners; valleys from reflex."""
-    signed = 0.0
-    n = len(footprint)
-    for i in range(n):
-        x1, y1 = footprint[i]
-        x2, y2 = footprint[(i + 1) % n]
-        signed += x1 * y2 - x2 * y1
-    ccw = signed > 0.0
+    rings = _caller_rings(footprint, holes)
     for arc in built.arcs:
         a, b = built.nodes[arc.start], built.nodes[arc.end]
         if arc.kind == "ridge":
@@ -286,13 +318,23 @@ def arc_classification_matches_geometry(
             for end in (a, b):
                 if end.height > HEIGHT_TOL_M:
                     continue
-                corner = _closest_footprint_vertex(footprint, end.x, end.y)
-                vx, vy = footprint[corner]
+                ri, corner = _closest_corner(rings, end.x, end.y)
+                ring = rings[ri]
+                vx, vy = ring[corner]
                 assert math.hypot(end.x - vx, end.y - vy) <= HEIGHT_TOL_M * 10, (
                     "arc classification matches geometry: "
                     f"{arc.kind} meets the eave away from a footprint corner"
                 )
-                convex = _vertex_is_convex(footprint, corner, ccw)
+                signed = 0.0
+                n = len(ring)
+                for i in range(n):
+                    x1, y1 = ring[i]
+                    x2, y2 = ring[(i + 1) % n]
+                    signed += x1 * y2 - x2 * y1
+                ccw = signed > 0.0
+                convex = _vertex_is_convex(ring, corner, ccw)
+                if ri > 0:
+                    convex = not convex
                 if arc.kind == "hip":
                     assert convex, (
                         "arc classification matches geometry: "
