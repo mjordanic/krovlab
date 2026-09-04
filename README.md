@@ -8,10 +8,11 @@ The core has no third-party dependencies. It takes data and returns data.
 
 ## What it does today
 
-Convex footprints, one pitch for the whole roof. A square becomes a pyramid of
-four triangular faces. A rectangle becomes two trapezoids, two triangles and a
-ridge. `krovlab.viz` draws a plan of that roof. L-shapes, holes, gables,
-overhang and per-edge pitch are not built yet.
+Simple footprints (convex, L, U), one pitch for the whole roof. A square
+becomes a pyramid of four triangular faces. A rectangle becomes two trapezoids,
+two triangles and a ridge. An L-shape produces one valley. `krovlab.viz` draws
+a plan of that roof. Holes, gables, overhang and per-edge pitch are not built
+yet.
 
 ## Install
 
@@ -75,7 +76,7 @@ returned roof.
 |---|---|
 | `nodes` | Every vertex. Footprint corners have `height == 0`. |
 | `faces` | One face per footprint edge. `edge_index` is the edge you passed in. |
-| `arcs` | `kind` is `"eave"`, `"hip"` or `"ridge"`; `length` is 3D metres. |
+| `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"` or `"ridge"`; `length` is 3D metres. |
 | `ridge_height` | Highest point above the eave plane. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
 | `validity` | Whether the roof is a terrain. `is_terrain` is true only when plan areas sum to the footprint, every face is planar, sampled plan points have one height, water drains to each face's own eave, and arc labels match the geometry. |
@@ -130,6 +131,7 @@ can show. Nothing the entry point accepts raises.
 | `degenerate` | A point, a line, coincident consecutive vertices, or no area. |
 | `hole_intersects` | A hole touches or crosses the outer ring. |
 | `unsupported` | A valid hole, or differing per-edge pitches — not built yet. |
+| `incomplete` | The wavefront stopped before the skeleton finished. |
 
 A closed-ring spelling (first point repeated at the end) is accepted. Either
 winding produces the same roof. Collinear vertices that still enclose area
@@ -161,13 +163,13 @@ uv run mypy src tests
 uv run ruff check src tests
 ```
 
-`tests/test_invariants.py` generates convex footprints and asserts the terrain
-invariants (areas, planarity, drainage, arc labels, determinism). Later
-geometry tickets widen `tests/generation.py` rather than copying those
-assertions.
+`tests/test_invariants.py` generates simple footprints (convex, L, U) and
+asserts the terrain invariants (areas, planarity, drainage, arc labels,
+determinism). Later geometry tickets widen `tests/generation.py` rather than
+copying those assertions.
 
 ## Glossary
 
 Terms (`footprint`, `face`, `pitch`, `plan area`, `sloped area`, `ridge`,
-`hip`, `eave`) are defined in [`CONTEXT.md`](CONTEXT.md). The algorithm
+`hip`, `valley`, `eave`) are defined in [`CONTEXT.md`](CONTEXT.md). The algorithm
 choice is recorded in [`docs/adr/0001-own-weighted-straight-skeleton-in-python.md`](docs/adr/0001-own-weighted-straight-skeleton-in-python.md).

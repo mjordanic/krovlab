@@ -187,7 +187,8 @@ def test_tie_breaking_rule_is_documented_next_to_the_queue() -> None:
 
     doc = wavefront.__doc__
     assert doc is not None
-    assert "vanishing original-edge index" in doc
+    assert "split events before edge" in doc
+    assert "event point" in doc
     assert "COLLOCATION_M" in doc
 
 
@@ -206,6 +207,17 @@ def test_clockwise_square_preserves_caller_edge_indices() -> None:
 
 RIGHT_TRIANGLE = [(0.0, 0.0), (4.0, 0.0), (0.0, 3.0)]
 
+# Asymmetric L: reflex at (3, 6), not on a square diagonal, so the valley
+# hits the opposite eave in its interior rather than a corner.
+L_SHAPE = [
+    (0.0, 0.0),
+    (10.0, 0.0),
+    (10.0, 6.0),
+    (3.0, 6.0),
+    (3.0, 10.0),
+    (0.0, 10.0),
+]
+
 
 def test_right_triangle_at_forty_five_has_hand_computed_incenter_apex() -> None:
     result = roof(RIGHT_TRIANGLE, 45.0)
@@ -219,3 +231,153 @@ def test_right_triangle_at_forty_five_has_hand_computed_incenter_apex() -> None:
     assert len(apex) == 1
     assert apex[0].x == pytest.approx(1.0)
     assert apex[0].y == pytest.approx(1.0)
+
+
+def test_l_shape_at_uniform_pitch_has_exactly_one_valley() -> None:
+    result = roof(L_SHAPE, 45.0)
+    assert isinstance(result, Roof)
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 1
+    valley = valleys[0]
+    # Reflex at (3, 6) to the split/collapse at (1.5, 4.5, 1.5).
+    assert valley.length == pytest.approx(1.5 * math.sqrt(3.0))
+    ends = [result.nodes[valley.start], result.nodes[valley.end]]
+    eave_end = next(n for n in ends if n.height <= 1e-9)
+    assert eave_end.x == pytest.approx(3.0)
+    assert eave_end.y == pytest.approx(6.0)
+    hips = [arc for arc in result.arcs if arc.kind == "hip"]
+    assert hips
+    assert all(h.length > 0.0 for h in hips)
+    assert result.validity.is_terrain is True
+
+
+T_SHAPE = [
+    (0.0, 6.0),
+    (4.0, 6.0),
+    (4.0, 0.0),
+    (8.0, 0.0),
+    (8.0, 6.0),
+    (12.0, 6.0),
+    (12.0, 10.0),
+    (0.0, 10.0),
+]
+
+U_SHAPE = [
+    (0.0, 0.0),
+    (10.0, 0.0),
+    (10.0, 8.0),
+    (7.0, 8.0),
+    (7.0, 3.0),
+    (3.0, 3.0),
+    (3.0, 8.0),
+    (0.0, 8.0),
+]
+
+SYMMETRIC_U = [
+    (0.0, 0.0),
+    (12.0, 0.0),
+    (12.0, 8.0),
+    (9.0, 8.0),
+    (9.0, 3.0),
+    (3.0, 3.0),
+    (3.0, 8.0),
+    (0.0, 8.0),
+]
+
+# Two reflex corners whose valleys meet the same opposite eave.
+PLUS = [
+    (2.0, 0.0),
+    (4.0, 0.0),
+    (4.0, 2.0),
+    (6.0, 2.0),
+    (6.0, 4.0),
+    (4.0, 4.0),
+    (4.0, 6.0),
+    (2.0, 6.0),
+    (2.0, 4.0),
+    (0.0, 4.0),
+    (0.0, 2.0),
+    (2.0, 2.0),
+]
+
+# Rectangular bite: the reflex at the notch tip hits the opposite eave
+# in its interior, so the event log records a split rather than an edge.
+NOTCHED = [
+    (0.0, 0.0),
+    (10.0, 0.0),
+    (10.0, 8.0),
+    (6.0, 8.0),
+    (5.0, 6.0),
+    (4.0, 8.0),
+    (0.0, 8.0),
+]
+
+
+def test_t_shape_is_independent_of_which_vertex_starts_the_ring() -> None:
+    areas = []
+    for k in range(len(T_SHAPE)):
+        rotated = T_SHAPE[k:] + T_SHAPE[:k]
+        result = roof(rotated, 45.0)
+        assert isinstance(result, Roof)
+        assert result.validity.is_terrain is True
+        areas.append(sum(face.plan_area for face in result.faces))
+    assert areas == pytest.approx([areas[0]] * len(areas))
+    result = roof(T_SHAPE, 45.0)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 2
+    assert all(v.length > 0.0 for v in valleys)
+
+
+def test_u_shape_produces_a_valid_roof_with_valleys() -> None:
+    result = roof(U_SHAPE, 45.0)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    valleys = [arc for arc in result.arcs if arc.kind == "valley"]
+    assert len(valleys) == 2
+    assert all(v.length > 0.0 for v in valleys)
+
+
+def test_reflex_skeleton_nodes_are_equidistant_from_their_defining_edges() -> None:
+    pitch = 30.0
+    result = roof(L_SHAPE, pitch)
+    assert isinstance(result, Roof)
+    n = len(L_SHAPE)
+    cot = 1.0 / math.tan(math.radians(pitch))
+    for node in result.nodes:
+        if node.height <= 1e-9:
+            continue
+        distances = [
+            _line_distance((node.x, node.y), L_SHAPE[i], L_SHAPE[(i + 1) % n])
+            for i in range(n)
+        ]
+        inset = node.height * cot
+        defining = [d for d in distances if math.isclose(d, inset, abs_tol=1e-8)]
+        assert len(defining) >= 2
+        assert defining == pytest.approx([inset] * len(defining))
+
+
+def test_symmetric_u_is_deterministic_under_simultaneous_events() -> None:
+    first = roof(SYMMETRIC_U, 45.0)
+    second = roof(SYMMETRIC_U, 45.0)
+    assert isinstance(first, Roof)
+    assert isinstance(second, Roof)
+    assert first == second
+    assert first.validity.is_terrain is True
+
+
+def test_colliding_split_footprint_does_not_raise() -> None:
+    result = roof(PLUS, 45.0)
+    assert isinstance(result, (Roof, Failure))
+
+
+def test_notched_rectangle_event_log_records_a_split() -> None:
+    result = roof(NOTCHED, 45.0, events=True)
+    assert not isinstance(result, Failure)
+    built, events = result
+    assert isinstance(built, Roof)
+    assert built.validity.is_terrain is True
+    assert any(event.kind == "split" for event in events)
+    times = [event.time for event in events]
+    assert times == sorted(times)

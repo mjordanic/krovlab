@@ -1,4 +1,4 @@
-"""Invariant harness: named properties over generated convex footprints.
+"""Invariant harness: named properties over generated simple footprints.
 
 Each test is one property. Later tickets widen the generator in
 ``tests/generation.py``; they should not copy these assertions.
@@ -24,7 +24,7 @@ _SETTINGS = settings(max_examples=40, deadline=None)
 
 def _built(footprint: list[tuple[float, float]], pitch: float) -> Roof:
     result = roof(footprint, pitch)
-    assert isinstance(result, Roof)
+    assert isinstance(result, Roof), getattr(result, "reason", result)
     return result
 
 
@@ -38,7 +38,7 @@ def test_returned_roof_carries_a_validity_result_that_is_a_terrain() -> None:
 
 @_SETTINGS
 @given(footprints())
-def test_generator_produces_only_convex_footprints(
+def test_generator_produces_simple_polygons(
     footprint: list[tuple[float, float]],
 ) -> None:
     from shapely.geometry import Polygon  # type: ignore[import-untyped]
@@ -46,7 +46,7 @@ def test_generator_produces_only_convex_footprints(
     poly = Polygon(footprint)
     assert poly.is_valid
     assert len(footprint) >= 3
-    assert poly.equals(poly.convex_hull)
+    assert poly.area >= 4.0
 
 
 @_SETTINGS

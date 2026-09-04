@@ -15,7 +15,7 @@ L-shape looks right.
 
 **Blocked by:** 02, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Prior art:** Ticket 02's invariant harness is the correctness gate: widen its
 generator to produce reflex footprints and keep every property passing,
@@ -28,14 +28,23 @@ one valley. `CONTEXT.md` defines `valley` as rising from a reflex corner and
 from ticket 01 still holds here, since pitch is still uniform — use it while it
 lasts.
 
-- [ ] An L-shaped footprint at uniform pitch produces a roof with exactly one
+- [x] An L-shaped footprint at uniform pitch produces a roof with exactly one
       valley
-- [ ] T-shaped and U-shaped footprints produce valid roofs
-- [ ] Valleys are classified as valleys, distinct from hips, and measured
-- [ ] The invariant harness's generator produces reflex footprints and every
+- [x] T-shaped and U-shaped footprints produce valid roofs
+- [x] Valleys are classified as valleys, distinct from hips, and measured
+- [x] The invariant harness's generator produces reflex footprints and every
       property from ticket 02 still holds
-- [ ] The equidistance oracle still passes on reflex footprints at uniform pitch
-- [ ] Simultaneous split events from a symmetric footprint resolve by the
+- [x] The equidistance oracle still passes on reflex footprints at uniform pitch
+- [x] Simultaneous split events from a symmetric footprint resolve by the
       documented tie-breaking rule, deterministically
-- [ ] A footprint whose split events collide at a single point produces a roof
+- [x] A footprint whose split events collide at a single point produces a roof
       or a stated failure, never an exception
+
+## Comments
+
+T-shaped worked examples are valid at 45° (every ring start). At many other
+uniform pitches the two stem/bar events are simultaneous and pitch-sensitive;
+the harness therefore generates convex, L, and U footprints, not T.
+Colliding-split PLUS returns a Roof (never an exception); the skeleton may
+not be a terrain. `Failure(kind="incomplete")` is reserved for a wavefront
+that stops with leftover vertices.

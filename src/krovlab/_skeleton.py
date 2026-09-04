@@ -1,7 +1,8 @@
-"""Felkel-Obdrzalek wavefront: edge events over a circular LAV.
+"""Felkel-Obdrzalek wavefront: edge and split events over circular LAVs.
 
-Only edge events are handled (convex footprints). Split events are out of
-scope here.
+Edge events shrink a wavefront edge to a point. Split events fire when a
+reflex vertex reaches an opposite edge and the shrinking polygon divides
+in two. Convex footprints only ever see edge events.
 
 Tie-breaking (simultaneous and co-located events)
 -------------------------------------------------
@@ -9,13 +10,19 @@ The event queue is a min-heap ordered by:
 
 1. time (the offset of the three supporting lines divided by weight; this
    time *is* the node's height; there is no later lifting step)
-2. vanishing original-edge index, lower first
-3. insertion sequence, so the heap never falls through to object identity
+2. kind rank: split events before edge events, so a reflex vertex
+   hitting an opposite edge is processed before a vanishing edge at
+   the same instant (parallel-arm collapses otherwise swallow the split)
+3. event point, plan x then y, so numbering of the ring cannot change
+   which of two co-located events goes first
+4. tracing vertex's birth coordinates, x then y
+5. insertion sequence, so the heap never falls through to object identity
 
 When an event point lies within ``COLLOCATION_M`` metres of an existing
 skeleton node at the same height, that node is reused. A square's four
 coincident edge events therefore share one apex rather than four
-overlapping nodes.
+overlapping nodes. Symmetric footprints whose split events collide at one
+point reuse that node the same way.
 """
 
 from __future__ import annotations
@@ -26,6 +33,12 @@ from heapq import heappop, heappush
 
 COLLOCATION_M = 1e-9
 """Plan/height tolerance in metres for merging co-located skeleton nodes."""
+
+_EVENT_SPLIT = 0
+_EVENT_EDGE = 1
+_ALONG_TOL = 1e-5
+_DIST_TOL_M = 1e-4
+_REGION_TOL = 1e-12
 
 
 @dataclass
@@ -57,8 +70,11 @@ class _Vertex:
     source_node: int
     """Skeleton node this vertex is tracing an arc from."""
 
+    birth: float = 0.0
+    """Time (height) at which this vertex was created."""
+
     valid: bool = True
-    """False once this vertex has been consumed by an edge event."""
+    """False once this vertex has been consumed by an event."""
 
     prev: _Vertex = field(init=False, repr=False)
     next: _Vertex = field(init=False, repr=False)
@@ -68,9 +84,11 @@ class _Vertex:
 class RawEvent:
     """One processed wavefront event, before caller edge indices are mapped.
 
-    ``edges`` are original-ring indices: left support, the vanishing edge,
-    right support. ``vertices`` are skeleton-node indices involved: the
-    two sources that traced in, then the node created (or reused).
+    ``edges`` are original-ring indices. For an edge event: left support,
+    the vanishing edge, right support. For a split event: the reflex
+    vertex's left support, its right support, and the opposite edge.
+    ``vertices`` are skeleton-node indices involved: the sources that
+    traced in, then the node created (or reused).
     """
 
     kind: str
@@ -87,105 +105,224 @@ class RawSkeleton:
     ``(start, end, face_a, face_b)`` — each internal arc bounds two faces
     identified by original-edge index. Eaves are not included; the public
     layer adds them from the footprint. ``events`` is the sequence the
-    wavefront actually processed, in order.
+    wavefront actually processed, in order. ``complete`` is false when
+    the wavefront stopped with leftover vertices.
     """
 
     nodes: tuple[tuple[float, float, float], ...]
     arcs: tuple[tuple[int, int, int, int], ...]
     events: tuple[RawEvent, ...]
+    complete: bool = True
 
 
 def skeleton(ring: list[tuple[float, float]], weights: list[float]) -> RawSkeleton:
-    """Grow the straight skeleton of a counter-clockwise convex ring.
+    """Grow the straight skeleton of a counter-clockwise simple ring.
 
     ``weights[i]`` is the plan speed of edge ``i``. Event time equals
     height because the wavefront rises at unit rate as it moves in.
+    Reflex vertices emit split events; convex footprints never do.
     """
     n = len(ring)
     lines = [_supporting_line(ring[i], ring[(i + 1) % n]) for i in range(n)]
     nodes: list[tuple[float, float, float]] = [(p[0], p[1], 0.0) for p in ring]
     arcs: list[tuple[int, int, int, int]] = []
     events: list[RawEvent] = []
+    bisectors = _original_bisectors(ring, lines, weights)
 
-    verts = [_Vertex(p[0], p[1], (i - 1) % n, i, i) for i, p in enumerate(ring)]
+    verts = [
+        _Vertex(p[0], p[1], (i - 1) % n, i, i, birth=0.0) for i, p in enumerate(ring)
+    ]
     for i, v in enumerate(verts):
         v.prev = verts[(i - 1) % n]
         v.next = verts[(i + 1) % n]
 
-    heap: list[tuple[float, int, int, _Vertex]] = []
+    heap: list[
+        tuple[float, int, float, float, float, float, int, _Vertex, int]
+    ] = []
     seq = 0
 
-    def push(vertex: _Vertex) -> None:
+    def push(
+        kind_rank: int,
+        t: float,
+        px: float,
+        py: float,
+        vertex: _Vertex,
+        edge_index: int,
+    ) -> None:
         nonlocal seq
+        seq += 1
+        heappush(
+            heap,
+            (t, kind_rank, px, py, vertex.x, vertex.y, seq, vertex, edge_index),
+        )
+
+    def push_edge(vertex: _Vertex) -> None:
         event = _edge_event(vertex, lines, weights)
         if event is None:
             return
-        t, edge_index, _px, _py = event
-        seq += 1
-        heappush(heap, (t, edge_index, seq, vertex))
+        t, edge_index, px, py = event
+        if t + 1e-12 < vertex.birth:
+            return
+        push(_EVENT_EDGE, t, px, py, vertex, edge_index)
+
+    def push_splits(vertex: _Vertex) -> None:
+        if not _is_reflex(vertex, lines):
+            return
+        for opp in range(n):
+            cand = _split_candidate(vertex, opp, lines, weights, ring, bisectors)
+            if cand is None:
+                continue
+            t, px, py = cand
+            push(_EVENT_SPLIT, t, px, py, vertex, opp)
+
+    def push_all(vertex: _Vertex) -> None:
+        push_edge(vertex)
+        push_splits(vertex)
+
+    def finish_if_small(vertex: _Vertex) -> bool:
+        """Collapse a 1- or 2-vertex LAV. True if the vertex was consumed."""
+        if not vertex.valid:
+            return True
+        if vertex.next is vertex:
+            vertex.valid = False
+            return True
+        if vertex.next.next is vertex:
+            other = vertex.next
+            _add_arc(
+                arcs,
+                nodes,
+                vertex.source_node,
+                other.source_node,
+                vertex.left_edge,
+                vertex.right_edge,
+            )
+            vertex.valid = False
+            other.valid = False
+            return True
+        return False
 
     for v in verts:
-        push(v)
+        push_all(v)
+
+    max_events = max(n * n * 8, 32)
+    processed = 0
+    seen: set[tuple[float, float, float, tuple[int, ...]]] = set()
+
+    def already_seen(t_ev: float, px: float, py: float, *edge_ids: int) -> bool:
+        key = (round(t_ev, 8), round(px, 8), round(py, 8), tuple(sorted(edge_ids)))
+        if key in seen:
+            return True
+        seen.add(key)
+        return False
 
     while heap:
-        t, _edge_index, _, va = heappop(heap)
+        t, kind_rank, _px, _py, _vx, _vy, _, va, edge_index = heappop(heap)
         if not va.valid:
             continue
-        vb = va.next
-        if not vb.valid:
+        processed += 1
+        if processed > max_events:
+            return RawSkeleton(
+                nodes=tuple(nodes),
+                arcs=tuple(arcs),
+                events=tuple(events),
+                complete=False,
+            )
+
+        if kind_rank == _EVENT_EDGE:
+            vb = va.next
+            if not vb.valid:
+                continue
+            event = _edge_event(va, lines, weights)
+            if event is None:
+                continue
+            t2, vanishing, px, py = event
+            if abs(t2 - t) > 1e-9 or vanishing != edge_index:
+                continue
+            if not _vertices_meet(va, vb, px, py, t2, lines, weights):
+                continue
+            if already_seen(t2, px, py, va.left_edge, va.right_edge, vb.right_edge):
+                continue
+
+            node_idx = _find_or_add_node(nodes, px, py, t2)
+            events.append(
+                RawEvent(
+                    kind="edge",
+                    time=t2,
+                    edges=(va.left_edge, va.right_edge, vb.right_edge),
+                    vertices=(va.source_node, vb.source_node, node_idx),
+                )
+            )
+            _add_arc(arcs, nodes, va.source_node, node_idx, va.left_edge, va.right_edge)
+            _add_arc(arcs, nodes, vb.source_node, node_idx, vb.left_edge, vb.right_edge)
+
+            va.valid = False
+            vb.valid = False
+
+            nv = _Vertex(px, py, va.left_edge, vb.right_edge, node_idx, birth=t2)
+            nv.prev = va.prev
+            nv.next = vb.next
+            nv.prev.next = nv
+            nv.next.prev = nv
+            verts.append(nv)
+
+            if not finish_if_small(nv):
+                push_edge(nv.prev)
+                push_all(nv)
             continue
-        event = _edge_event(va, lines, weights)
-        if event is None:
+
+        cand = _split_candidate(va, edge_index, lines, weights, ring, bisectors)
+        if cand is None:
             continue
-        t2, edge_index, px, py = event
-        # Stale heap entry: this vertex's next neighbour changed since push.
-        if abs(t2 - t) > 1e-9 or edge_index != _edge_index:
+        t2, px, py = cand
+        if abs(t2 - t) > 1e-9:
+            continue
+        found = _find_opposite(edge_index, px, py, t2, verts, lines, weights)
+        if found is None:
+            continue
+        vo, vp = found
+        if vo is va or vp is va:
+            continue
+        if already_seen(t2, px, py, va.left_edge, va.right_edge, edge_index):
             continue
 
         node_idx = _find_or_add_node(nodes, px, py, t2)
         events.append(
             RawEvent(
-                kind="edge",
+                kind="split",
                 time=t2,
-                edges=(va.left_edge, va.right_edge, vb.right_edge),
-                vertices=(va.source_node, vb.source_node, node_idx),
+                edges=(va.left_edge, va.right_edge, edge_index),
+                vertices=(va.source_node, vo.source_node, vp.source_node, node_idx),
             )
         )
         _add_arc(arcs, nodes, va.source_node, node_idx, va.left_edge, va.right_edge)
-        _add_arc(arcs, nodes, vb.source_node, node_idx, vb.left_edge, vb.right_edge)
+
+        v1 = _Vertex(px, py, va.left_edge, edge_index, node_idx, birth=t2)
+        v2 = _Vertex(px, py, edge_index, va.right_edge, node_idx, birth=t2)
+
+        v1.prev = va.prev
+        v1.next = vp
+        va.prev.next = v1
+        vp.prev = v1
+
+        v2.prev = vo
+        v2.next = va.next
+        va.next.prev = v2
+        vo.next = v2
 
         va.valid = False
-        vb.valid = False
+        verts.append(v1)
+        verts.append(v2)
 
-        nv = _Vertex(px, py, va.left_edge, vb.right_edge, node_idx)
-        nv.prev = va.prev
-        nv.next = vb.next
-        nv.prev.next = nv
-        nv.next.prev = nv
+        if not finish_if_small(v1):
+            push_edge(v1.prev)
+            push_all(v1)
+        if v2.valid and not finish_if_small(v2):
+            push_edge(v2.prev)
+            push_all(v2)
 
-        if nv.next is nv:
-            break
-        # Two vertices left: they either coincide (triangle apex — the
-        # remaining hip is the arc between their sources) or sit at the
-        # two ends of a ridge (rectangle).
-        if nv.next.next is nv:
-            other = nv.next
-            _add_arc(
-                arcs,
-                nodes,
-                nv.source_node,
-                other.source_node,
-                nv.left_edge,
-                nv.right_edge,
-            )
-            nv.valid = False
-            other.valid = False
-            break
-
-        push(nv.prev)
-        push(nv)
-
-    return RawSkeleton(nodes=tuple(nodes), arcs=tuple(arcs), events=tuple(events))
+    return RawSkeleton(
+        nodes=tuple(nodes), arcs=tuple(arcs), events=tuple(events), complete=True
+    )
 
 
 def _supporting_line(a: tuple[float, float], b: tuple[float, float]) -> _Line:
@@ -196,6 +333,232 @@ def _supporting_line(a: tuple[float, float], b: tuple[float, float]) -> _Line:
     nx = -dy / length
     ny = dx / length
     return _Line(nx=nx, ny=ny, c=nx * a[0] + ny * a[1])
+
+
+def _is_reflex(vertex: _Vertex, lines: list[_Line]) -> bool:
+    """True when the vertex's supporting lines form a reflex wavefront corner."""
+    left, right = lines[vertex.left_edge], lines[vertex.right_edge]
+    return left.nx * right.ny - left.ny * right.nx < -_REGION_TOL
+
+
+def _original_bisectors(
+    ring: list[tuple[float, float]], lines: list[_Line], weights: list[float]
+) -> list[tuple[float, float]]:
+    """Unit direction each original vertex moves as the wavefront advances."""
+    n = len(ring)
+    out: list[tuple[float, float]] = []
+    for i, _p in enumerate(ring):
+        vel = _solve2(
+            lines[(i - 1) % n].nx,
+            lines[(i - 1) % n].ny,
+            weights[(i - 1) % n],
+            lines[i].nx,
+            lines[i].ny,
+            weights[i],
+        )
+        if vel is None:
+            out.append((0.0, 0.0))
+            continue
+        length = math.hypot(vel[0], vel[1])
+        out.append((vel[0] / length, vel[1] / length) if length > 1e-18 else (0.0, 0.0))
+    return out
+
+
+def _in_felkel_region(
+    px: float,
+    py: float,
+    edge_i: int,
+    ring: list[tuple[float, float]],
+    bisectors: list[tuple[float, float]],
+) -> bool:
+    """True if ``(px, py)`` lies in the opposite edge's influence region.
+
+    The region is bounded by the original edge (interior to its left) and
+    the bisectors of its two endpoints. This is the Felkel-Obdrzalek test
+    that rejects a bisector hitting the supporting line *behind* the edge
+    or in a neighbour's region.
+    """
+    n = len(ring)
+    a = ring[edge_i]
+    b = ring[(edge_i + 1) % n]
+    ex, ey = b[0] - a[0], b[1] - a[1]
+    if ex * (py - a[1]) - ey * (px - a[0]) <= _REGION_TOL:
+        return False
+    ldx, ldy = bisectors[edge_i]
+    if ldx * (py - a[1]) - ldy * (px - a[0]) >= _REGION_TOL:
+        return False
+    rdx, rdy = bisectors[(edge_i + 1) % n]
+    return rdx * (py - b[1]) - rdy * (px - b[0]) > -_REGION_TOL
+
+
+def _split_candidate(
+    vertex: _Vertex,
+    opp: int,
+    lines: list[_Line],
+    weights: list[float],
+    ring: list[tuple[float, float]],
+    bisectors: list[tuple[float, float]],
+) -> tuple[float, float, float] | None:
+    """Time and point at which ``vertex`` hits original edge ``opp``, if ever."""
+    if opp == vertex.left_edge or opp == vertex.right_edge:
+        return None
+    solved = _offset_meet(
+        lines[vertex.left_edge],
+        weights[vertex.left_edge],
+        lines[vertex.right_edge],
+        weights[vertex.right_edge],
+        lines[opp],
+        weights[opp],
+    )
+    if solved is None:
+        return None
+    px, py, t = solved
+    if t < vertex.birth - 1e-12:
+        return None
+    if t < 0.0:
+        t = 0.0
+    if not _in_felkel_region(px, py, opp, ring, bisectors):
+        return None
+    return t, px, py
+
+
+def _intersect_offsets(
+    l1: _Line, w1: float, l2: _Line, w2: float, t: float
+) -> tuple[float, float] | None:
+    """Intersection of two supporting lines after inward offset ``t``."""
+    return _solve2(
+        l1.nx,
+        l1.ny,
+        l1.c + w1 * t,
+        l2.nx,
+        l2.ny,
+        l2.c + w2 * t,
+    )
+
+
+def _solve2(
+    a11: float, a12: float, b1: float, a21: float, a22: float, b2: float
+) -> tuple[float, float] | None:
+    """Solve a 2x2 linear system. ``None`` if singular."""
+    det = a11 * a22 - a12 * a21
+    if abs(det) < 1e-18:
+        return None
+    return (a22 * b1 - a12 * b2) / det, (a11 * b2 - a21 * b1) / det
+
+
+def _position_at(
+    vertex: _Vertex, t: float, lines: list[_Line], weights: list[float]
+) -> tuple[float, float] | None:
+    """Plan position of a wavefront vertex at time ``t`` along its bisector."""
+    pos = _intersect_offsets(
+        lines[vertex.left_edge],
+        weights[vertex.left_edge],
+        lines[vertex.right_edge],
+        weights[vertex.right_edge],
+        t,
+    )
+    if pos is not None:
+        return pos
+    # Antiparallel supports coincide at one instant: the vertex sits on
+    # that collapsed line at its birth point and does not trace further.
+    if abs(t - vertex.birth) <= 1e-9 and _offsets_coincide(
+        vertex.left_edge, vertex.right_edge, t, lines, weights
+    ):
+        return (vertex.x, vertex.y)
+    return None
+
+
+def _offsets_coincide(
+    i: int, j: int, t: float, lines: list[_Line], weights: list[float]
+) -> bool:
+    """True if original edges ``i`` and ``j`` have met as a single offset line."""
+    a, b = lines[i], lines[j]
+    if a.nx * b.nx + a.ny * b.ny > -0.999:
+        return False
+    gap = abs(a.c + b.c)
+    return abs(gap - (weights[i] + weights[j]) * t) <= 1e-9
+
+
+def _vertices_meet(
+    va: _Vertex,
+    vb: _Vertex,
+    px: float,
+    py: float,
+    t: float,
+    lines: list[_Line],
+    weights: list[float],
+) -> bool:
+    """True if both wavefront vertices are at the edge-event point at time ``t``."""
+    pa = _position_at(va, t, lines, weights)
+    pb = _position_at(vb, t, lines, weights)
+    if pa is None or pb is None:
+        return False
+    return (
+        math.hypot(pa[0] - px, pa[1] - py) < _DIST_TOL_M
+        and math.hypot(pb[0] - px, pb[1] - py) < _DIST_TOL_M
+    )
+
+
+def _on_offset_segment(
+    px: float,
+    py: float,
+    t: float,
+    va: _Vertex,
+    vb: _Vertex,
+    lines: list[_Line],
+    weights: list[float],
+) -> bool:
+    """True if ``(px, py)`` lies on the wavefront edge ``va → vb`` at time ``t``.
+
+    Interior hits are splits. A hit at a convex endpoint is a vertex
+    event still processed as a split (the reflex merges into that
+    corner). A hit at a reflex endpoint is rejected: two reflexes
+    meeting is handled by their own events, and treating it as a split
+    loops.
+    """
+    a = _position_at(va, t, lines, weights)
+    b = _position_at(vb, t, lines, weights)
+    if a is None or b is None:
+        return False
+    ax, ay = a
+    bx, by = b
+    abx, aby = bx - ax, by - ay
+    apx, apy = px - ax, py - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 < 1e-24:
+        return False
+    along = (apx * abx + apy * aby) / ab2
+    dist = abs(apx * aby - apy * abx) / math.sqrt(ab2)
+    if dist >= _DIST_TOL_M:
+        return False
+    if _ALONG_TOL < along < 1.0 - _ALONG_TOL:
+        return True
+    if -_ALONG_TOL <= along <= _ALONG_TOL:
+        return not _is_reflex(va, lines)
+    if 1.0 - _ALONG_TOL <= along <= 1.0 + _ALONG_TOL:
+        return not _is_reflex(vb, lines)
+    return False
+
+
+def _find_opposite(
+    opp: int,
+    px: float,
+    py: float,
+    t: float,
+    verts: list[_Vertex],
+    lines: list[_Line],
+    weights: list[float],
+) -> tuple[_Vertex, _Vertex] | None:
+    """Current LAV endpoints of original edge ``opp`` that contain the point."""
+    for vertex in verts:
+        if not vertex.valid or vertex.right_edge != opp:
+            continue
+        other = vertex.next
+        if not other.valid:
+            continue
+        if _on_offset_segment(px, py, t, vertex, other, lines, weights):
+            return vertex, other
+    return None
 
 
 def _edge_event(

@@ -21,7 +21,7 @@ from krovlab._input import check_footprint, check_holes, resolve_pitches
 from krovlab._skeleton import skeleton as _skeleton
 
 ArcKind = Literal["ridge", "hip", "eave", "valley"]
-EventKind = Literal["edge"]
+EventKind = Literal["edge", "split"]
 FailureKind = Literal[
     "invalid_pitch",
     "pitch_count",
@@ -29,6 +29,7 @@ FailureKind = Literal[
     "degenerate",
     "hole_intersects",
     "unsupported",
+    "incomplete",
 ]
 """Why :func:`roof` refused.
 
@@ -38,6 +39,7 @@ FailureKind = Literal[
 ``degenerate`` — a point, a line, coincident consecutive vertices, or no area.
 ``hole_intersects`` — a hole touches or crosses the outer ring.
 ``unsupported`` — a valid hole, or differing per-edge pitches; not built yet.
+``incomplete`` — the wavefront stopped before the skeleton finished.
 """
 
 
@@ -166,16 +168,21 @@ class Event:
     """
 
     kind: EventKind
-    """``"edge"``: a wavefront edge vanished."""
+    """``"edge"``: a wavefront edge vanished. ``"split"``: a reflex
+    vertex hit an opposite edge and the wavefront divided in two."""
 
     time: float
     """Height at which the event occurred, metres above the eave plane."""
 
     edges: tuple[int, ...]
-    """Caller footprint-edge indices involved (left, vanishing, right)."""
+    """Caller footprint-edge indices involved.
+
+    Edge events: left support, vanishing edge, right support. Split
+    events: the reflex vertex's two supports and the opposite edge.
+    """
 
     vertices: tuple[int, ...]
-    """``Roof.nodes`` indices of the two sources and the resulting node."""
+    """``Roof.nodes`` indices of the tracing sources, then the resulting node."""
 
 
 @dataclass(frozen=True)
@@ -269,7 +276,7 @@ def roof(
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
-    """Build a roof over a convex footprint at one uniform pitch.
+    """Build a roof over a simple footprint at one uniform pitch.
 
     Parameters
     ----------
@@ -299,7 +306,7 @@ def roof(
     Roof
         Faces, arcs, nodes, quantities, and a :class:`Validity` result
         that records whether the roof is a terrain. Every length is
-        metres; every angle is degrees.
+        metres; every angle is degrees. Reflex corners produce valleys.
     tuple[Roof, tuple[Event, ...]]
         The same roof, plus the event log, when ``events=True``.
     Failure
@@ -333,12 +340,17 @@ def roof(
     # moves inward more slowly. Converted here and nowhere else.
     weight = _pitch_to_weight(parsed)
     raw = _skeleton(ring, [weight] * len(ring))
+    if not raw.complete:
+        return Failure(
+            kind="incomplete",
+            reason="the wavefront did not finish; the roof could not be produced",
+        )
     built = _roof_from_skeleton(ring, parsed, raw.nodes, raw.arcs, edge_map, cleaned)
     if not events:
         return built
     log = tuple(
         Event(
-            kind="edge",
+            kind="split" if ev.kind == "split" else "edge",
             time=ev.time,
             edges=tuple(edge_map[i] for i in ev.edges),
             vertices=ev.vertices,
@@ -418,14 +430,7 @@ def _roof_from_skeleton(
     for a, b, face_a, face_b in raw_arcs:
         _link(face_a, a, b)
         _link(face_b, a, b)
-        h1 = nodes[a].height
-        h2 = nodes[b].height
-        # A ridge is horizontal and above the eave. Anything that still
-        # climbs — typically from a corner — is a hip on a convex roof.
-        if min(h1, h2) > height_tol and abs(h1 - h2) <= height_tol:
-            kind: ArcKind = "ridge"
-        else:
-            kind = "hip"
+        kind = _classify_arc(nodes[a], nodes[b], ring, height_tol)
         arcs.append(
             Arc(start=a, end=b, kind=kind, length=_node_distance(nodes[a], nodes[b]))
         )
@@ -456,6 +461,32 @@ def _roof_from_skeleton(
         total_sloped_area=sum(face.sloped_area for face in faces),
         validity=Validity.assess(nodes, built_faces, built_arcs, footprint),
     )
+
+
+def _classify_arc(
+    a: Node, b: Node, ring: list[tuple[float, float]], height_tol: float
+) -> ArcKind:
+    """Ridge if level and above the eave; hip/valley from the eave-end corner."""
+    if min(a.height, b.height) > height_tol and abs(a.height - b.height) <= height_tol:
+        return "ridge"
+    for end in (a, b):
+        if end.height > height_tol:
+            continue
+        corner = min(
+            range(len(ring)),
+            key=lambda i: math.hypot(ring[i][0] - end.x, ring[i][1] - end.y),
+        )
+        return "hip" if _ring_vertex_is_convex(ring, corner) else "valley"
+    return "hip"
+
+
+def _ring_vertex_is_convex(ring: list[tuple[float, float]], index: int) -> bool:
+    """True if the CCW ring turns left at ``index``."""
+    n = len(ring)
+    ax, ay = ring[(index - 1) % n]
+    bx, by = ring[index]
+    cx, cy = ring[(index + 1) % n]
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0.0
 
 
 def _walk_cycle(adj: dict[int, list[int]], start: int, second: int) -> list[int]:
