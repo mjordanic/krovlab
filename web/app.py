@@ -118,6 +118,9 @@ def create_app() -> Flask:
             plan_html=plan_html,
             solid_html=solid_html,
             footprint_html=footprint_html,
+            edit_vertices=bool(
+                request.method == "POST" and request.form.get("edit_vertices")
+            ),
         )
 
     return app
@@ -141,6 +144,8 @@ def _rings_for_request(
     Failure | None,
 ]:
     if method != "POST" or stale:
+        return preset.footprint, preset.holes, None
+    if not form.get("edit_vertices"):
         return preset.footprint, preset.holes, None
     posted_outer = _posted_ring(form, "outer")
     if posted_outer is None:

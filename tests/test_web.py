@@ -42,6 +42,54 @@ def test_get_returns_the_default_rectangle_already_run() -> None:
     assert "3D" in page
 
 
+def test_get_shows_a_title_description_and_github_link() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert "<h1>krovlab</h1>" in page
+    assert "https://github.com/mjordanic/krovlab" in page
+    assert "named footprint" in page
+    assert "Edit vertices" in page
+    assert "one wall" in page
+
+
+def test_get_hides_vertex_tables_until_edit_is_checked() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert 'name="edit_vertices"' in page
+    assert 'id="vertex-editor" hidden' in page
+    assert 'name="outer-x-0"' in page
+
+
+def test_posting_vertices_without_edit_checked_uses_the_named_footprint() -> None:
+    short = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)]
+    edited = roof(short, 45.0)
+    named = roof(RECTANGLE, 45.0)
+    assert isinstance(edited, Roof)
+    assert isinstance(named, Roof)
+    assert f"{edited.ridge_height:.3f}" != f"{named.ridge_height:.3f}"
+
+    page = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "4",
+            "outer-x-3": "0",
+            "outer-y-3": "4",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    ).get_data(as_text=True)
+    assert f"ridge height: {named.ridge_height:.3f} m" in page
+    assert f"ridge height: {edited.ridge_height:.3f} m" not in page
+
+
 def test_plotly_js_is_loaded_from_a_cdn_not_inlined() -> None:
     page = _client().get("/").get_data(as_text=True)
     assert "cdn.plot.ly" in page
@@ -265,6 +313,7 @@ def test_posting_edited_outer_vertices_builds_that_footprint() -> None:
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "0",
             "outer-y-0": "0",
             "outer-x-1": "10",
@@ -316,6 +365,7 @@ def test_posting_one_hole_with_outer_vertices_roofs_that_plan() -> None:
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "0",
             "outer-y-0": "0",
             "outer-x-1": "10",
@@ -362,6 +412,7 @@ def test_posting_an_extra_vertex_relabels_pitch_rows_from_the_new_edges() -> Non
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "0",
             "outer-y-0": "0",
             "outer-x-1": "10",
@@ -400,6 +451,7 @@ def test_extra_vertex_without_a_new_pitch_does_not_return_pitch_count() -> None:
         data={
             "fixture": "rectangle-gabled",
             "loaded_fixture": "rectangle-gabled",
+            "edit_vertices": "on",
             "apply_to_all": "45",
             "outer-x-0": "0",
             "outer-y-0": "0",
@@ -477,6 +529,7 @@ def test_posting_an_unreadable_pitch_returns_invalid_pitch_not_500() -> None:
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "0",
             "outer-y-0": "0",
             "outer-x-1": "10",
@@ -511,6 +564,7 @@ def test_posting_a_collinear_extra_vertex_shows_plan_and_validity_reasons() -> N
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "0",
             "outer-y-0": "0",
             "outer-x-1": "5",
@@ -546,6 +600,7 @@ def test_posting_unreadable_coordinates_returns_a_failure_not_500() -> None:
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "abc",
             "outer-y-0": "0",
             "outer-x-1": "10",
@@ -577,6 +632,7 @@ def test_posting_unreadable_overhang_returns_a_failure_not_500() -> None:
         data={
             "fixture": "rectangle-10x6",
             "loaded_fixture": "rectangle-10x6",
+            "edit_vertices": "on",
             "outer-x-0": "0",
             "outer-y-0": "0",
             "outer-x-1": "10",

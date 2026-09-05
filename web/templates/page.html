@@ -5,9 +5,19 @@
   <title>krovlab</title>
 </head>
 <body>
+  <h1>krovlab</h1>
+  <p>
+    Give a building footprint in metres and a pitch in degrees. Get back a
+    hipped roof, or a named failure.
+    <a href="https://github.com/mjordanic/krovlab">Source on GitHub</a>.
+  </p>
   <p>Units: metres and degrees.</p>
   <form method="post">
     <input type="hidden" name="loaded_fixture" value="{{ selected }}">
+    <p>
+      Choose a named footprint from the list, or tick Edit vertices to type
+      the outer ring (and an optional hole) in metres.
+    </p>
     <label>
       Footprint
       <select name="fixture">
@@ -16,6 +26,11 @@
         {% endfor %}
       </select>
     </label>
+    <p>
+      Each row is one wall. Enter pitch as degrees, rise:run (4:12), or a
+      percentage. Apply to all fills every row. Gable is a vertical wall
+      (pitch 90).
+    </p>
     <p>
       <label>
         Apply to all
@@ -43,7 +58,15 @@
         <input name="overhang" value="{{ overhang }}">
         m
       </label>
+      metres the eaves project past the walls.
     </p>
+    <p>
+      <label>
+        <input type="checkbox" name="edit_vertices" id="edit-vertices"{% if edit_vertices %} checked{% endif %}>
+        Edit vertices
+      </label>
+    </p>
+    <div id="vertex-editor"{% if not edit_vertices %} hidden{% endif %}>
     <p>Outer vertices (m)</p>
     <table>
       <thead>
@@ -80,6 +103,7 @@
       <button type="button" id="add-hole">Add hole vertex</button>
       <button type="button" id="remove-hole">Remove hole vertex</button>
     </p>
+    </div>
     <button type="submit">Submit</button>
   </form>
   <pre>{{ describe }}</pre>
@@ -191,6 +215,9 @@
       rebuildPitches();
     }
 
+    document.getElementById("edit-vertices").addEventListener("change", function () {
+      document.getElementById("vertex-editor").hidden = !this.checked;
+    });
     document.getElementById("add-outer").addEventListener("click", function () {
       addVertex("outer-vertices", "outer");
     });
