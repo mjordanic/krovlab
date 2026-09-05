@@ -240,4 +240,366 @@ def test_get_shows_apply_to_all_and_a_pitch_row_per_edge() -> None:
     assert "Gable" in page
 
 
+def test_get_shows_an_editable_outer_vertex_table() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert 'name="outer-x-0" value="0.0"' in page
+    assert 'name="outer-y-0" value="0.0"' in page
+    assert 'name="outer-x-1" value="10.0"' in page
+    assert 'name="outer-y-1" value="0.0"' in page
+    assert 'name="outer-x-2" value="10.0"' in page
+    assert 'name="outer-y-2" value="6.0"' in page
+    assert 'name="outer-x-3" value="0.0"' in page
+    assert 'name="outer-y-3" value="6.0"' in page
+
+
+def test_posting_edited_outer_vertices_builds_that_footprint() -> None:
+    short = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)]
+    built = roof(short, 45.0)
+    assert isinstance(built, Roof)
+    default = roof(RECTANGLE, 45.0)
+    assert isinstance(default, Roof)
+    assert f"{built.ridge_height:.3f}" != f"{default.ridge_height:.3f}"
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "4",
+            "outer-x-3": "0",
+            "outer-y-3": "4",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert 'name="outer-y-2" value="4.0"' in page
+    assert "3D solid" in page
+
+
+def test_posting_a_courtyard_fixture_fills_the_hole_table() -> None:
+    page = _client().post("/", data={"fixture": "courtyard"}).get_data(as_text=True)
+    assert 'name="outer-x-0" value="0.0"' in page
+    assert 'name="outer-x-2" value="10.0"' in page
+    assert 'name="hole-x-0" value="3.0"' in page
+    assert 'name="hole-y-0" value="3.0"' in page
+    assert 'name="hole-x-1" value="7.0"' in page
+    assert 'name="hole-y-1" value="3.0"' in page
+    assert 'name="hole-x-2" value="7.0"' in page
+    assert 'name="hole-y-2" value="7.0"' in page
+    assert 'name="hole-x-3" value="3.0"' in page
+    assert 'name="hole-y-3" value="7.0"' in page
+    assert "4: (3.0, 3.0) → (7.0, 3.0)" in page
+
+
+def test_posting_one_hole_with_outer_vertices_roofs_that_plan() -> None:
+    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    well = [(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)]
+    built = roof(square, 45.0, holes=[well])
+    assert isinstance(built, Roof)
+    without_hole = roof(square, 45.0)
+    assert isinstance(without_hole, Roof)
+    assert f"{built.ridge_height:.3f}" != f"{without_hole.ridge_height:.3f}"
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "10",
+            "outer-x-3": "0",
+            "outer-y-3": "10",
+            "hole-x-0": "3",
+            "hole-y-0": "3",
+            "hole-x-1": "7",
+            "hole-y-1": "3",
+            "hole-x-2": "7",
+            "hole-y-2": "7",
+            "hole-x-3": "3",
+            "hole-y-3": "7",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "pitch-4": "45",
+            "pitch-5": "45",
+            "pitch-6": "45",
+            "pitch-7": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert "3D solid" in page
+    assert 'name="hole-x-0" value="3.0"' in page
+
+
+PENTAGON = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (4.0, 8.0), (0.0, 6.0)]
+
+
+def test_posting_an_extra_vertex_relabels_pitch_rows_from_the_new_edges() -> None:
+    built = roof(PENTAGON, 45.0)
+    assert isinstance(built, Roof)
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "4",
+            "outer-y-3": "8",
+            "outer-x-4": "0",
+            "outer-y-4": "6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "pitch-4": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "0: (0.0, 0.0) → (10.0, 0.0)" in page
+    assert "2: (10.0, 6.0) → (4.0, 8.0)" in page
+    assert "3: (4.0, 8.0) → (0.0, 6.0)" in page
+    assert "4: (0.0, 6.0) → (0.0, 0.0)" in page
+    assert 'name="pitch-4"' in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert "pitch_count" not in page
+
+
+def test_extra_vertex_without_a_new_pitch_does_not_return_pitch_count() -> None:
+    built = roof(PENTAGON, 45.0)
+    assert isinstance(built, Roof)
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-gabled",
+            "loaded_fixture": "rectangle-gabled",
+            "apply_to_all": "45",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "4",
+            "outer-y-3": "8",
+            "outer-x-4": "0",
+            "outer-y-4": "6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "pitch_count" not in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert 'name="pitch-4" value="45"' in page
+
+
+def test_posting_a_new_fixture_ignores_stale_vertex_fields() -> None:
+    refused = roof(BOWTIE, 45.0)
+    assert isinstance(refused, Failure)
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "bowtie",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "0",
+            "outer-y-3": "6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "self_intersection" in page
+    assert refused.reason in page
+    assert "3D solid" not in page
+
+
+def test_get_offers_add_and_remove_vertex_rows() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert "Add outer vertex" in page
+    assert "Remove outer vertex" in page
+    assert "Add hole vertex" in page
+    assert "Remove hole vertex" in page
+
+
+COLLINEAR = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+
+
+def test_posting_an_unreadable_pitch_returns_invalid_pitch_not_500() -> None:
+    refused = roof(RECTANGLE, "not-a-pitch")
+    assert isinstance(refused, Failure)
+    assert refused.kind == "invalid_pitch"
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "0",
+            "outer-y-3": "6",
+            "pitch-0": "not-a-pitch",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "invalid_pitch" in page
+    assert "not-a-pitch" in page
+    assert "3D solid" not in page
+    assert "<h2>Plan</h2>" not in page
+
+
+def test_posting_a_collinear_extra_vertex_shows_plan_and_validity_reasons() -> None:
+    built = roof(COLLINEAR, 45.0)
+    assert isinstance(built, Roof)
+    assert built.validity.is_terrain is False
+    assert built.validity.reasons
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "5",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "0",
+            "outer-x-3": "10",
+            "outer-y-3": "6",
+            "outer-x-4": "0",
+            "outer-y-4": "6",
+            "apply_to_all": "45",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "pitch-4": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: False" in page
+    for reason in built.validity.reasons:
+        assert reason in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" not in page
+    assert "Input footprint" not in page
+
+
+def test_posting_unreadable_coordinates_returns_a_failure_not_500() -> None:
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "abc",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "0",
+            "outer-y-3": "6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Failure" in page
+    assert "degenerate" in page
+    assert "not an (x, y) metre pair" in page
+    assert 'name="outer-x-0" value="abc"' in page
+    assert "3D solid" not in page
+    assert "<h2>Plan</h2>" not in page
+
+
+def test_posting_unreadable_overhang_returns_a_failure_not_500() -> None:
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "loaded_fixture": "rectangle-10x6",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "0",
+            "outer-y-3": "6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "nope",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Failure" in page
+    assert "degenerate" in page
+    assert "overhang must be a finite number of metres" in page
+    assert 'name="overhang" value="nope"' in page
+    assert "3D solid" not in page
+
+
+
 

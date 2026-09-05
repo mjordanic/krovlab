@@ -7,6 +7,7 @@
 <body>
   <p>Units: metres and degrees.</p>
   <form method="post">
+    <input type="hidden" name="loaded_fixture" value="{{ selected }}">
     <label>
       Footprint
       <select name="fixture">
@@ -22,6 +23,7 @@
       </label>
       <button type="button" id="apply-to-all">Apply to all</button>
     </p>
+    <div id="pitch-rows">
     {% for edge in edges %}
     <p>
       <label>
@@ -34,6 +36,7 @@
       </label>
     </p>
     {% endfor %}
+    </div>
     <p>
       <label>
         Overhang
@@ -41,20 +44,42 @@
         m
       </label>
     </p>
-    <p>Vertices (m):
-      {% for x, y in preset.footprint %}
-      ({{ x }}, {{ y }}){% if not loop.last %}, {% endif %}
-      {% endfor %}
-    </p>
-    {% if preset.holes %}
-    <p>Hole (m):
-      {% for hole in preset.holes %}
-        {% for x, y in hole %}
-        ({{ x }}, {{ y }}){% if not loop.last %}, {% endif %}
+    <p>Outer vertices (m)</p>
+    <table>
+      <thead>
+        <tr><th>x</th><th>y</th></tr>
+      </thead>
+      <tbody id="outer-vertices">
+        {% for x, y in footprint %}
+        <tr>
+          <td><input name="outer-x-{{ loop.index0 }}" value="{{ x }}"></td>
+          <td><input name="outer-y-{{ loop.index0 }}" value="{{ y }}"></td>
+        </tr>
         {% endfor %}
-      {% endfor %}
+      </tbody>
+    </table>
+    <p>
+      <button type="button" id="add-outer">Add outer vertex</button>
+      <button type="button" id="remove-outer">Remove outer vertex</button>
     </p>
-    {% endif %}
+    <p>Hole vertices (m)</p>
+    <table>
+      <thead>
+        <tr><th>x</th><th>y</th></tr>
+      </thead>
+      <tbody id="hole-vertices">
+        {% for x, y in hole %}
+        <tr>
+          <td><input name="hole-x-{{ loop.index0 }}" value="{{ x }}"></td>
+          <td><input name="hole-y-{{ loop.index0 }}" value="{{ y }}"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p>
+      <button type="button" id="add-hole">Add hole vertex</button>
+      <button type="button" id="remove-hole">Remove hole vertex</button>
+    </p>
     <button type="submit">Submit</button>
   </form>
   <pre>{{ describe }}</pre>
@@ -71,6 +96,113 @@
   {{ footprint_html | safe }}
   {% endif %}
   <script>
+    function readRing(tbodyId) {
+      var points = [];
+      document.querySelectorAll("#" + tbodyId + " tr").forEach(function (row) {
+        var inputs = row.querySelectorAll("input");
+        points.push({ x: inputs[0].value, y: inputs[1].value });
+      });
+      return points;
+    }
+
+    function reindexRing(tbodyId, prefix) {
+      document.querySelectorAll("#" + tbodyId + " tr").forEach(function (row, i) {
+        var inputs = row.querySelectorAll("input");
+        inputs[0].name = prefix + "-x-" + i;
+        inputs[1].name = prefix + "-y-" + i;
+      });
+    }
+
+    function savedPitches() {
+      var saved = {};
+      document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
+        saved[input.name.slice("pitch-".length)] = {
+          pitch: input.value,
+          gable: false
+        };
+      });
+      document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
+        var i = box.name.slice("gable-".length);
+        if (!saved[i]) {
+          saved[i] = { pitch: "90", gable: box.checked };
+        } else {
+          saved[i].gable = box.checked;
+        }
+      });
+      return saved;
+    }
+
+    function esc(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function edgeLabel(i, start, end) {
+      return i + ": (" + esc(start.x) + ", " + esc(start.y) + ") → (" + esc(end.x) + ", " + esc(end.y) + ")";
+    }
+
+    function rebuildPitches() {
+      var outer = readRing("outer-vertices");
+      var hole = readRing("hole-vertices");
+      var rings = hole.length ? [outer, hole] : [outer];
+      var saved = savedPitches();
+      var fill = document.querySelector("[name=apply_to_all]").value;
+      var html = "";
+      var index = 0;
+      rings.forEach(function (ring) {
+        ring.forEach(function (start, j) {
+          var end = ring[(j + 1) % ring.length];
+          var prev = saved[String(index)] || { pitch: fill, gable: false };
+          html += "<p><label>" + edgeLabel(index, start, end);
+          html += " <input name=\"pitch-" + index + "\" value=\"" + esc(prev.pitch) + "\"";
+          if (prev.gable) {
+            html += " disabled";
+          }
+          html += "></label> <label><input type=\"checkbox\" name=\"gable-" + index + "\"";
+          if (prev.gable) {
+            html += " checked";
+          }
+          html += "> Gable</label></p>";
+          index += 1;
+        });
+      });
+      document.getElementById("pitch-rows").innerHTML = html;
+    }
+
+    function addVertex(tbodyId, prefix) {
+      var tbody = document.getElementById(tbodyId);
+      var row = document.createElement("tr");
+      row.innerHTML = "<td><input></td><td><input></td>";
+      tbody.appendChild(row);
+      reindexRing(tbodyId, prefix);
+      rebuildPitches();
+    }
+
+    function removeVertex(tbodyId, prefix, minRows) {
+      var tbody = document.getElementById(tbodyId);
+      if (tbody.rows.length <= minRows) {
+        return;
+      }
+      tbody.deleteRow(-1);
+      reindexRing(tbodyId, prefix);
+      rebuildPitches();
+    }
+
+    document.getElementById("add-outer").addEventListener("click", function () {
+      addVertex("outer-vertices", "outer");
+    });
+    document.getElementById("remove-outer").addEventListener("click", function () {
+      removeVertex("outer-vertices", "outer", 3);
+    });
+    document.getElementById("add-hole").addEventListener("click", function () {
+      addVertex("hole-vertices", "hole");
+    });
+    document.getElementById("remove-hole").addEventListener("click", function () {
+      removeVertex("hole-vertices", "hole", 0);
+    });
     document.getElementById("apply-to-all").addEventListener("click", function () {
       var value = document.querySelector("[name=apply_to_all]").value;
       document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
@@ -81,18 +213,26 @@
         box.checked = false;
       });
     });
-    document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
-      box.addEventListener("change", function () {
-        var input = document.querySelector("[name='pitch-" + box.name.slice("gable-".length) + "']");
-        if (!input) {
-          return;
-        }
-        if (box.checked) {
-          input.value = "90";
-          input.disabled = true;
-        } else {
-          input.disabled = false;
-        }
+    document.getElementById("pitch-rows").addEventListener("change", function (event) {
+      var box = event.target;
+      if (!box.name || box.name.indexOf("gable-") !== 0) {
+        return;
+      }
+      var input = document.querySelector("[name='pitch-" + box.name.slice("gable-".length) + "']");
+      if (!input) {
+        return;
+      }
+      if (box.checked) {
+        input.value = "90";
+        input.disabled = true;
+      } else {
+        input.disabled = false;
+      }
+    });
+    document.querySelector("form").addEventListener("submit", function () {
+      rebuildPitches();
+      document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
+        input.disabled = false;
       });
     });
   </script>

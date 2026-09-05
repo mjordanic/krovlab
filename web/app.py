@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from flask import Flask, render_template, request
 
@@ -20,8 +20,8 @@ class EdgeRow:
     """One footprint edge on the form: index, endpoints, posted pitch."""
 
     index: int
-    start: tuple[float, float]
-    end: tuple[float, float]
+    start: tuple[Any, Any]
+    end: tuple[Any, Any]
     pitch: str
     gable: bool
 
@@ -39,36 +39,81 @@ def create_app() -> Flask:
             else DEFAULT_PRESET
         )
         preset = presets.get(name, presets[DEFAULT_PRESET])
-        n_edges = _edge_count(preset)
+        stale = _fixture_changed(request.method, request.form, preset.name)
+        footprint, holes, parse_error = _rings_for_request(
+            request.method, request.form, preset, stale
+        )
+        n_edges = len(footprint) + sum(len(hole) for hole in (holes or []))
         fallback = _expand_pitches(preset.pitch, n_edges)
-        if request.method == "POST":
-            pitches = _posted_pitches(request.form, n_edges, fallback)
+        draw_overhang = preset.overhang
+        form_overhang: float | str = preset.overhang
+        result: Roof | Failure
+        if parse_error is not None:
             apply_to_all = request.form.get("apply_to_all") or (
-                pitches[0] if pitches else ""
+                str(fallback[0]) if fallback else ""
             )
-            overhang = _posted_overhang(request.form, preset.overhang)
+            pitches = _posted_pitches(
+                request.form, n_edges, fallback, apply_to_all
+            )
+            result = parse_error
+            draw_rings: tuple[
+                list[tuple[float, float]],
+                list[list[tuple[float, float]]] | None,
+            ] = ([], None)
+        elif request.method == "POST" and not stale:
+            apply_to_all = request.form.get("apply_to_all") or ""
+            pitches = _posted_pitches(
+                request.form, n_edges, fallback, apply_to_all
+            )
+            if not apply_to_all:
+                apply_to_all = str(pitches[0]) if pitches else ""
+            parsed_overhang = _posted_overhang(request.form, preset.overhang)
+            parsed_footprint = cast(list[tuple[float, float]], footprint)
+            parsed_holes = cast(
+                list[list[tuple[float, float]]] | None, holes
+            )
+            if isinstance(parsed_overhang, Failure):
+                result = parsed_overhang
+                form_overhang = request.form.get("overhang") or preset.overhang
+                draw_overhang = 0.0
+                draw_rings = (parsed_footprint, parsed_holes)
+            else:
+                draw_overhang = parsed_overhang
+                form_overhang = parsed_overhang
+                result = roof(
+                    parsed_footprint,
+                    pitches,
+                    holes=parsed_holes,
+                    overhang=parsed_overhang,
+                )
+                draw_rings = (parsed_footprint, parsed_holes)
         else:
             pitches = fallback
-            apply_to_all = pitches[0] if pitches else ""
-            overhang = preset.overhang
-        rows = _edge_rows(preset.footprint, preset.holes, pitches)
-        result = roof(
-            preset.footprint,
-            pitches,
-            holes=preset.holes,
-            overhang=overhang,
-        )
+            apply_to_all = str(pitches[0]) if pitches else ""
+            parsed_footprint = cast(list[tuple[float, float]], footprint)
+            parsed_holes = cast(
+                list[list[tuple[float, float]]] | None, holes
+            )
+            result = roof(
+                parsed_footprint,
+                pitches,
+                holes=parsed_holes,
+                overhang=preset.overhang,
+            )
+            draw_rings = (parsed_footprint, parsed_holes)
+        rows = _edge_rows(footprint, holes, pitches)
         plan_html, solid_html, footprint_html = _draw(
-            result, preset.footprint, preset.holes, overhang
+            result, draw_rings[0], draw_rings[1], draw_overhang
         )
         return render_template(
             "page.html",
             names=list(presets),
             selected=preset.name,
-            preset=preset,
             apply_to_all=apply_to_all,
-            overhang=overhang,
+            overhang=form_overhang,
             edges=rows,
+            footprint=footprint,
+            hole=holes[0] if holes else [],
             describe=_describe(result),
             plan_html=plan_html,
             solid_html=solid_html,
@@ -78,15 +123,82 @@ def create_app() -> Flask:
     return app
 
 
-def _edge_count(preset: Preset) -> int:
-    n = len(preset.footprint)
-    if preset.holes:
-        n += sum(len(hole) for hole in preset.holes)
-    return n
+def _fixture_changed(method: str, form: Mapping[str, str], name: str) -> bool:
+    if method != "POST":
+        return False
+    loaded = form.get("loaded_fixture")
+    return bool(loaded) and loaded != name
+
+
+def _rings_for_request(
+    method: str,
+    form: Mapping[str, str],
+    preset: Preset,
+    stale: bool,
+) -> tuple[
+    list[tuple[Any, Any]],
+    list[list[tuple[Any, Any]]] | None,
+    Failure | None,
+]:
+    if method != "POST" or stale:
+        return preset.footprint, preset.holes, None
+    posted_outer = _posted_ring(form, "outer")
+    if posted_outer is None:
+        return preset.footprint, preset.holes, None
+    parsed_outer = _as_xy_ring(posted_outer, "footprint")
+    posted_hole = _posted_ring(form, "hole")
+    if isinstance(parsed_outer, Failure):
+        holes: list[list[tuple[Any, Any]]] | None = (
+            [posted_hole] if posted_hole else None
+        )
+        return posted_outer, holes, parsed_outer
+    if posted_hole is None:
+        return parsed_outer, None, None
+    parsed_hole = _as_xy_ring(posted_hole, "hole")
+    if isinstance(parsed_hole, Failure):
+        return parsed_outer, [posted_hole], parsed_hole
+    return parsed_outer, [parsed_hole], None
+
+
+def _posted_ring(
+    form: Mapping[str, str], prefix: str
+) -> list[tuple[str, str]] | None:
+    points: list[tuple[str, str]] = []
+    i = 0
+    while True:
+        raw_x = form.get(f"{prefix}-x-{i}")
+        raw_y = form.get(f"{prefix}-y-{i}")
+        if raw_x is None and raw_y is None:
+            break
+        points.append((raw_x or "", raw_y or ""))
+        i += 1
+    if i == 0:
+        return None
+    while points and points[-1] == ("", ""):
+        points.pop()
+    return points if points else None
+
+
+def _as_xy_ring(
+    points: list[tuple[str, str]], name: str
+) -> list[tuple[float, float]] | Failure:
+    ring: list[tuple[float, float]] = []
+    for i, (raw_x, raw_y) in enumerate(points):
+        try:
+            ring.append((float(raw_x), float(raw_y)))
+        except ValueError:
+            return Failure(
+                kind="degenerate",
+                reason=f"{name} vertex {i} is not an (x, y) metre pair",
+            )
+    return ring
 
 
 def _posted_pitches(
-    form: Mapping[str, str], n: int, fallback: list[Pitch]
+    form: Mapping[str, str],
+    n: int,
+    fallback: list[Pitch],
+    apply_to_all: str,
 ) -> list[Pitch]:
     pitches: list[Pitch] = []
     for i in range(n):
@@ -96,16 +208,26 @@ def _posted_pitches(
         posted = form.get(f"pitch-{i}")
         if posted is not None and posted != "":
             pitches.append(posted)
+        elif apply_to_all:
+            pitches.append(apply_to_all)
         else:
             pitches.append(fallback[i] if i < len(fallback) else "")
     return pitches
 
 
-def _posted_overhang(form: Mapping[str, str], fallback: float) -> float:
+def _posted_overhang(
+    form: Mapping[str, str], fallback: float
+) -> float | Failure:
     raw = form.get("overhang")
     if raw is None or raw.strip() == "":
         return fallback
-    return float(raw)
+    try:
+        return float(raw)
+    except ValueError:
+        return Failure(
+            kind="degenerate",
+            reason="overhang must be a finite number of metres, zero or positive",
+        )
 
 
 def _expand_pitches(pitch: Pitch | list[Pitch], n: int) -> list[Pitch]:
@@ -124,8 +246,8 @@ def _is_gable(pitch: Pitch) -> bool:
 
 
 def _edge_rows(
-    footprint: list[tuple[float, float]],
-    holes: list[list[tuple[float, float]]] | None,
+    footprint: list[tuple[Any, Any]],
+    holes: list[list[tuple[Any, Any]]] | None,
     pitches: list[Pitch],
 ) -> list[EdgeRow]:
     rings = [footprint, *(holes or [])]
@@ -163,6 +285,9 @@ def _describe(result: Roof | Failure) -> str:
         lengths = by_kind.get(kind)
         if lengths:
             lines.append(f"{kind}: {sum(lengths):.3f} m")
+    if not result.validity.is_terrain:
+        lines.append("validity.reasons:")
+        lines.extend(result.validity.reasons)
     return "\n".join(lines)
 
 

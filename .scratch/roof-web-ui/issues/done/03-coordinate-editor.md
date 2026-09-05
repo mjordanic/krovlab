@@ -17,7 +17,7 @@ plan, `validity.reasons`, and no 3D. An unreadable pitch spelling returns
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 5 (tables filled from the preset), 9, 10, 11, 12, 13, 14, 24, 29, 30, 31
 
@@ -28,11 +28,11 @@ some L-shapes — a `Roof` with `validity.is_terrain` false, not always a
 PRD "Required HTTP cases" for invalid pitch and non-terrain POST. One hole
 only is an explicit out-of-scope for N holes, not a missing feature.
 
-- [ ] Outer vertices and at most one hole can be edited as `(x, y)` metres and submitted
-- [ ] Adding or removing vertices rebuilds pitch rows (outer then hole) before or as part of submit
-- [ ] Pitch rows stay labelled with index and `from → to` after an edit
-- [ ] Choosing a corpus fixture fills the coordinate tables and pitch rows
-- [ ] POST of an unreadable pitch returns Failure `invalid_pitch` and not HTTP 500
-- [ ] POST of a documented non-terrain footprint shows plan, validity reasons, and no 3D
-- [ ] No accepted form POST raises out of the request
-- [ ] Flask test client covers invalid pitch and one non-terrain case
+- [x] Outer vertices and at most one hole can be edited as `(x, y)` metres and submitted
+- [x] Adding or removing vertices rebuilds pitch rows (outer then hole) before or as part of submit
+- [x] Pitch rows stay labelled with index and `from → to` after an edit
+- [x] Choosing a corpus fixture fills the coordinate tables and pitch rows
+- [x] POST of an unreadable pitch returns Failure `invalid_pitch` and not HTTP 500
+- [x] POST of a documented non-terrain footprint shows plan, validity reasons, and no 3D
+- [x] No accepted form POST raises out of the request
+- [x] Flask test client covers invalid pitch and one non-terrain case
