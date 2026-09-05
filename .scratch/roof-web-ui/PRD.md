@@ -287,6 +287,16 @@ or the Failure taxonomy.
 Cost optimisation, additive weights, and everything else in
 `docs/future-work.md` except the web application, which this spec starts.
 
+## Story coverage
+
+| Stories | Ticket |
+|---|---|
+| 2, 3, 20, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39 | 01 default rectangle page |
+| 4, 6, 7, 8, 21, 22, 28; 5 starts (preset loads the fixture) | 02 corpus dropdown |
+| 15, 16, 17, 18, 19 | 03 per-edge pitch, gable, overhang |
+| 9–14, 24, 29, 30, 31; 5 finishes (tables fill) | 04 coordinate editor and non-terrain |
+| 1, 37, 38 | 05 Cloud Run container |
+
 ## Further Notes
 
 **The risk is teaching the wrong lesson.** If the page is implemented as a
