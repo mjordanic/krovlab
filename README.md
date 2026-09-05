@@ -25,6 +25,7 @@ Optional extras:
 ```bash
 uv sync --extra viz         # Plotly, for plan / 3D / wavefront views
 uv sync --extra notebooks   # ipykernel + Plotly, to run the notebooks
+uv sync --extra web         # Flask form server wrapping roof
 ```
 
 ## Quick start
@@ -225,6 +226,20 @@ A `Failure` means no roof was produced. A `Roof` with
 `validity.is_terrain == False` means a roof was produced and then failed
 the checks — treat it as unusable. Units on a valid roof are metres and
 degrees.
+
+## Web demo
+
+A form page that wraps `roof` and the existing plan and 3D views. From the
+repo root:
+
+```bash
+uv sync --extra web
+uv run --extra web python -m web
+```
+
+Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
+Pick a named footprint from the project's corpus and submit to see the
+matching roof, or a Failure with the input drawn.
 
 ## Worked numbers
 

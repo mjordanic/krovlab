@@ -24,7 +24,7 @@ tests through the Flask test client. No coordinate editor and no Cloud Run yet.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 2, 3, 4, 5 (preset loads the fixture; tables in 03), 6, 7, 8, 20, 21, 22, 23, 25, 26, 27, 28, 32, 33, 34, 35, 36, 39
 
@@ -41,17 +41,17 @@ Failure drawing — the web app owns it; do not add it to viz. Artifact homes
 are already in the PRD: application under `web/`, `web` extra, README "Web
 demo" section for the local command only.
 
-- [ ] GET returns 200 and the default 10 × 6 m rectangle at 45° already run
-- [ ] Describe reports a terrain, ridge height 3 m, and total sloped area matching `roof`
-- [ ] Plan view and 3D solid are both present on that default roof
-- [ ] Plotly.js is loaded from a CDN, not inlined by `write_html`
-- [ ] The form lives in an HTML template a person can read
-- [ ] Dropdown lists the corpus footprints by name, not a parallel coordinate list
-- [ ] Submitting the bowtie returns Failure `self_intersection`, draws the input footprint, and omits 3D
-- [ ] Submitting the courtyard returns a terrain Roof with plan and 3D
-- [ ] Submitting the gabled rectangle returns a terrain Roof whose plan includes a verge, with 3D
-- [ ] Picking a fixture loads that fixture's rings, pitch, and overhang into the form
-- [ ] `import krovlab` still pulls in no third-party dependencies
-- [ ] The core package does not import Flask or the web app
-- [ ] One local command starts the server
-- [ ] Flask test client covers the GET and the bowtie, courtyard, and gabled rectangle POSTs; nothing asserts on CSS or pixels
+- [x] GET returns 200 and the default 10 × 6 m rectangle at 45° already run
+- [x] Describe reports a terrain, ridge height 3 m, and total sloped area matching `roof`
+- [x] Plan view and 3D solid are both present on that default roof
+- [x] Plotly.js is loaded from a CDN, not inlined by `write_html`
+- [x] The form lives in an HTML template a person can read
+- [x] Dropdown lists the corpus footprints by name, not a parallel coordinate list
+- [x] Submitting the bowtie returns Failure `self_intersection`, draws the input footprint, and omits 3D
+- [x] Submitting the courtyard returns a terrain Roof with plan and 3D
+- [x] Submitting the gabled rectangle returns a terrain Roof whose plan includes a verge, with 3D
+- [x] Picking a fixture loads that fixture's rings, pitch, and overhang into the form
+- [x] `import krovlab` still pulls in no third-party dependencies
+- [x] The core package does not import Flask or the web app
+- [x] One local command starts the server
+- [x] Flask test client covers the GET and the bowtie, courtyard, and gabled rectangle POSTs; nothing asserts on CSS or pixels

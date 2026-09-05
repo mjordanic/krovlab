@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>krovlab</title>
+</head>
+<body>
+  <p>Units: metres and degrees.</p>
+  <form method="post">
+    <label>
+      Footprint
+      <select name="fixture">
+        {% for name in names %}
+        <option value="{{ name }}"{% if name == selected %} selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p>Pitch: {{ pitch_text }} °</p>
+    <p>Overhang: {{ preset.overhang }} m</p>
+    <p>Vertices (m):
+      {% for x, y in preset.footprint %}
+      ({{ x }}, {{ y }}){% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </p>
+    {% if preset.holes %}
+    <p>Hole (m):
+      {% for hole in preset.holes %}
+        {% for x, y in hole %}
+        ({{ x }}, {{ y }}){% if not loop.last %}, {% endif %}
+        {% endfor %}
+      {% endfor %}
+    </p>
+    {% endif %}
+    <button type="submit">Submit</button>
+  </form>
+  <pre>{{ describe }}</pre>
+  {% if plan_html %}
+  <h2>Plan</h2>
+  {{ plan_html | safe }}
+  {% endif %}
+  {% if solid_html %}
+  <h2>3D solid</h2>
+  {{ solid_html | safe }}
+  {% endif %}
+  {% if footprint_html %}
+  <h2>Input footprint</h2>
+  {{ footprint_html | safe }}
+  {% endif %}
+</body>
+</html>
