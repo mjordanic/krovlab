@@ -1,4 +1,4 @@
-# 05: Cloud Run container
+# 04: Cloud Run container
 
 **What to build:** The same process that runs on localhost can be given a URL.
 A Dockerfile runs it on Python 3.13, binds `0.0.0.0`, and honours `PORT`. The
@@ -7,9 +7,9 @@ Run: `europe-west1`, min instances 0, unauthenticated. No custom domain, no
 auth, no live GCP project in CI.
 
 A power user with the deployed URL sees the same page as localhost — that is
-story 1, and it is only true once 04 is on the image.
+story 1, and it is only true once 03 is on the image.
 
-**Blocked by:** 04
+**Blocked by:** 03
 
 **Status:** ready-for-agent
 

@@ -1,4 +1,4 @@
-# 04: Coordinate editor and the non-terrain branch
+# 03: Coordinate editor and the non-terrain branch
 
 **What to build:** The power user can leave the corpus and type vertices. An
 optional outer-ring table and an optional table for **one** hole (not N holes).
@@ -15,7 +15,7 @@ straight wall, as in the limitations note) posted through the editor shows the
 plan, `validity.reasons`, and no 3D. An unreadable pitch spelling returns
 `invalid_pitch`, not a 500. Nothing the form accepts raises out of the request.
 
-**Blocked by:** 03
+**Blocked by:** 02
 
 **Status:** ready-for-agent
 

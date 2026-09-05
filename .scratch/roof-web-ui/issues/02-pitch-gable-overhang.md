@@ -1,4 +1,4 @@
-# 03: Per-edge pitch, gable, and overhang
+# 02: Per-edge pitch, gable, and overhang
 
 **What to build:** On the selected footprint, the power user sets slope the way
 `roof` already understands it. One "apply to all" control fills every edge.
@@ -10,7 +10,7 @@ stays distinct from the eaves.
 
 The posted pitch list is the source of truth. Submit is still a form POST.
 
-**Blocked by:** 02
+**Blocked by:** 01
 
 **Status:** ready-for-agent
 

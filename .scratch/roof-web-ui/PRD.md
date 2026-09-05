@@ -291,11 +291,10 @@ Cost optimisation, additive weights, and everything else in
 
 | Stories | Ticket |
 |---|---|
-| 2, 3, 20, 23, 25, 26, 27, 32, 33, 34, 35, 36, 39 | 01 default rectangle page |
-| 4, 6, 7, 8, 21, 22, 28; 5 starts (preset loads the fixture) | 02 corpus dropdown |
-| 15, 16, 17, 18, 19 | 03 per-edge pitch, gable, overhang |
-| 9–14, 24, 29, 30, 31; 5 finishes (tables fill) | 04 coordinate editor and non-terrain |
-| 1, 37, 38 | 05 Cloud Run container |
+| 2–8, 20–23, 25–28, 32–36, 39; 5 starts (preset loads the fixture) | 01 default page and corpus dropdown |
+| 15, 16, 17, 18, 19 | 02 per-edge pitch, gable, overhang |
+| 9–14, 24, 29, 30, 31; 5 finishes (tables fill) | 03 coordinate editor and non-terrain |
+| 1, 37, 38 | 04 Cloud Run container |
 
 ## Further Notes
 
