@@ -241,6 +241,27 @@ Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
 Pick a named footprint from the project's corpus and submit to see the
 matching roof, or a Failure with the input drawn.
 
+The same process is what a container runs. `Dockerfile` at the repo root
+starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
+image). Plotly.js still comes from a CDN.
+
+```bash
+docker build -t krovlab .
+docker run --rm -p 8080:8080 krovlab
+```
+
+To give it a URL, deploy that image to Cloud Run: region `europe-west1`,
+min instances 0, unauthenticated. No custom domain. Do not run this from
+CI — there is no live Google Cloud project in the test suite.
+
+```bash
+gcloud run deploy krovlab \
+  --source . \
+  --region europe-west1 \
+  --min-instances 0 \
+  --allow-unauthenticated
+```
+
 ## Worked numbers
 
 A 10 m square at 45° has apex height 5 m and four faces of 25 m² plan /

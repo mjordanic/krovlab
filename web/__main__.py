@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import os
+
 from web.app import create_app
 
 app = create_app()
 
 
 def main() -> None:
-    app.run(host="127.0.0.1", port=5000)
+    port = int(os.environ.get("PORT", "5000"))
+    host = "0.0.0.0" if "PORT" in os.environ else "127.0.0.1"
+    app.run(host=host, port=port)
 
 
 if __name__ == "__main__":
