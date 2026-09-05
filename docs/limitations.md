@@ -17,7 +17,9 @@ out. The library puts a hip or a valley at each corner and gives you
 one face per wall.
 
 If two consecutive walls are collinear (the same wall, with a vertex in
-the middle), you still get two faces, not one plane spanning both.
+the middle), the method still wants two faces, not one plane spanning
+both. Today that extra vertex often fails the terrain check — leave
+straight walls as two endpoints.
 
 ## Extra vertices that are not on the building
 
@@ -60,9 +62,37 @@ These are not a later version of the same construction. The model does
 not carry them:
 
 - Dormers, chimneys, rooflights, and any other penetration through the roof
+  (a courtyard hole is at eave height, with inward faces; a chimney would
+  cut the slope above the eaves, which is a different thing)
 - Curved walls
 - Eaves at more than one height, and split-level buildings
 - Several disconnected wings in one call — roof each wing separately
+
+## A returned `Roof` can still be wrong
+
+`roof` reports input it cannot even start on as a `Failure` (a bowtie,
+pitch 0, every edge gabled). Some plans it *does* start on still come
+back as a `Roof` whose `validity.is_terrain` is false. The quantities
+are then unusable. Check that flag; `validity.reasons` names what broke.
+
+Cases that currently do this, rather than raising or returning
+`Failure`:
+
+- A plus-shaped plan, where several split events collide at once
+- Some T-shapes at some pitches (the same T at 45° can pass and at 30°
+  fail)
+- Mixed pitch on some L-shapes, especially a large gap between a
+  shallow face and a steep neighbour
+- A gable on some edges of an L or a U — not every gable, only some
+- An extra vertex on an otherwise straight wall (the collinear case
+  above)
+
+Simple convex rectangles, L and U at one pitch, rectangular courtyards,
+and a gable on a rectangle are the shapes the tests exercise hardest.
+Those are the ones to trust first.
+
+Runnable examples of both the method limits and these cases are in
+[`notebooks/limitations.ipynb`](../notebooks/limitations.ipynb).
 
 ## What a passing fixture means
 

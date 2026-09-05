@@ -565,6 +565,46 @@ def test_holes_work_with_per_edge_pitch() -> None:
     assert all(face.plan_area > 0.0 for face in hole_faces)
 
 
+def test_regular_ngon_hole_is_a_valid_courtyard() -> None:
+    # A circle is not a primitive — approximate it with an n-gon. Each
+    # segment is still one wall, so the hole has n inward faces.
+    n = 16
+    radius = 1.5
+    hole = [
+        (
+            5.0 + radius * math.cos(2.0 * math.pi * i / n),
+            5.0 + radius * math.sin(2.0 * math.pi * i / n),
+        )
+        for i in range(n)
+    ]
+    result = roof(SQUARE, 45.0, holes=[hole])
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert len(result.faces) == 4 + n
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(
+        100.0 - math.pi * radius * radius, abs=0.3
+    )
+
+
+def test_scalar_pitch_covers_hole_edges_without_a_list() -> None:
+    result = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE])
+    assert isinstance(result, Roof)
+    assert {face.pitch for face in result.faces} == {45.0}
+
+
+def test_gabled_courtyard_has_no_faces_on_the_hole() -> None:
+    # Inner pitch 90: vertical courtyard walls, no inward-sloping faces.
+    # This is a light well at eave height, not a chimney through the slope.
+    pitches: list[Pitch] = [45.0, 45.0, 45.0, 45.0, 90.0, 90.0, 90.0, 90.0]
+    result = roof(SQUARE, pitches, holes=[COURTYARD_HOLE])
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert sorted(face.edge_index for face in result.faces) == [0, 1, 2, 3]
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(84.0)
+    verges = [arc for arc in result.arcs if arc.kind == "verge"]
+    assert len(verges) == 4
+
+
 def test_pitch_list_for_a_holed_footprint_must_cover_every_edge() -> None:
     result = roof(SQUARE, [45.0, 45.0, 45.0, 45.0], holes=[COURTYARD_HOLE])
     assert isinstance(result, Failure)

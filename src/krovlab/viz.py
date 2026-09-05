@@ -29,14 +29,26 @@ ARC_COLOUR = {
 ARC_KINDS = ("eave", "verge", "hip", "valley", "ridge")
 
 
-def plan_view(roof: Roof) -> go.Figure:
-    """Return a plan figure of the footprint with the skeleton drawn over it.
+def plan_view(
+    roof: Roof,
+    *,
+    walls: list[tuple[float, float]] | None = None,
+    wall_holes: list[list[tuple[float, float]]] | None = None,
+) -> go.Figure:
+    """Return a plan figure of the roof with the skeleton drawn over it.
 
     Arcs are coloured by classification, using the glossary names in the
     legend. Node heights are annotated in metres.
+
+    Pass ``walls`` (and ``wall_holes``) when the eaves are not the walls:
+    an overhang. The dark ``walls`` line is the building; the eave arcs
+    are where the roof ends.
     """
     fig = go.Figure()
-    _add_footprint_trace(fig, roof)
+    fill_name = "roof" if walls is not None else "footprint"
+    _add_footprint_trace(fig, roof, name=fill_name)
+    if walls is not None:
+        _add_wall_plan_traces(fig, walls, wall_holes)
 
     by_kind: dict[str, list[tuple[float, float]]] = {kind: [] for kind in ARC_KINDS}
     for arc in roof.arcs:
@@ -84,11 +96,17 @@ def plan_view(roof: Roof) -> go.Figure:
     return fig
 
 
-def solid_view(roof: Roof) -> go.Figure:
+def solid_view(
+    roof: Roof,
+    *,
+    walls: list[tuple[float, float]] | None = None,
+    wall_holes: list[list[tuple[float, float]]] | None = None,
+) -> go.Figure:
     """Return an orbitable 3D figure of the roof solid.
 
     Face vertices use the node heights the roof already reports. There
-    is no lifting step.
+    is no lifting step. ``walls`` is the building outline at height 0,
+    drawn inside the eaves when an overhang is applied.
     """
     fig = go.Figure()
     xs = [node.x for node in roof.nodes]
@@ -141,6 +159,8 @@ def solid_view(roof: Roof) -> go.Figure:
                 hovertemplate=f"{kind}<extra></extra>",
             )
         )
+    if walls is not None:
+        _add_wall_solid_traces(fig, walls, wall_holes)
     fig.update_layout(
         scene={
             "xaxis_title": "x (m)",
@@ -154,7 +174,13 @@ def solid_view(roof: Roof) -> go.Figure:
     return fig
 
 
-def wavefront_view(roof: Roof, time: float) -> go.Figure:
+def wavefront_view(
+    roof: Roof,
+    time: float,
+    *,
+    walls: list[tuple[float, float]] | None = None,
+    wall_holes: list[list[tuple[float, float]]] | None = None,
+) -> go.Figure:
     """Return a plan figure of the wavefront at ``time`` over the footprint.
 
     ``time`` is height in metres: the wavefront rises at unit rate, so a
@@ -163,7 +189,10 @@ def wavefront_view(roof: Roof, time: float) -> go.Figure:
     footprint with an empty wavefront — rather than erroring.
     """
     fig = go.Figure()
-    _add_footprint_trace(fig, roof)
+    fill_name = "roof" if walls is not None else "footprint"
+    _add_footprint_trace(fig, roof, name=fill_name)
+    if walls is not None:
+        _add_wall_plan_traces(fig, walls, wall_holes)
     points = _wavefront_segments(roof, time)
     if not points:
         points = [(float("nan"), float("nan"))]
@@ -190,7 +219,11 @@ def wavefront_view(roof: Roof, time: float) -> go.Figure:
 
 
 def wavefront_steps(
-    roof: Roof, events: tuple[Event, ...] | None = None
+    roof: Roof,
+    events: tuple[Event, ...] | None = None,
+    *,
+    walls: list[tuple[float, float]] | None = None,
+    wall_holes: list[list[tuple[float, float]]] | None = None,
 ) -> list[go.Figure]:
     """Return a wavefront view at each successive step time.
 
@@ -199,7 +232,10 @@ def wavefront_steps(
     Without the log, node heights are used — time is height. Time 0 is
     always included so the sequence starts at the footprint.
     """
-    return [wavefront_view(roof, time) for time in _step_times(roof, events)]
+    return [
+        wavefront_view(roof, time, walls=walls, wall_holes=wall_holes)
+        for time in _step_times(roof, events)
+    ]
 
 
 def _step_times(
@@ -227,8 +263,10 @@ def write_html(fig: go.Figure, path: str | Path) -> Path:
     return destination
 
 
-def _add_footprint_trace(fig: go.Figure, roof: Roof) -> None:
-    """Draw the footprint ring under the skeleton or wavefront."""
+def _add_footprint_trace(
+    fig: go.Figure, roof: Roof, *, name: str = "footprint"
+) -> None:
+    """Draw the eave ring — the roof's plan extent — under the skeleton."""
     ring = _footprint_ring(roof)
     xs, ys = [p[0] for p in ring], [p[1] for p in ring]
     fig.add_trace(
@@ -239,11 +277,92 @@ def _add_footprint_trace(fig: go.Figure, roof: Roof) -> None:
             fill="toself",
             fillcolor="rgba(243, 244, 246, 0.85)",
             line={"color": "#d1d5db", "width": 1},
-            name="footprint",
+            name=name,
             hoverinfo="skip",
             showlegend=True,
         )
     )
+
+
+WALL_COLOUR = "#7c2d12"
+WALL_FILL = "rgba(124, 45, 18, 0.20)"
+
+
+def _closed_xy(ring: list[tuple[float, float]]) -> tuple[list[float], list[float]]:
+    """Repeat the first vertex so a scatter trace closes."""
+    xs = [p[0] for p in ring]
+    ys = [p[1] for p in ring]
+    if not xs:
+        return xs, ys
+    return [*xs, xs[0]], [*ys, ys[0]]
+
+
+def _add_wall_plan_traces(
+    fig: go.Figure,
+    walls: list[tuple[float, float]],
+    wall_holes: list[list[tuple[float, float]]] | None,
+) -> None:
+    """Building outline, distinct from the eaves (the roof edge)."""
+    xs, ys = _closed_xy(walls)
+    fig.add_trace(
+        go.Scatter(
+            x=xs,
+            y=ys,
+            mode="lines",
+            fill="toself",
+            fillcolor=WALL_FILL,
+            line={"color": WALL_COLOUR, "width": 3},
+            name="walls",
+            hovertemplate="walls<extra></extra>",
+        )
+    )
+    for i, hole in enumerate(wall_holes or []):
+        hxs, hys = _closed_xy(hole)
+        fig.add_trace(
+            go.Scatter(
+                x=hxs,
+                y=hys,
+                mode="lines",
+                line={"color": WALL_COLOUR, "width": 2, "dash": "dash"},
+                name="walls (hole)" if i == 0 else f"walls (hole {i})",
+                hovertemplate="walls (hole)<extra></extra>",
+                showlegend=i == 0,
+            )
+        )
+
+
+def _add_wall_solid_traces(
+    fig: go.Figure,
+    walls: list[tuple[float, float]],
+    wall_holes: list[list[tuple[float, float]]] | None,
+) -> None:
+    """Building outline at height 0, inside the eaves when they overhang."""
+    xs, ys = _closed_xy(walls)
+    fig.add_trace(
+        go.Scatter3d(
+            x=xs,
+            y=ys,
+            z=[0.0] * len(xs),
+            mode="lines",
+            line={"color": WALL_COLOUR, "width": 8},
+            name="walls",
+            hovertemplate="walls<extra></extra>",
+        )
+    )
+    for i, hole in enumerate(wall_holes or []):
+        hxs, hys = _closed_xy(hole)
+        fig.add_trace(
+            go.Scatter3d(
+                x=hxs,
+                y=hys,
+                z=[0.0] * len(hxs),
+                mode="lines",
+                line={"color": WALL_COLOUR, "width": 6},
+                name="walls (hole)" if i == 0 else f"walls (hole {i})",
+                hovertemplate="walls (hole)<extra></extra>",
+                showlegend=i == 0,
+            )
+        )
 
 
 def _wavefront_segments(roof: Roof, time: float) -> list[tuple[float, float]]:

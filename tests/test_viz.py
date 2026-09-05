@@ -299,6 +299,55 @@ def test_wavefront_view_builds_from_supported_footprint_classes(
     assert len(figs) > 1
 
 
+def test_plan_view_without_walls_has_no_walls_trace() -> None:
+    from krovlab.viz import plan_view
+
+    names = {trace.name for trace in plan_view(_rectangle_roof()).data}
+    assert "walls" not in names
+    assert "footprint" in names
+
+
+def test_plan_view_draws_walls_inside_overhanging_eaves() -> None:
+    from krovlab.viz import plan_view
+
+    result = roof(RECTANGLE, 45.0, overhang=0.5)
+    assert isinstance(result, Roof)
+    fig = plan_view(result, walls=RECTANGLE)
+    names = {trace.name for trace in fig.data}
+    assert "walls" in names
+    assert "roof" in names
+    walls = next(trace for trace in fig.data if trace.name == "walls")
+    assert 0.0 in list(walls.x)
+    assert 10.0 in list(walls.x)
+    eaves = next(trace for trace in fig.data if trace.name == "eave")
+    finite = [x for x in eaves.x if x == x]
+    assert any(abs(x - (-0.5)) < 1e-9 for x in finite)
+    assert any(abs(x - 10.5) < 1e-9 for x in finite)
+
+
+def test_plan_view_draws_wall_holes() -> None:
+    from krovlab.viz import plan_view
+
+    result = roof(SQUARE, 45.0, holes=[COURTYARD], overhang=0.5)
+    assert isinstance(result, Roof)
+    fig = plan_view(result, walls=SQUARE, wall_holes=[COURTYARD])
+    hole = next(trace for trace in fig.data if trace.name == "walls (hole)")
+    assert 3.0 in list(hole.x)
+    assert 7.0 in list(hole.x)
+
+
+def test_solid_view_draws_walls_at_height_zero() -> None:
+    from krovlab.viz import solid_view
+
+    result = roof(RECTANGLE, 45.0, overhang=0.5)
+    assert isinstance(result, Roof)
+    fig = solid_view(result, walls=RECTANGLE)
+    walls = next(trace for trace in fig.data if trace.name == "walls")
+    assert set(walls.z) <= {0.0}
+    assert 0.0 in list(walls.x)
+    assert 10.0 in list(walls.x)
+
+
 def test_core_does_not_import_viz() -> None:
     import ast
 
