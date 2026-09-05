@@ -15,8 +15,32 @@
         {% endfor %}
       </select>
     </label>
-    <p>Pitch: {{ pitch_text }} °</p>
-    <p>Overhang: {{ preset.overhang }} m</p>
+    <p>
+      <label>
+        Apply to all
+        <input name="apply_to_all" value="{{ apply_to_all }}">
+      </label>
+      <button type="button" id="apply-to-all">Apply to all</button>
+    </p>
+    {% for edge in edges %}
+    <p>
+      <label>
+        {{ edge.index }}: ({{ edge.start[0] }}, {{ edge.start[1] }}) → ({{ edge.end[0] }}, {{ edge.end[1] }})
+        <input name="pitch-{{ edge.index }}" value="{{ edge.pitch }}"{% if edge.gable %} disabled{% endif %}>
+      </label>
+      <label>
+        <input type="checkbox" name="gable-{{ edge.index }}"{% if edge.gable %} checked{% endif %}>
+        Gable
+      </label>
+    </p>
+    {% endfor %}
+    <p>
+      <label>
+        Overhang
+        <input name="overhang" value="{{ overhang }}">
+        m
+      </label>
+    </p>
     <p>Vertices (m):
       {% for x, y in preset.footprint %}
       ({{ x }}, {{ y }}){% if not loop.last %}, {% endif %}
@@ -46,5 +70,31 @@
   <h2>Input footprint</h2>
   {{ footprint_html | safe }}
   {% endif %}
+  <script>
+    document.getElementById("apply-to-all").addEventListener("click", function () {
+      var value = document.querySelector("[name=apply_to_all]").value;
+      document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
+        input.value = value;
+        input.disabled = false;
+      });
+      document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
+        box.checked = false;
+      });
+    });
+    document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
+      box.addEventListener("change", function () {
+        var input = document.querySelector("[name='pitch-" + box.name.slice("gable-".length) + "']");
+        if (!input) {
+          return;
+        }
+        if (box.checked) {
+          input.value = "90";
+          input.disabled = true;
+        } else {
+          input.disabled = false;
+        }
+      });
+    });
+  </script>
 </body>
 </html>

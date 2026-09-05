@@ -114,8 +114,12 @@ def test_posting_a_fixture_fills_the_form_from_the_corpus() -> None:
     assert 'value="rectangle-gabled" selected' in page
     assert "(0.0, 0.0)" in page
     assert "(10.0, 6.0)" in page
-    assert "45.0, 90.0, 45.0, 45.0" in page
-    assert "0.0 m" in page
+    assert 'name="pitch-0" value="45.0"' in page
+    assert 'name="pitch-1" value="90" disabled' in page
+    assert 'name="pitch-2" value="45.0"' in page
+    assert 'name="pitch-3" value="45.0"' in page
+    assert 'name="gable-1" checked' in page
+    assert 'name="overhang" value="0.0"' in page
 
 
 def test_core_does_not_import_flask_or_the_web_app() -> None:
@@ -143,6 +147,97 @@ def test_readme_documents_one_local_command() -> None:
     text = readme.read_text(encoding="utf-8")
     assert "## Web demo" in text
     assert "python -m web" in text
+
+
+def test_posting_apply_to_all_builds_the_roof_at_that_pitch() -> None:
+    built = roof(RECTANGLE, "4:12")
+    assert isinstance(built, Roof)
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "apply_to_all": "4:12",
+            "pitch-0": "4:12",
+            "pitch-1": "4:12",
+            "pitch-2": "4:12",
+            "pitch-3": "4:12",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "ridge height: 1.000 m" in page
+    assert "ridge: 4.000 m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert 'name="pitch-0" value="4:12"' in page
+    assert 'name="pitch-1" value="4:12"' in page
+    assert 'name="pitch-2" value="4:12"' in page
+    assert 'name="pitch-3" value="4:12"' in page
+
+
+def test_posting_a_gable_on_one_rectangle_edge_writes_90() -> None:
+    built = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0])
+    assert isinstance(built, Roof)
+    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "pitch-0": "45",
+            "gable-1": "on",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"verge: {verge_m:.3f} m" in page
+    assert 'name="pitch-1" value="90" disabled' in page
+    assert 'name="gable-1" checked' in page
+
+
+def test_posting_overhang_returns_the_enlarged_footprint_roof() -> None:
+    built = roof(RECTANGLE, 45.0, overhang=0.5)
+    assert isinstance(built, Roof)
+    assert built.validity.is_terrain is True
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0.5",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "ridge height: 3.500 m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert 'name="overhang" value="0.5"' in page
+
+
+def test_get_shows_apply_to_all_and_a_pitch_row_per_edge() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert 'name="apply_to_all"' in page
+    assert "Apply to all" in page
+    assert 'name="overhang"' in page
+    assert "0: (0.0, 0.0) → (10.0, 0.0)" in page
+    assert "1: (10.0, 0.0) → (10.0, 6.0)" in page
+    assert "2: (10.0, 6.0) → (0.0, 6.0)" in page
+    assert "3: (0.0, 6.0) → (0.0, 0.0)" in page
+    assert 'name="pitch-0"' in page
+    assert 'name="pitch-3"' in page
+    assert 'name="gable-0"' in page
+    assert "Gable" in page
 
 
 

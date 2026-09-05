@@ -12,7 +12,7 @@ The posted pitch list is the source of truth. Submit is still a form POST.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 15, 16, 17, 18, 19
 
@@ -23,9 +23,9 @@ pitch list `[45, 90, 45, 45]`. Overhang as an offset; viz `plan_view` /
 PRD "The posted pitch list is the source of truth" and "Overhang uses the viz
 walls contract."
 
-- [ ] Apply-to-all fills every edge pitch row, then a single gable can be checked
-- [ ] Each edge row shows index and `from → to`, and accepts `roof`'s pitch spellings
-- [ ] A gable checkbox writes `90` and disables that row's pitch field
-- [ ] Overhang posts through to `roof`; when non-zero, views get the original rings as walls
-- [ ] POST of the rectangle with overhang 0.5 m returns 200 and a terrain Roof of the enlarged footprint
-- [ ] Flask test client covers apply-to-all, a gable on one rectangle edge, and overhang
+- [x] Apply-to-all fills every edge pitch row, then a single gable can be checked
+- [x] Each edge row shows index and `from → to`, and accepts `roof`'s pitch spellings
+- [x] A gable checkbox writes `90` and disables that row's pitch field
+- [x] Overhang posts through to `roof`; when non-zero, views get the original rings as walls
+- [x] POST of the rectangle with overhang 0.5 m returns 200 and a terrain Roof of the enlarged footprint
+- [x] Flask test client covers apply-to-all, a gable on one rectangle edge, and overhang
