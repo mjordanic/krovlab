@@ -153,16 +153,19 @@ partly to keep this possible. CGAL would have foreclosed it permanently.
 
 ## 3. Web application
 
-Unresolved on purpose. The core library must not assume an answer: data in,
-data out, no I/O, no framework.
+The first UI is decided: a Python form server wrapping `roof`, developed on
+localhost, hosted on Cloud Run when a URL is needed. See ADR-0002 and
+`.scratch/roof-web-ui/PRD.md`. The core still must not assume that answer:
+data in, data out, no I/O, no framework.
 
-Once there is something worth showing, the options are a Python server
-(simplest, now that zero hosting cost isn't required), Pyodide (no server, but
-ships a large runtime), or a port of the core to TypeScript.
+Pyodide (no server, large runtime) and a TypeScript port of the core remain
+the unused alternatives. They would only be reopened if the server wrap were
+abandoned.
 
-For hosting a static build, Cloudflare Pages remains the standout — unlimited
-bandwidth and requests on the free tier where Netlify, Vercel and GitHub Pages
-all cap at 100 GB/month — with a 25 MB per-file limit to design around.
+For a *static* build (not this UI), Cloudflare Pages remains the standout —
+unlimited bandwidth and requests on the free tier where Netlify, Vercel and
+GitHub Pages all cap at 100 GB/month — with a 25 MB per-file limit to design
+around.
 
 ---
 
