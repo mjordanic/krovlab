@@ -76,7 +76,7 @@ and the neighbouring faces meet the wall at verges. Gabling every edge is
 Weight (`cot(pitch)`) is an internal wavefront speed. It never appears on
 the returned roof.
 
-### A rectangle, an L, a courtyard, a gable, an overhang
+### A rectangle, an L, a courtyard, a gable, an overhang, an eave height
 
 ```python
 import math
@@ -282,7 +282,8 @@ the courtyard corners, and a 7 m ridge square where the wavefronts meet.
 Step-through examples after `uv sync --extra notebooks`:
 
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
-  call `roof`, read quantities, gables, holes, overhang, and the views.
+  call `roof`, read quantities, gables, holes, overhang, eave height,
+  and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, inherent method limits, and how to read
   `validity`.
