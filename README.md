@@ -147,6 +147,20 @@ lot = project(
 # height is 9.5 m. Each face names its cell and that cell's edge.
 # Overlapping cells are a named Failure. An L drawn as one polygon is
 # still one cell — the library does not cut it.
+
+neighbour = [(5, 0), (10, 0), (10, 6), (5, 6)]
+gables = [45, 90, 45, 90]
+pair = project(
+    [
+        Cell(house, gables, eave_height=5),
+        Cell(neighbour, gables, eave_height=7),
+    ]
+)
+# Two concatenated gables sharing the party wall at x = 5. Each
+# ridge is 3 m above its eave, so the project ridge is 10 m. The
+# party wall is not counted twice as eaves. Two pitched eaves on that
+# wall at the same eave height meet as one valley. A gable against a
+# pitch, or pitched eaves at two heights, is a named Failure.
 ```
 
 Either winding is accepted. A closed-ring spelling (first point repeated
@@ -243,6 +257,8 @@ you can show. Nothing the entry point accepts raises.
 | `incomplete` | The wavefront stopped before the skeleton finished, including when every edge is a gable. |
 | `empty` | `project` was given no cells. |
 | `overlap` | Two cells overlap in plan. |
+| `gable_versus_pitch` | A shared edge is a gable on one cell and pitched on the other. |
+| `unequal_eave_height` | A pitched shared edge sits at two eave heights. |
 
 A `Failure` means no roof was produced. A `Roof` with
 `validity.is_terrain == False` means a roof was produced and then failed
@@ -261,7 +277,8 @@ uv run --extra web python -m web
 
 Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
 Pick a named footprint from the project's corpus and submit to see the
-matching roof, or a Failure with the input drawn. Edit vertices and Add
+matching roof, or a Failure with the input drawn. `concatenated-gables`
+is two cells at plate heights 5 m and 7 m. Edit vertices and Add
 cell to type a second footprint; submit is still one form POST.
 
 The same process is what a container runs. `Dockerfile` at the repo root
@@ -291,8 +308,9 @@ A 10 m square at 45° has apex height 5 m and four faces of 25 m² plan /
 `25 / cos(45°)` sloped. A 10 × 6 m rectangle at 45° has a 4 m ridge at
 height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. The same roof at eave height
 7 m has ridge height 10 m. Two detached 5 × 6 m hips at eave heights 5 m
-and 7 m have project ridge height 9.5 m and plan area 60 m². A 10 m square
-with pitches
+and 7 m have project ridge height 9.5 m and plan area 60 m². Two 5 × 6 m
+gables sharing a party wall at those plate heights have project ridge
+height 10 m: each ridge is 3 m above its eave. A 10 m square with pitches
 `[60, 45, 60, 45]` has a 5 m ridge along `x = 5` of length `10 - 10/√3`.
 A 10 m square with a centred 4 m courtyard at 45° has ridge height 1.5 m
 and plan area 84 m²: four hips from the outer corners, four valleys from
@@ -304,7 +322,7 @@ Step-through examples after `uv sync --extra notebooks`:
 
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
   call `roof`, read quantities, gables, holes, overhang, eave height,
-  a project of two cells, and the views.
+  a project of two cells, concatenated gables and a valley, and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, inherent method limits, and how to read
   `validity`.

@@ -8,10 +8,14 @@ import pytest
 from hypothesis import assume, given, settings
 
 from generation import PITCHES, footprints
-from krovlab import Cell, Failure, Project, Roof, project, roof
+from krovlab import Cell, Failure, Pitch, Project, Roof, project, roof
 
 RECT_5X6 = [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
 DETACHED_5X6 = [(8.0, 0.0), (13.0, 0.0), (13.0, 6.0), (8.0, 6.0)]
+NEIGHBOUR_5X6 = [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)]
+# East and west walls gabled: ridge runs north-south. The party wall at
+# x = 5 is a 6 m gable, so each cell's ridge is 3 m above its eave.
+GABLES: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
 L_SHAPE = [
     (0.0, 0.0),
     (10.0, 0.0),
@@ -105,10 +109,75 @@ def test_overlapping_cells_are_a_named_failure() -> None:
 
 
 def test_cells_that_only_share_a_wall_are_not_an_overlap() -> None:
-    neighbour = [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)]
-    result = project([Cell(RECT_5X6, 45.0), Cell(neighbour, 45.0)])
+    result = project([Cell(RECT_5X6, 45.0), Cell(NEIGHBOUR_5X6, 45.0)])
     assert isinstance(result, Project)
     assert sum(face.plan_area for face in result.faces) == pytest.approx(60.0)
+
+
+def test_concatenated_gables_at_5m_and_7m_are_one_project() -> None:
+    result = project(
+        [
+            Cell(RECT_5X6, GABLES, eave_height=5.0),
+            Cell(NEIGHBOUR_5X6, GABLES, eave_height=7.0),
+        ]
+    )
+    assert isinstance(result, Project)
+    assert result.ridge_height == pytest.approx(10.0)
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(60.0)
+    assert result.validity.is_terrain is True
+    assert all(roof.validity.is_terrain for roof in result.roofs)
+
+
+def test_a_party_wall_is_not_counted_twice_as_eaves() -> None:
+    result = project(
+        [
+            Cell(RECT_5X6, GABLES, eave_height=5.0),
+            Cell(NEIGHBOUR_5X6, GABLES, eave_height=7.0),
+        ]
+    )
+    assert isinstance(result, Project)
+    eave_m = sum(arc.length for arc in result.arcs if arc.kind == "eave")
+    # Each cell has two 5 m eaves. The 6 m party wall is a gable, not an
+    # eave, so it is not counted twice.
+    assert eave_m == pytest.approx(20.0)
+
+
+def test_shared_pitched_eaves_at_the_same_height_are_one_valley() -> None:
+    result = project([Cell(RECT_5X6, 45.0), Cell(NEIGHBOUR_5X6, 45.0)])
+    assert isinstance(result, Project)
+    eave_m = sum(arc.length for arc in result.arcs if arc.kind == "eave")
+    valley_m = sum(arc.length for arc in result.arcs if arc.kind == "valley")
+    assert eave_m == pytest.approx(32.0)
+    assert valley_m == pytest.approx(6.0)
+
+
+def test_shared_edge_gable_versus_pitch_is_a_named_failure() -> None:
+    result = project(
+        [Cell(RECT_5X6, GABLES), Cell(NEIGHBOUR_5X6, 45.0)]
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "gable_versus_pitch"
+    assert "gable" in result.reason.lower()
+
+
+def test_shared_pitched_edge_with_unequal_eave_heights_is_a_named_failure() -> None:
+    result = project(
+        [
+            Cell(RECT_5X6, 45.0, eave_height=5.0),
+            Cell(NEIGHBOUR_5X6, 45.0, eave_height=7.0),
+        ]
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "unequal_eave_height"
+    assert "eave" in result.reason.lower()
+
+
+def test_two_pitches_on_collinear_edges_of_one_cell_remain_unsupported() -> None:
+    ring = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+    pitches: list[Pitch] = [45.0, 30.0, 45.0, 45.0, 45.0]
+    result = project([Cell(ring, pitches)])
+    assert isinstance(result, Failure)
+    assert result.kind == "unsupported"
 
 
 def test_identical_cells_are_an_overlap() -> None:

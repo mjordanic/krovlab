@@ -1,10 +1,10 @@
 """A project is one or more cells roofed through :func:`krovlab.roof.roof`.
 
 Each cell is one footprint at one eave height. ``project`` roofs them
-independently, refuses an empty list and overlapping plan regions, and
-returns one value: per-cell roofs, faces that name cell and edge, summed
-covering, and ridge height as the highest point above datum. Shared-wall
-agreement is not decided here.
+independently, refuses an empty list, overlapping plan regions, and
+disagreeing shared edges, and returns one value: per-cell roofs, faces
+that name cell and edge, summed covering, and ridge height as the
+highest point above datum. Shared walls are coincident geometry.
 """
 
 from __future__ import annotations
@@ -12,7 +12,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from krovlab._input import Pitch
+from krovlab._input import (
+    _ORIENT_M2,
+    Pitch,
+    _on_segment,
+    _same_point,
+)
 from krovlab._input import (
     _orient as _orient_points,
 )
@@ -23,6 +28,9 @@ from krovlab._input import (
     _signed_area as _ring_area,
 )
 from krovlab.roof import Arc, Face, Failure, Node, Roof, Validity, roof
+
+_EAVE_HEIGHT_TOL_M = 1e-9
+"""Metres. Shared pitched edges at this gap are treated as one height."""
 
 
 @dataclass(frozen=True)
@@ -99,7 +107,10 @@ class Project:
     """Sum of every cell's covering area."""
 
     validity: Validity
-    """True when every cell is a terrain. Overlap is a Failure, not a flag."""
+    """True when every cell is a terrain.
+
+    Overlap and shared-edge disagreement are Failures, not flags.
+    """
 
 
 def project(cells: Sequence[Cell]) -> Project | Failure:
@@ -109,16 +120,19 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
     ----------
     cells
         One or more cells. Empty is ``empty``. Two cells whose roofed
-        regions overlap in plan is ``overlap``. A cell that ``roof``
-        refuses is that same Failure. Shared-edge agreement is not
-        checked.
+        regions overlap in plan is ``overlap``. A shared edge that is a
+        gable on one cell and pitched on the other is ``gable_versus_pitch``.
+        A pitched shared edge at two eave heights is ``unequal_eave_height``.
+        A cell that ``roof`` refuses is that same Failure.
 
     Returns
     -------
     Project
         Per-cell roofs, faces with cell and edge indices, summed sloped
         area, ridge height as the max above datum, and a validity result
-        that is a terrain when every cell is.
+        that is a terrain when every cell is. A party wall (both gables)
+        is not counted twice as eaves. Two pitched shared eaves at the
+        same height are one valley.
     Failure
         Named refusal. Nothing this function accepts raises.
     """
@@ -151,11 +165,17 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
                     kind="overlap",
                     reason="cells overlap in plan",
                 )
-    return _assemble(roofs)
+    valleys = _shared_edge_agreement(cells, roofs)
+    if isinstance(valleys, Failure):
+        return valleys
+    return _assemble(roofs, valleys)
 
 
-def _assemble(roofs: list[Roof]) -> Project:
-    """Concatenate roofs into one project value."""
+def _assemble(
+    roofs: list[Roof],
+    valleys: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> Project:
+    """Concatenate roofs into one project value, joining shared eaves."""
     nodes: list[Node] = []
     faces: list[ProjectFace] = []
     arcs: list[Arc] = []
@@ -173,7 +193,7 @@ def _assemble(roofs: list[Roof]) -> Project:
         roofs=tuple(roofs),
         nodes=tuple(nodes),
         faces=tuple(faces),
-        arcs=tuple(arcs),
+        arcs=tuple(_rewrite_valleys(nodes, arcs, valleys)),
         ridge_height=max(node.height for node in nodes),
         total_sloped_area=sum(face.sloped_area for face in faces),
         validity=Validity(is_terrain=not reasons, reasons=tuple(reasons)),
@@ -206,6 +226,135 @@ def _shifted_arcs(offset: int, arcs: tuple[Arc, ...]) -> list[Arc]:
         )
         for arc in arcs
     ]
+
+
+def _shared_edge_agreement(
+    cells: Sequence[Cell], roofs: list[Roof]
+) -> list[tuple[tuple[float, float], tuple[float, float]]] | Failure:
+    """Party walls pass; pitched matches become valleys; the rest fail."""
+    valleys: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for i, cell in enumerate(cells):
+        for ei, (a0, a1) in enumerate(_outer_edges(cell.footprint)):
+            for j, other in enumerate(cells[i + 1 :], start=i + 1):
+                for ej, (b0, b1) in enumerate(_outer_edges(other.footprint)):
+                    if not _segments_coincide(a0, a1, b0, b1):
+                        continue
+                    gable_a = _edge_is_gable(roofs[i], ei)
+                    gable_b = _edge_is_gable(roofs[j], ej)
+                    if gable_a and gable_b:
+                        continue
+                    if gable_a or gable_b:
+                        return Failure(
+                            kind="gable_versus_pitch",
+                            reason=(
+                                "a shared edge is a gable on one cell and "
+                                "pitched on the other"
+                            ),
+                        )
+                    if (
+                        abs(cell.eave_height - other.eave_height)
+                        > _EAVE_HEIGHT_TOL_M
+                    ):
+                        return Failure(
+                            kind="unequal_eave_height",
+                            reason=(
+                                "a pitched shared edge has unequal eave heights"
+                            ),
+                        )
+                    valleys.append((a0, a1))
+    return valleys
+
+
+def _outer_edges(
+    ring: list[tuple[float, float]],
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    pts = _open_ring(ring)
+    n = len(pts)
+    return [(pts[i], pts[(i + 1) % n]) for i in range(n)]
+
+
+def _edge_is_gable(built: Roof, edge_index: int) -> bool:
+    return all(face.edge_index != edge_index for face in built.faces)
+
+
+def _segments_coincide(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+) -> bool:
+    """True when ab and cd are the same segment to vertex tolerance."""
+    if _same_point(a, b) or _same_point(c, d):
+        return False
+    if (_same_point(a, c) and _same_point(b, d)) or (
+        _same_point(a, d) and _same_point(b, c)
+    ):
+        return True
+    if (
+        abs(_orient_points(a, b, c)) > _ORIENT_M2
+        or abs(_orient_points(a, b, d)) > _ORIENT_M2
+    ):
+        return False
+    return (
+        _on_segment(a, b, c)
+        and _on_segment(a, b, d)
+        and _on_segment(c, d, a)
+        and _on_segment(c, d, b)
+    )
+
+
+def _rewrite_valleys(
+    nodes: list[Node],
+    arcs: list[Arc],
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> list[Arc]:
+    """Drop both shared eaves and count the inner gutter once as a valley."""
+    drop: set[int] = set()
+    added: list[Arc] = []
+    for segment in segments:
+        hits = [
+            i
+            for i, arc in enumerate(arcs)
+            if i not in drop
+            and arc.kind == "eave"
+            and _arc_on_segment(arc, nodes, segment[0], segment[1])
+        ]
+        if len(hits) < 2:
+            continue
+        first = arcs[hits[0]]
+        added.append(
+            Arc(
+                start=first.start,
+                end=first.end,
+                kind="valley",
+                length=first.length,
+            )
+        )
+        drop.update(hits)
+    return [arc for i, arc in enumerate(arcs) if i not in drop] + added
+
+
+def _arc_on_segment(
+    arc: Arc,
+    nodes: list[Node],
+    a: tuple[float, float],
+    b: tuple[float, float],
+) -> bool:
+    start = nodes[arc.start]
+    end = nodes[arc.end]
+    return _point_on_segment((start.x, start.y), a, b) and _point_on_segment(
+        (end.x, end.y), a, b
+    )
+
+
+def _point_on_segment(
+    p: tuple[float, float],
+    a: tuple[float, float],
+    b: tuple[float, float],
+) -> bool:
+    if abs(_orient_points(a, b, p)) > _ORIENT_M2:
+        return False
+    return _on_segment(a, b, p)
 
 
 def _open_ring(ring: list[tuple[float, float]]) -> list[tuple[float, float]]:

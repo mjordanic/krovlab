@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -86,7 +86,9 @@ def create_app() -> Flask:
             if not apply_to_all:
                 apply_to_all = str(pitches[0]) if pitches else ""
             parsed_overhang = _posted_overhang(request.form, preset.overhang)
-            parsed_eave_height = _posted_eave_height(request.form)
+            parsed_eave_height = _posted_eave_height(
+                request.form, preset.eave_height
+            )
             parsed_footprint = cast(list[tuple[float, float]], footprint)
             parsed_holes = cast(
                 list[list[tuple[float, float]]] | None, holes
@@ -105,10 +107,8 @@ def create_app() -> Flask:
                 form_overhang = parsed_overhang
                 form_eave_height = parsed_eave_height
                 draw_rings = (parsed_footprint, parsed_holes)
-                extra_views, extra_parsed = (
-                    _posted_extra_cells(request.form, apply_to_all)
-                    if request.form.get("edit_vertices")
-                    else ([], [])
+                extra_views, extra_parsed = _extra_cells_for_post(
+                    request.form, apply_to_all, preset
                 )
                 if isinstance(extra_parsed, Failure):
                     result = extra_parsed
@@ -137,16 +137,14 @@ def create_app() -> Flask:
         else:
             pitches = fallback
             apply_to_all = str(pitches[0]) if pitches else ""
+            form_eave_height = preset.eave_height
             parsed_footprint = cast(list[tuple[float, float]], footprint)
             parsed_holes = cast(
                 list[list[tuple[float, float]]] | None, holes
             )
-            result = roof(
-                parsed_footprint,
-                pitches,
-                holes=parsed_holes,
-                overhang=preset.overhang,
-            )
+            extra_views = _extra_views_from_cells(preset.extra_cells)
+            extra_footprints = [cell.footprint for cell in preset.extra_cells]
+            result = _from_preset(preset)
             draw_rings = (parsed_footprint, parsed_holes)
         rows = _edge_rows(footprint, holes, pitches)
         plan_html, solid_html, footprint_html = _draw(
@@ -172,7 +170,11 @@ def create_app() -> Flask:
             solid_html=solid_html,
             footprint_html=footprint_html,
             edit_vertices=bool(
-                request.method == "POST" and request.form.get("edit_vertices")
+                (
+                    request.method == "POST"
+                    and request.form.get("edit_vertices")
+                )
+                or extra_views
             ),
         )
 
@@ -291,11 +293,14 @@ def _posted_overhang(
 
 
 def _posted_eave_height(
-    form: Mapping[str, str], *, field: str = "eave_height"
+    form: Mapping[str, str],
+    fallback: float = 0.0,
+    *,
+    field: str = "eave_height",
 ) -> float | Failure:
     raw = form.get(field)
     if raw is None or raw.strip() == "":
-        return 0.0
+        return fallback
     try:
         return float(raw)
     except ValueError:
@@ -348,6 +353,62 @@ def _edge_rows(
                 )
             )
     return rows
+
+
+def _from_preset(preset: Preset) -> Roof | Project | Failure:
+    cells = [
+        Cell(
+            preset.footprint,
+            preset.pitch,
+            holes=preset.holes,
+            overhang=preset.overhang,
+            eave_height=preset.eave_height,
+        ),
+        *preset.extra_cells,
+    ]
+    if len(cells) == 1:
+        return roof(
+            cells[0].footprint,
+            cells[0].pitch,
+            holes=cells[0].holes,
+            overhang=cells[0].overhang,
+            eave_height=cells[0].eave_height,
+        )
+    return project(cells)
+
+
+def _extra_cells_for_post(
+    form: Mapping[str, str], apply_to_all: str, preset: Preset
+) -> tuple[list[ExtraCellView], list[Cell] | Failure]:
+    if form.get("edit_vertices"):
+        return _posted_extra_cells(form, apply_to_all)
+    extras = list(preset.extra_cells)
+    return _extra_views_from_cells(extras), extras
+
+
+def _extra_views_from_cells(cells: Sequence[Cell]) -> list[ExtraCellView]:
+    return [_view_from_cell(i + 1, cell) for i, cell in enumerate(cells)]
+
+
+def _view_from_cell(index: int, cell: Cell) -> ExtraCellView:
+    prefix = f"cell-{index}-"
+    hole = cell.holes[0] if cell.holes else []
+    n_edges = len(cell.footprint) + len(hole)
+    pitches = _expand_pitches(cell.pitch, n_edges)
+    return ExtraCellView(
+        index=index,
+        prefix=prefix,
+        footprint=cell.footprint,
+        hole=hole,
+        edges=_edge_rows(
+            cell.footprint,
+            [hole] if hole else None,
+            pitches,
+            prefix=prefix,
+        ),
+        overhang=cell.overhang,
+        eave_height=cell.eave_height,
+    )
 
 
 def _posted_extra_cells(

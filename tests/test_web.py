@@ -5,6 +5,7 @@ Assert what the power user reads: status, describe lines, which drawing
 branch rendered, and the worked-example numbers. Not CSS, not pixels.
 """
 
+import pytest
 from flask.testing import FlaskClient
 from web.app import create_app
 
@@ -103,6 +104,7 @@ REQUIRED_PRESETS = (
     "courtyard",
     "rectangle-gabled",
     "bowtie",
+    "concatenated-gables",
 )
 
 
@@ -815,6 +817,40 @@ def test_get_offers_a_second_cell_table() -> None:
     page = _client().get("/").get_data(as_text=True)
     assert "Add cell" in page
     assert "ridge height: 3.000 m" in page
+
+
+def test_posting_concatenated_gables_preset() -> None:
+    built = project(
+        [
+            Cell(CELL_A, [45.0, 90.0, 45.0, 90.0], eave_height=5.0),
+            Cell(
+                [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)],
+                [45.0, 90.0, 45.0, 90.0],
+                eave_height=7.0,
+            ),
+        ]
+    )
+    assert isinstance(built, Project)
+    assert built.ridge_height == pytest.approx(10.0)
+    assert built.validity.is_terrain is True
+
+    response = _client().post("/", data={"fixture": "concatenated-gables"})
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert 'value="concatenated-gables" selected' in page
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" in page
+    assert "Input footprint" not in page
+    assert "(0.0, 0.0)" in page
+    assert "(10.0, 6.0)" in page
+    assert 'name="cell-1-outer-x-0"' in page
+    assert 'name="eave_height" value="5' in page
+    assert 'name="cell-1-eave_height" value="7' in page
+    assert 'name="gable-1" checked' in page
+    assert 'name="cell-1-gable-3" checked' in page
 
 
 def test_posting_overlapping_cells_is_a_failure_not_500() -> None:

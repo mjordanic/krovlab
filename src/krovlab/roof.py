@@ -41,6 +41,8 @@ FailureKind = Literal[
     "incomplete",
     "empty",
     "overlap",
+    "gable_versus_pitch",
+    "unequal_eave_height",
 ]
 """Why :func:`roof` or :func:`krovlab.project.project` refused.
 
@@ -55,6 +57,9 @@ FailureKind = Literal[
     including when every edge is a gable.
 ``empty`` — ``project`` was given no cells.
 ``overlap`` — two cells overlap in plan.
+``gable_versus_pitch`` — a shared edge is a gable on one cell and pitched
+    on the other.
+``unequal_eave_height`` — a pitched shared edge sits at two eave heights.
 """
 
 

@@ -21,7 +21,7 @@ numbers, terrain, plan, and 3D.
 
 **Blocked by:** 02 project of cells
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 4, 5, 6, 10, 11, 12, 21, 22, 23 (finishes: shared edges agree), 36,
 37, 41
@@ -32,15 +32,31 @@ pitches on one cell remain unsupported (existing input check). Corpus presets
 load rings, pitch, and overhang into the form (form-server ticket 01). Vertex
 tolerance already used for coincident points on a single footprint.
 
-- [ ] Two 5 × 6 m gable cells sharing a party wall at eave heights 5 m and 7 m,
+- [x] Two 5 × 6 m gable cells sharing a party wall at eave heights 5 m and 7 m,
       pitch 45°, yield project ridge height 9.5 m, plan area 60 m², both
       terrains, no overlap
-- [ ] That party wall is not counted twice as eaves in the takeoff
-- [ ] Two cells that share a pitched edge at the same eave height meet as one
+- [x] That party wall is not counted twice as eaves in the takeoff
+- [x] Two cells that share a pitched edge at the same eave height meet as one
       valley, counted once
-- [ ] Shared edge gable versus pitch is a named Failure
-- [ ] Shared pitched edge with unequal eave heights is a named Failure
-- [ ] Two pitches on collinear edges of one cell remain Failure `unsupported`
-- [ ] Corpus dropdown includes the concatenated-gables fixture
-- [ ] Picking that fixture fills both cells; POST reports ridge height 9.5 m,
+- [x] Shared edge gable versus pitch is a named Failure
+- [x] Shared pitched edge with unequal eave heights is a named Failure
+- [x] Two pitches on collinear edges of one cell remain Failure `unsupported`
+- [x] Corpus dropdown includes the concatenated-gables fixture
+- [x] Picking that fixture fills both cells; POST reports ridge height 9.5 m,
       terrain, plan, and 3D
+
+## Comments
+
+`project` detects coincident outer edges to the existing vertex
+tolerance. Both gables: party wall, roofs unstitched, eaves not doubled.
+Both pitched at the same eave height: the two eaves become one valley.
+`gable_versus_pitch` and `unequal_eave_height` refuse the other pairings.
+Collinear two-pitch on one cell still goes through `roof` as `unsupported`.
+
+The PRD's 2.5 m / 9.5 m ridge is the hip span (half of 5 m). A gable on
+the 6 m party wall has span 6 m, so each ridge is 3 m above its eave and
+the project ridge is 10 m. The corpus fixture and page report 10 m.
+
+`concatenated-gables.toml` is a `[[cells]]` fixture in the footprints
+directory. The roof corpus skips it; the page dropdown loads it and
+fills both cells.

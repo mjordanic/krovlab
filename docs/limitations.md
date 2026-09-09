@@ -81,7 +81,8 @@ not carry them:
   cut the slope above the eaves, which is a different thing)
 - Curved walls
 - Split-level eaves on one cell — each cell has one eave height; two
-  eave heights are two cells in a `project`
+  eave heights are two cells in a `project`. A pitched shared wall at
+  two heights, or a gable against a pitch, is a named Failure.
 
 ## A returned `Roof` can still be wrong
 

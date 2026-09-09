@@ -504,15 +504,16 @@ def _footprint_ring(roof: Roof) -> list[tuple[float, float]]:
     """Plan ring of the footprint, reconstructed from the roof value.
 
     Eaves close the ring on a fully hipped roof. Gabled edges have no
-    eave, so fall back to the original vertices (height-0 nodes, which
-    the skeleton records first).
+    eave, so fall back to the original vertices (the first nodes, which
+    sit at this cell's eave height — zero by default).
     """
     closed = _eave_ring(roof)
     if closed is not None:
         return closed
+    eave = min((node.height for node in roof.nodes), default=0.0)
     outer: list[tuple[float, float]] = []
     for node in roof.nodes:
-        if node.height > 1e-9:
+        if node.height > eave + 1e-9:
             break
         outer.append((node.x, node.y))
     return outer
