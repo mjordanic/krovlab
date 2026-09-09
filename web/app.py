@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from flask import Flask, render_template, request
 
-from krovlab import Cell, Failure, Pitch, Project, Roof, project, roof
+from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 from krovlab.viz import plan_view, solid_view
 from web.corpus import DEFAULT_PRESET, Preset, load_presets
 from web.figures import input_footprint
@@ -49,6 +49,17 @@ class ExtraCellView:
     wrap_groups: list[str]
 
 
+@dataclass(frozen=True)
+class DormerView:
+    """Posted millimetre table for one dormer ring."""
+
+    index: int
+    cell_index: int
+    footprint: list[tuple[Any, Any]]
+    pitches: list[str]
+    gables: list[bool]
+
+
 def create_app() -> Flask:
     """Build the single-page form app. One route for GET and POST."""
     app = Flask(__name__)
@@ -79,6 +90,7 @@ def create_app() -> Flask:
         wrap_groups: list[str] = _wrap_group_strings(
             posted_wrap_fields if not isinstance(posted_wrap_fields, Failure) else []
         )
+        dormer_views: list[DormerView] = []
         result: Roof | Project | Failure
         if parse_error is not None:
             apply_to_all = request.form.get("apply_to_all") or (
@@ -138,25 +150,29 @@ def create_app() -> Flask:
                 extra_views, extra_parsed = _extra_cells_for_post(
                     request.form, apply_to_all, preset
                 )
+                dormer_views, parsed_dormers = _posted_dormers(request.form)
+                first_cell = Cell(
+                    parsed_footprint,
+                    pitches,
+                    holes=parsed_holes,
+                    overhang=parsed_overhang,
+                    eave_height=parsed_eave_height,
+                    knee_height=parsed_knees,
+                    wrap=parsed_wraps or None,
+                    gambrel=posted_gambrel,
+                )
                 if isinstance(extra_parsed, Failure):
                     result = extra_parsed
+                elif isinstance(parsed_dormers, Failure):
+                    result = parsed_dormers
                 elif extra_parsed:
                     extra_footprints = [cell.footprint for cell in extra_parsed]
                     result = project(
-                        [
-                            Cell(
-                                parsed_footprint,
-                                pitches,
-                                holes=parsed_holes,
-                                overhang=parsed_overhang,
-                                eave_height=parsed_eave_height,
-                                knee_height=parsed_knees,
-                                wrap=parsed_wraps or None,
-                                gambrel=posted_gambrel,
-                            ),
-                            *extra_parsed,
-                        ]
+                        [first_cell, *extra_parsed],
+                        parsed_dormers or None,
                     )
+                elif parsed_dormers:
+                    result = project([first_cell], parsed_dormers)
                 else:
                     result = roof(
                         parsed_footprint,
@@ -198,6 +214,7 @@ def create_app() -> Flask:
             hole=holes[0] if holes else [],
             extra_cells=extra_views,
             wrap_groups=wrap_groups,
+            dormers=dormer_views,
             describe=_describe(result),
             plan_html=plan_html,
             solid_html=solid_html,
@@ -434,6 +451,63 @@ def _posted_wraps(
             groups.append(edges)
         index += 1
     return groups
+
+
+def _posted_dormers(
+    form: Mapping[str, str],
+) -> tuple[list[DormerView], list[Dormer] | Failure]:
+    views: list[DormerView] = []
+    items: list[Dormer] = []
+    index = 0
+    while index < 64:
+        if form.get(f"dormer-{index}-x-0") is None:
+            break
+        ring_display: list[tuple[str, str]] = []
+        i = 0
+        while True:
+            raw_x = form.get(f"dormer-{index}-x-{i}")
+            raw_y = form.get(f"dormer-{index}-y-{i}")
+            if raw_x is None and raw_y is None:
+                break
+            ring_display.append((raw_x or "", raw_y or ""))
+            i += 1
+        while ring_display and ring_display[-1] == ("", ""):
+            ring_display.pop()
+        n_edges = len(ring_display)
+        pitches = _posted_pitches(form, n_edges, [], "", prefix=f"dormer-{index}-")
+        gables = [bool(form.get(f"dormer-{index}-gable-{j}")) for j in range(n_edges)]
+        raw_cell = form.get(f"dormer-{index}-cell") or "0"
+        try:
+            cell_index = int(raw_cell)
+        except ValueError:
+            views.append(
+                DormerView(
+                    index=index,
+                    cell_index=0,
+                    footprint=ring_display,
+                    pitches=[str(p) for p in pitches],
+                    gables=gables,
+                )
+            )
+            return views, Failure(
+                kind="degenerate",
+                reason="a dormer names its host cell by integer index",
+            )
+        views.append(
+            DormerView(
+                index=index,
+                cell_index=cell_index,
+                footprint=ring_display,
+                pitches=[str(p) for p in pitches],
+                gables=gables,
+            )
+        )
+        parsed_ring = _as_xy_ring(ring_display, f"dormer {index} ring")
+        if isinstance(parsed_ring, Failure):
+            return views, parsed_ring
+        items.append(Dormer(cell_index, parsed_ring, pitches))
+        index += 1
+    return views, items
 
 
 def _wrap_group_strings(groups: list[list[int]] | None) -> list[str]:
@@ -694,6 +768,17 @@ def _describe(result: Roof | Project | Failure) -> str:
     return "\n".join(lines)
 
 
+def _shows_solid(result: Roof | Project) -> bool:
+    """3D is the terrain branch, plus the documented dormer exception."""
+    if result.validity.is_terrain:
+        return True
+    if not isinstance(result, Project):
+        return False
+    if not all(item.validity.is_terrain for item in result.roofs):
+        return False
+    return any("dormer" in reason for reason in result.validity.reasons)
+
+
 def _draw(
     result: Roof | Project | Failure,
     footprint: list[tuple[float, float]],
@@ -714,7 +799,7 @@ def _draw(
     if isinstance(result, Project):
         plan_html = _embed(plan_view(result), include_js=True)
         solid_html: str | None = None
-        if result.validity.is_terrain:
+        if _shows_solid(result):
             solid_html = _embed(solid_view(result), include_js=False)
         return plan_html, solid_html, None
     walls: dict[str, Any] = {}
@@ -722,7 +807,7 @@ def _draw(
         walls = {"walls": footprint, "wall_holes": holes}
     plan_html = _embed(plan_view(result, **walls), include_js=True)
     solid_html = None
-    if result.validity.is_terrain:
+    if _shows_solid(result):
         solid_html = _embed(solid_view(result, **walls), include_js=False)
     return plan_html, solid_html, None
 

@@ -24,6 +24,8 @@
     var selectedCell = -1;
     var selectedEdge = null;
     var selectedEdges = [];
+    var dormers = [];
+    var dormerMode = false;
 
     function pointInRing(x, y, vertices) {
       var inside = false;
@@ -138,9 +140,21 @@
       }
     }
 
+    function startDormer() {
+      if (cells.length === 0) {
+        return;
+      }
+      dormerMode = true;
+      drawing = true;
+      draft = [];
+      selectedEdge = null;
+      selectedEdges = [];
+    }
+
     function addCell() {
       drawing = true;
       draft = [];
+      dormerMode = false;
       selectedCell = -1;
       selectedEdge = null;
       selectedEdges = [];
@@ -250,6 +264,23 @@
       if (draft.length < 3) {
         return;
       }
+      if (dormerMode) {
+        var host = selectedCell < 0 ? 0 : selectedCell;
+        dormers.push({
+          cell: host,
+          vertices: draft.slice(),
+          pitches: draft.map(function () {
+            return applyToAll;
+          }),
+          gables: draft.map(function () {
+            return false;
+          }),
+        });
+        draft = [];
+        drawing = false;
+        dormerMode = false;
+        return;
+      }
       cells.push({
         vertices: draft.slice(),
         pitches: draft.map(function () {
@@ -325,6 +356,22 @@
         (cell.hole || []).forEach(function (pt, i) {
           out[p + "hole-x-" + i] = String(pt.x);
           out[p + "hole-y-" + i] = String(pt.y);
+        });
+      });
+      dormers.forEach(function (dormer, index) {
+        var dp = "dormer-" + index + "-";
+        out[dp + "cell"] = String(dormer.cell);
+        dormer.vertices.forEach(function (pt, i) {
+          out[dp + "x-" + i] = String(pt.x);
+          out[dp + "y-" + i] = String(pt.y);
+        });
+        (dormer.pitches || []).forEach(function (pitch, i) {
+          out[dp + "pitch-" + i] = String(pitch);
+        });
+        (dormer.gables || []).forEach(function (gable, i) {
+          if (gable) {
+            out[dp + "gable-" + i] = "on";
+          }
         });
       });
       return out;
@@ -413,6 +460,7 @@
       cells = [];
       draft = [];
       drawing = false;
+      dormerMode = false;
       selectedEdge = null;
       var first = readRingFromMap(map, "", "outer");
       if (first.length) {
@@ -427,7 +475,44 @@
         cells.push(cellFromMap(map, "cell-" + n + "-", extra));
         n += 1;
       }
+      dormers = readDormers(map);
       selectedCell = cells.length ? 0 : -1;
+    }
+
+    function readDormers(map) {
+      var items = [];
+      var index = 0;
+      while (Object.prototype.hasOwnProperty.call(map, "dormer-" + index + "-x-0")) {
+        var vertices = [];
+        var i = 0;
+        while (Object.prototype.hasOwnProperty.call(map, "dormer-" + index + "-x-" + i)) {
+          var xs = map["dormer-" + index + "-x-" + i];
+          var ys = map["dormer-" + index + "-y-" + i];
+          if (xs !== "" && ys !== "" && xs != null && ys != null &&
+              !Number.isNaN(parseFloat(String(xs))) &&
+              !Number.isNaN(parseFloat(String(ys)))) {
+            vertices.push({ x: parseFloat(String(xs)), y: parseFloat(String(ys)) });
+          }
+          i += 1;
+        }
+        var pitches = [];
+        var gables = [];
+        for (i = 0; i < vertices.length; i += 1) {
+          var gable = map["dormer-" + index + "-gable-" + i] === "on";
+          gables.push(gable);
+          var pitch = map["dormer-" + index + "-pitch-" + i];
+          pitches.push(gable ? "90" : (pitch ? String(pitch) : applyToAll));
+        }
+        var cell = parseInt(String(map["dormer-" + index + "-cell"] || "0"), 10);
+        items.push({
+          cell: Number.isNaN(cell) ? 0 : cell,
+          vertices: vertices,
+          pitches: pitches,
+          gables: gables,
+        });
+        index += 1;
+      }
+      return items;
     }
 
     function loadForm(form) {
@@ -566,12 +651,46 @@
           fillTbody(form.querySelector("#" + dp + "outer-vertices"), dp, "outer", draft);
         }
       }
+      writeDormerTables(form);
+    }
+
+    function writeDormerTables(form) {
+      var box = form.querySelector("#dormer-tables");
+      if (!box) {
+        return;
+      }
+      var html = "";
+      dormers.forEach(function (dormer, index) {
+        var dp = "dormer-" + index + "-";
+        html += "<p>Dormer " + index + " vertices (m)</p>";
+        html += "<input type=\"hidden\" name=\"" + dp + "cell\" value=\"" + esc(dormer.cell) + "\">";
+        html += "<table><thead><tr><th>x</th><th>y</th></tr></thead><tbody>";
+        dormer.vertices.forEach(function (pt, i) {
+          html += "<tr><td><input name=\"" + dp + "x-" + i + "\" value=\"" + esc(pt.x) + "\"></td>";
+          html += "<td><input name=\"" + dp + "y-" + i + "\" value=\"" + esc(pt.y) + "\"></td></tr>";
+        });
+        html += "</tbody></table>";
+        (dormer.pitches || []).forEach(function (pitch, i) {
+          var gable = !!(dormer.gables && dormer.gables[i]);
+          html += "<p><label>Pitch <input name=\"" + dp + "pitch-" + i + "\" value=\"" + esc(pitch) + "\"";
+          if (gable) {
+            html += " disabled";
+          }
+          html += "></label> <label><input type=\"checkbox\" name=\"" + dp + "gable-" + i + "\"";
+          if (gable) {
+            html += " checked";
+          }
+          html += "> Gable</label></p>";
+        });
+      });
+      box.innerHTML = html;
     }
 
     return {
       clickPlan: clickPlan,
       closeRing: closeRing,
       addCell: addCell,
+      startDormer: startDormer,
       setEaveHeight: setEaveHeight,
       setPitch: setPitch,
       setGable: setGable,
@@ -756,6 +875,13 @@
     if (onePlane) {
       onePlane.addEventListener("click", function () {
         editor.setOnePlane();
+        commit();
+      });
+    }
+    var drawDormer = form.querySelector("#draw-dormer");
+    if (drawDormer) {
+      drawDormer.addEventListener("click", function () {
+        editor.startDormer();
         commit();
       });
     }

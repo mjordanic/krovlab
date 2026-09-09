@@ -449,3 +449,22 @@ def test_plan_and_solid_build_from_concatenated_gables() -> None:
     assert min(xs) == pytest.approx(0.0)
     assert max(xs) == pytest.approx(10.0)
 
+
+def test_solid_view_builds_from_a_project_with_a_dormer() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Dormer, Project, project
+    from krovlab.viz import solid_view
+
+    ring = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
+    pitches: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
+    result = project([Cell(RECTANGLE, 45.0)], [Dormer(0, ring, pitches)])
+    assert isinstance(result, Project)
+    assert result.validity.is_terrain is False
+    fig = solid_view(result)
+    assert isinstance(fig, Figure)
+    mesh = next(trace for trace in fig.data if trace.type == "mesh3d")
+    assert list(mesh.z) == [node.height for node in result.nodes]
+    used = set(mesh.i) | set(mesh.j) | set(mesh.k)
+    for face in result.faces:
+        assert set(face.node_indices) <= used

@@ -24,7 +24,7 @@ dormer rings remain. Submit is still POST.
 
 **Blocked by:** 03 wrap consecutive edges
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Complexity:** high
 
@@ -37,18 +37,18 @@ Plus-shape POST still plan-only (project-from-cells and form-server). Ticket 03
 for wrap so a dormer on a wrapped face is testable. Do not add a public
 from-graph or a third engine.
 
-- [ ] Rectangle plus one gable dormer whose plan is a 2 × 1.5 m rectangle on a
+- [x] Rectangle plus one gable dormer whose plan is a 2 × 1.5 m rectangle on a
       long slope: host sloped area decreases by the opening; dormer adds two or
       three faces
-- [ ] Plan areas of host-plus-dormer still cover the host footprint; the opening
+- [x] Plan areas of host-plus-dormer still cover the host footprint; the opening
       is not double-counted
-- [ ] The project is not a terrain; the describe block says so; 3D still builds
-- [ ] A shed dormer and a gable dormer use the same placement tool (pitch list
+- [x] The project is not a terrain; the describe block says so; 3D still builds
+- [x] A shed dormer and a gable dormer use the same placement tool (pitch list
       on the dormer ring)
-- [ ] Several dormers on one project are several placements
-- [ ] Dormer overlapping two faces is a named Failure
-- [ ] Dormer outside the host is a named Failure
-- [ ] A dormer on a wrapped face clips that one plane
-- [ ] POST of a drawn dormer rectangle matches `project` with that dormer
-- [ ] A plus-shape POST still shows plan, validity reasons, and no 3D
-- [ ] Tests go through `project`; Failure is a value; core imports no Flask
+- [x] Several dormers on one project are several placements
+- [x] Dormer overlapping two faces is a named Failure
+- [x] Dormer outside the host is a named Failure
+- [x] A dormer on a wrapped face clips that one plane
+- [x] POST of a drawn dormer rectangle matches `project` with that dormer
+- [x] A plus-shape POST still shows plan, validity reasons, and no 3D
+- [x] Tests go through `project`; Failure is a value; core imports no Flask

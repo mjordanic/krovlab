@@ -5,8 +5,8 @@ build. Read this before deciding whether the tool covers a given
 building.
 
 Four limits are inherent to the method. They will not go away by
-adding features. Other roofs — dormers, and a butterfly — are
-simply not produced today; some of those stay reachable later.
+adding features. Other roofs — a butterfly, a mansard as a four-wall
+break — are simply not produced today; some of those stay reachable later.
 
 ## One plane can cover several walls only as a wrap
 
@@ -19,6 +19,18 @@ gable mask or a project of several cells.
 
 A wrap of non-consecutive edges, wrapped edges with disagreeing pitches,
 or a wrap that cannot embed as a planar terrain is a named Failure.
+
+## A dormer sits on a host face
+
+A dormer is a small footprint drawn on one host face, not a cell at eave
+height. `project` roofs every cell first, then locates each dormer by
+plan overlap onto exactly one face of that cell. The child is the
+one-footprint function on the dormer ring, lifted onto the host plane —
+the dormer's eave is the intersection with the host. Host sloped area
+loses the opening; dormer faces add. A project with dormers is not a
+single terrain; quantities remain usable and 3D still draws. A plus-shape
+or other broken skeleton still hides 3D. A dormer that overlaps two
+faces, or that lies outside the host, is a named Failure.
 
 ## One straight wall cannot carry two pitches
 
@@ -62,12 +74,9 @@ A different ridge layout on the same plan is not.
 ## Deferred: roofs that need more than one pitch per wall
 
 These are roofs a builder puts up, and that this library cannot make
-today. Dormers clip a child roof onto a host face. That is later work,
-not a closed door: the algorithm was written in-house so these stay
-reachable. An off-the-shelf skeleton library would have made them
+today. An off-the-shelf skeleton library would have made them
 impossible permanently. The reasoning is in [future work](future-work.md).
 
-- Dormers
 - Mansards
 - Butterfly roofs
 
@@ -76,7 +85,7 @@ impossible permanently. The reasoning is in [future work](future-work.md).
 These are not a later version of the same construction. The model does
 not carry them:
 
-- Dormers, chimneys, rooflights, and any other penetration through the roof
+- Chimneys, rooflights, and any other penetration that is not a dormer
   (a courtyard hole is at eave height, with inward faces; a chimney would
   cut the slope above the eaves, which is a different thing)
 - Curved walls

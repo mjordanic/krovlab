@@ -11,12 +11,14 @@ node after the roof is assessed. ``knee_height`` is metres of vertical
 wall on an edge before that edge's pitch begins. ``gambrel`` is a steep
 pitch, a shallow pitch, and a break height in metres above that cell's
 eave. ``wrap`` marks
-consecutive edges as one plane. Every roof carries a
+consecutive edges as one plane. A :class:`~krovlab.project.Dormer` is extra
+input to ``project``: a plan ring on one host face, with its own pitch.
+Every roof carries a
 :class:`Validity` result. Units are metres and degrees throughout. Pass
 ``events=True`` on ``roof`` to inspect the wavefront events that produced it.
 """
 
-from krovlab.project import Cell, Project, ProjectFace, project
+from krovlab.project import Cell, Dormer, Project, ProjectFace, project
 from krovlab.roof import (
     Arc,
     Event,
@@ -34,6 +36,7 @@ from krovlab.roof import (
 __all__ = [
     "Arc",
     "Cell",
+    "Dormer",
     "Event",
     "Face",
     "Failure",

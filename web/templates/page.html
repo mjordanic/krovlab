@@ -109,7 +109,8 @@
       Click vertices on the plan to draw a cell. Close the ring, then add
       another cell. Click a cell to select it and set its eave height;
       click an edge to set pitch, a gable, a knee height, or a gambrel. Select
-      consecutive edges and choose one plane to wrap them.
+      consecutive edges and choose one plane to wrap them. Draw a small
+      rectangle on a face for a dormer.
     </p>
     <svg id="plan-editor" viewBox="-1 -1 12 8" role="img" aria-label="Plan editor">
       <polygon data-cell="0" data-ring="{% for x, y in footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
@@ -150,10 +151,42 @@
         m
       </label>
       <button type="button" id="one-plane">One plane</button>
+      <button type="button" id="draw-dormer">Dormer</button>
     </p>
     <div id="wrap-fields">
       {% for group in wrap_groups %}
       <input type="hidden" name="wrap-{{ loop.index0 }}" value="{{ group }}">
+      {% endfor %}
+    </div>
+    <div id="dormer-tables">
+      {% for dormer in dormers %}
+      <p>Dormer {{ dormer.index }} vertices (m)</p>
+      <input type="hidden" name="dormer-{{ dormer.index }}-cell" value="{{ dormer.cell_index }}">
+      <table>
+        <thead>
+          <tr><th>x</th><th>y</th></tr>
+        </thead>
+        <tbody>
+          {% for x, y in dormer.footprint %}
+          <tr>
+            <td><input name="dormer-{{ dormer.index }}-x-{{ loop.index0 }}" value="{{ x }}"></td>
+            <td><input name="dormer-{{ dormer.index }}-y-{{ loop.index0 }}" value="{{ y }}"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% for pitch in dormer.pitches %}
+      <p>
+        <label>
+          Pitch
+          <input name="dormer-{{ dormer.index }}-pitch-{{ loop.index0 }}" value="{{ pitch }}"{% if dormer.gables[loop.index0] %} disabled{% endif %}>
+        </label>
+        <label>
+          <input type="checkbox" name="dormer-{{ dormer.index }}-gable-{{ loop.index0 }}"{% if dormer.gables[loop.index0] %} checked{% endif %}>
+          Gable
+        </label>
+      </p>
+      {% endfor %}
       {% endfor %}
     </div>
     <p>

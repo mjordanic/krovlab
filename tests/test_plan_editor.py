@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from web.app import create_app
 
-from krovlab import Cell, Pitch, Project, project
+from krovlab import Cell, Dormer, Pitch, Project, project
 
 EDITOR_JS = Path(__file__).resolve().parents[1] / "web" / "static" / "plan-editor.js"
 
@@ -213,6 +213,73 @@ editor.setOnePlane();
     fields = result["fields"]
     assert result["selectedEdges"] == [0, 1]
     assert fields["wrap-0"] == "0,1"
+
+
+def test_drawing_a_dormer_rectangle_writes_millimetre_fields() -> None:
+    result = _run_editor(
+        """
+editor.clickPlan(0, 0);
+editor.clickPlan(10, 0);
+editor.clickPlan(10, 6);
+editor.clickPlan(0, 6);
+editor.closeRing();
+editor.startDormer();
+editor.clickPlan(4, 0.5);
+editor.clickPlan(6, 0.5);
+editor.clickPlan(6, 2);
+editor.clickPlan(4, 2);
+editor.closeRing();
+"""
+    )
+    fields = result["fields"]
+    assert fields["dormer-0-cell"] == "0"
+    assert float(fields["dormer-0-x-0"]) == 4.0
+    assert float(fields["dormer-0-y-0"]) == 0.5
+    assert float(fields["dormer-0-x-1"]) == 6.0
+    assert float(fields["dormer-0-y-1"]) == 0.5
+    assert float(fields["dormer-0-x-2"]) == 6.0
+    assert float(fields["dormer-0-y-2"]) == 2.0
+    assert float(fields["dormer-0-x-3"]) == 4.0
+    assert float(fields["dormer-0-y-3"]) == 2.0
+    assert fields["dormer-0-pitch-0"] == "45"
+    assert fields["dormer-0-pitch-3"] == "45"
+
+
+def test_posted_drawn_dormer_matches_project() -> None:
+    ring = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
+    host = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (0.0, 6.0),
+    ]
+    built = project([Cell(host, 45.0)], [Dormer(0, ring, 45.0)])
+    assert isinstance(built, Project)
+    result = _run_editor(
+        """
+editor.clickPlan(0, 0);
+editor.clickPlan(10, 0);
+editor.clickPlan(10, 6);
+editor.clickPlan(0, 6);
+editor.closeRing();
+editor.startDormer();
+editor.clickPlan(4, 0.5);
+editor.clickPlan(6, 0.5);
+editor.clickPlan(6, 2);
+editor.clickPlan(4, 2);
+editor.closeRing();
+"""
+    )
+    data = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        **result["fields"],
+    }
+    page = create_app().test_client().post("/", data=data).get_data(as_text=True)
+    assert "terrain: False" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert "3D solid" in page
 
 
 def test_editing_a_table_vertex_moves_it_on_the_plan() -> None:

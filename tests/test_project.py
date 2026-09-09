@@ -8,7 +8,7 @@ import pytest
 from hypothesis import assume, given, settings
 
 from generation import PITCHES, footprints
-from krovlab import Cell, Failure, Pitch, Project, Roof, project, roof
+from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 
 RECT_5X6 = [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
 DETACHED_5X6 = [(8.0, 0.0), (13.0, 0.0), (13.0, 6.0), (8.0, 6.0)]
@@ -40,6 +40,11 @@ PLUS = [
     (0.0, 2.0),
     (2.0, 2.0),
 ]
+RECT_10X6 = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+# 2 x 1.5 m rectangle on the long south slope of RECT_10X6.
+DORMER_2X15 = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
+GABLE_DORMER: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
+SHED_DORMER: list[Pitch] = [45.0, 90.0, 90.0, 90.0]
 
 
 def test_empty_list_of_cells_is_a_named_failure() -> None:
@@ -295,6 +300,146 @@ def test_project_faces_are_not_roof_faces() -> None:
     result = project([Cell(RECT_5X6, 45.0)])
     assert isinstance(result, Project)
     assert all(hasattr(face, "cell_index") for face in result.faces)
+
+
+def test_gable_dormer_shrinks_host_sloped_area_and_adds_faces() -> None:
+    import math
+
+    host = project([Cell(RECT_10X6, 45.0)])
+    result = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, DORMER_2X15, GABLE_DORMER)],
+    )
+    assert isinstance(host, Project)
+    assert isinstance(result, Project)
+    south = next(face for face in host.faces if face.edge_index == 0)
+    south_after = next(face for face in result.faces if face.edge_index == 0)
+    opening_plan = 2.0 * 1.5
+    opening_sloped = opening_plan / math.cos(math.radians(45.0))
+    assert south_after.sloped_area == pytest.approx(south.sloped_area - opening_sloped)
+    extra = len(result.faces) - len(host.faces)
+    assert extra in (2, 3)
+
+
+def test_host_plus_dormer_plan_areas_cover_the_footprint() -> None:
+    host = project([Cell(RECT_10X6, 45.0)])
+    result = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, DORMER_2X15, GABLE_DORMER)],
+    )
+    assert isinstance(host, Project)
+    assert isinstance(result, Project)
+    host_plan = sum(face.plan_area for face in host.faces)
+    result_plan = sum(face.plan_area for face in result.faces)
+    assert host_plan == pytest.approx(60.0)
+    assert result_plan == pytest.approx(60.0)
+
+
+def test_a_project_with_dormers_is_not_a_terrain() -> None:
+    result = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, DORMER_2X15, GABLE_DORMER)],
+    )
+    assert isinstance(result, Project)
+    assert result.validity.is_terrain is False
+    assert any("dormer" in reason.lower() for reason in result.validity.reasons)
+
+
+def test_shed_and_gable_dormers_use_the_same_placement() -> None:
+    gable = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, DORMER_2X15, GABLE_DORMER)],
+    )
+    shed = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, DORMER_2X15, SHED_DORMER)],
+    )
+    assert isinstance(gable, Project)
+    assert isinstance(shed, Project)
+    assert not isinstance(gable, Failure)
+    assert not isinstance(shed, Failure)
+    gable_extra = len(gable.faces) - 4
+    shed_extra = len(shed.faces) - 4
+    assert gable_extra in (2, 3)
+    assert shed_extra == 1
+
+
+def test_several_dormers_are_several_placements() -> None:
+    second = [(2.2, 0.5), (3.5, 0.5), (3.5, 1.5), (2.2, 1.5)]
+    result = project(
+        [Cell(RECT_10X6, 45.0)],
+        [
+            Dormer(0, DORMER_2X15, GABLE_DORMER),
+            Dormer(0, second, GABLE_DORMER),
+        ],
+    )
+    assert isinstance(result, Project)
+    assert len(result.faces) == 4 + 2 + 2
+    assert result.validity.is_terrain is False
+
+
+def test_dormer_overlapping_two_faces_is_a_named_failure() -> None:
+    across_ridge = [(4.5, 2.0), (5.5, 2.0), (5.5, 4.0), (4.5, 4.0)]
+    result = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, across_ridge, GABLE_DORMER)],
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "dormer_two_faces"
+    assert "face" in result.reason.lower()
+
+
+def test_dormer_outside_the_host_is_a_named_failure() -> None:
+    floating = [(20.0, 20.0), (22.0, 20.0), (22.0, 21.5), (20.0, 21.5)]
+    result = project(
+        [Cell(RECT_10X6, 45.0)],
+        [Dormer(0, floating, GABLE_DORMER)],
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "dormer_outside"
+    assert "host" in result.reason.lower()
+
+
+def test_a_dormer_on_a_wrapped_face_clips_that_plane() -> None:
+    import math
+
+    l_shape = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (3.0, 6.0),
+        (3.0, 10.0),
+        (0.0, 10.0),
+    ]
+    ring = [(5.0, 5.2), (6.5, 5.2), (6.5, 5.7), (5.0, 5.7)]
+    host = project([Cell(l_shape, 45.0, wrap=[[2, 3]])])
+    result = project(
+        [Cell(l_shape, 45.0, wrap=[[2, 3]])],
+        [Dormer(0, ring, GABLE_DORMER)],
+    )
+    assert isinstance(host, Project)
+    assert isinstance(result, Project)
+    wrapped = next(face for face in host.faces if face.edge_index == 2)
+    wrapped_after = next(face for face in result.faces if face.edge_index == 2)
+    opening_plan = 1.5 * 0.5
+    opening_sloped = opening_plan / math.cos(math.radians(45.0))
+    assert wrapped_after.sloped_area == pytest.approx(
+        wrapped.sloped_area - opening_sloped
+    )
+    assert wrapped_after.eave_indices == (2, 3)
+    assert len(result.faces) == len(host.faces) + 2
+
+
+def test_dormers_are_not_a_third_engine() -> None:
+    import krovlab
+    import krovlab.roof as roof_mod
+
+    assert not hasattr(krovlab, "from_graph")
+    assert not hasattr(roof_mod, "from_graph")
+    assert "from_graph" not in krovlab.__all__
+    assert "Dormer" in krovlab.__all__
+    assert "project" in krovlab.__all__
+    assert "roof" in krovlab.__all__
 
 
 _SETTINGS = settings(max_examples=25, deadline=None)

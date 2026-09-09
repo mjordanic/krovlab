@@ -9,7 +9,7 @@ import pytest
 from flask.testing import FlaskClient
 from web.app import create_app
 
-from krovlab import Cell, Failure, Project, Roof, project, roof
+from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 
 RECTANGLE = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
 BOWTIE = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
@@ -1083,3 +1083,52 @@ def test_posting_overlapping_cells_is_a_failure_not_500() -> None:
     assert "Input footprint" in page
     assert "3D solid" not in page
     assert "<h2>Plan</h2>" not in page
+
+
+DORMER_2X15 = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
+GABLE_DORMER: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
+
+
+def _dormer_fields(
+    ring: list[tuple[float, float]],
+    pitches: list[Pitch],
+    *,
+    index: int = 0,
+    cell: int = 0,
+) -> dict[str, str]:
+    prefix = f"dormer-{index}-"
+    data = {f"{prefix}cell": str(cell)}
+    for i, (x, y) in enumerate(ring):
+        data[f"{prefix}x-{i}"] = str(x)
+        data[f"{prefix}y-{i}"] = str(y)
+    for i, pitch in enumerate(pitches):
+        if pitch == 90.0:
+            data[f"{prefix}gable-{i}"] = "on"
+            data[f"{prefix}pitch-{i}"] = "90"
+        else:
+            data[f"{prefix}pitch-{i}"] = str(pitch)
+    return data
+
+
+def test_posting_a_dormer_rectangle_matches_project() -> None:
+    built = project([Cell(RECTANGLE, 45.0)], [Dormer(0, DORMER_2X15, GABLE_DORMER)])
+    assert isinstance(built, Project)
+    data: dict[str, str] = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        "pitch-0": "45",
+        "pitch-1": "45",
+        "pitch-2": "45",
+        "pitch-3": "45",
+        "overhang": "0",
+    }
+    data.update(_dormer_fields(DORMER_2X15, GABLE_DORMER))
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "terrain: False" in page
+    for reason in built.validity.reasons:
+        assert reason in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert "3D solid" in page
+    assert "<h2>Plan</h2>" in page
+    assert 'name="dormer-0-x-0"' in page

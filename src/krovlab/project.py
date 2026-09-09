@@ -5,6 +5,8 @@ independently, refuses an empty list, overlapping plan regions, and
 disagreeing shared edges, and returns one value: per-cell roofs, faces
 that name cell and edge, summed covering, and ridge height as the
 highest point above datum. Shared walls are coincident geometry.
+Dormers are extra input: each is a plan ring on one host face, clipped
+after every cell is roofed.
 """
 
 from __future__ import annotations
@@ -79,6 +81,25 @@ class Cell:
 
 
 @dataclass(frozen=True)
+class Dormer:
+    """A child roof sitting on one host face of one cell.
+
+    The plan ring must lie in the plan projection of exactly one face of
+    that cell. Pitch is the same list ``roof`` takes, so a gable dormer
+    and a shed dormer are the same placement with different pitches.
+    """
+
+    cell_index: int
+    """Index of the host cell in the list passed to :func:`project`."""
+
+    footprint: list[tuple[float, float]]
+    """Plan vertices ``(x, y)`` in metres of the dormer ring."""
+
+    pitch: Pitch | list[Pitch]
+    """One slope for every dormer face, or one value per edge of the ring."""
+
+
+@dataclass(frozen=True)
 class ProjectFace:
     """A roof face that names which cell and which edge of that cell."""
 
@@ -140,7 +161,10 @@ class Project:
     """
 
 
-def project(cells: Sequence[Cell]) -> Project | Failure:
+def project(
+    cells: Sequence[Cell],
+    dormers: Sequence[Dormer] | None = None,
+) -> Project | Failure:
     """Roof each cell and join the results into one project.
 
     Parameters
@@ -151,6 +175,11 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
         gable on one cell and pitched on the other is ``gable_versus_pitch``.
         A pitched shared edge at two eave heights is ``unequal_eave_height``.
         A cell that ``roof`` refuses is that same Failure.
+    dormers
+        Optional placements, each naming a cell, a plan ring on one host
+        face of that cell, and a pitch. A ring that overlaps two faces is
+        ``dormer_two_faces``. A ring that does not lie on a host face is
+        ``dormer_outside``. Omitting it, or an empty list, is no dormer.
 
     Returns
     -------
@@ -159,7 +188,8 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
         area, ridge height as the max above datum, and a validity result
         that is a terrain when every cell is. A party wall (both gables)
         is not counted twice as eaves. Two pitched shared eaves at the
-        same height are one valley.
+        same height are one valley. A project with dormers is not a
+        terrain: host sloped area loses each opening, dormer faces add.
     Failure
         Named refusal. Nothing this function accepts raises.
     """
@@ -198,7 +228,15 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
     valleys = _shared_edge_agreement(cells, roofs)
     if isinstance(valleys, Failure):
         return valleys
-    return _assemble(roofs, valleys)
+    assembled = _assemble(roofs, valleys)
+    if not dormers:
+        return assembled
+    from krovlab._dormer import apply_placements, locate_and_build
+
+    placements = locate_and_build(roofs, list(dormers))
+    if isinstance(placements, Failure):
+        return placements
+    return apply_placements(assembled, roofs, placements)
 
 
 def _assemble(

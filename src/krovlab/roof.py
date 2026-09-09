@@ -53,6 +53,8 @@ FailureKind = Literal[
     "nonconsecutive_wrap",
     "wrap_pitch",
     "nonplanar_wrap",
+    "dormer_two_faces",
+    "dormer_outside",
 ]
 """Why :func:`roof` or :func:`krovlab.project.project` refused.
 
@@ -76,6 +78,8 @@ FailureKind = Literal[
 ``nonconsecutive_wrap`` — a wrap group is not consecutive edges of one ring.
 ``wrap_pitch`` — wrapped edges do not share one pitch, or a wrap is a gable.
 ``nonplanar_wrap`` — the wrap cannot embed as a planar terrain.
+``dormer_two_faces`` — a dormer overlaps two host faces.
+``dormer_outside`` — a dormer does not lie on a host face.
 """
 
 
