@@ -2,7 +2,9 @@
 
 Give a building footprint in metres and a pitch in degrees. Get back
 the faces, hips, ridges, valleys and quantities of a hipped roof — or a
-named failure. Give several footprints as cells and get one project.
+named failure. Give several footprints as cells and get one project. An
+edge can carry a knee height or a gambrel; consecutive edges of one
+cell can wrap as one plane; a dormer is a small ring on a host face.
 
 The roofs it generates are a strict subset of roofs you can build. Read
 [what it cannot represent](docs/limitations.md) before deciding whether
@@ -31,7 +33,7 @@ uv sync --extra web         # Flask form server wrapping roof
 ## Quick start
 
 ```python
-from krovlab import Cell, Failure, Roof, project, roof, topology_hash
+from krovlab import Cell, Dormer, Failure, Roof, project, roof, topology_hash
 
 footprint = [(0, 0), (10, 0), (10, 6), (0, 6)]  # metres, either winding
 result = roof(footprint, 45)                    # degrees
@@ -45,9 +47,10 @@ else:
     print(topology_hash(result))        # combinatorial structure, not coordinates
 ```
 
-`roof` roofs one footprint. `project` roofs a list of cells. Everything
-else — the wavefront, the event queue, the conversion of pitch to weight —
-stays behind those two functions.
+`roof` roofs one footprint. `project` roofs a list of cells, optionally
+with dormers. Knee, gambrel, and wrap live on the same two functions
+and on `Cell`. Everything else — the wavefront, the event queue, the
+conversion of pitch to weight — stays behind those two functions.
 
 ## Examples
 
@@ -77,12 +80,12 @@ and the neighbouring faces meet the wall at verges. Gabling every edge is
 Weight (`cot(pitch)`) is an internal wavefront speed. It never appears on
 the returned roof.
 
-### A rectangle, an L, a courtyard, a gable, an overhang, an eave height, two cells
+### A rectangle, an L, a courtyard, a gable, an overhang, an eave height, two cells, a knee, a gambrel, a wrap, a dormer
 
 ```python
 import math
 
-from krovlab import Cell, project, roof
+from krovlab import Cell, Dormer, project, roof
 
 rect = [(0, 0), (10, 0), (10, 6), (0, 6)]
 l_shape = [(0, 0), (10, 0), (10, 6), (3, 6), (3, 10), (0, 10)]
@@ -161,6 +164,34 @@ pair = project(
 # party wall is not counted twice as eaves. Two pitched eaves on that
 # wall at the same eave height meet as one valley. A gable against a
 # pitch, or pitched eaves at two heights, is a named Failure.
+
+gablet = roof(rect, 45, knee_height=[0, 3, 0, 0])
+# East short wall rises 3 m — the would-be full-hip ridge — then a
+# vertical gablet. Neighbours close as verges. Ridge height still 3 m.
+# Zero knee height is the same roof as omitting it. Gable plus knee on
+# the same edge is gable_versus_knee.
+
+barn = roof(
+    rect,
+    45,
+    gambrel=[(60, 30, 3**0.5), None, (60, 30, 3**0.5), None],
+)
+# Long walls 60° then 30°, break √3 m above the eave. Two faces per
+# long wall; plan areas still sum to 60 m². Gambrel plus knee, or
+# gambrel plus gable, on the same edge is a named Failure.
+
+wrapped = roof(l_shape, 45, wrap=[[2, 3]])
+# Inner corner of the L is one plane: no valley there. Wrapped edges
+# share one pitch. Non-consecutive edges, disagreeing pitches, or a
+# wrap that cannot be planar is a named Failure.
+
+dormered = project(
+    [Cell(rect, 45)],
+    [Dormer(0, [(4, 0.5), (6, 0.5), (6, 2), (4, 2)], [45, 90, 45, 90])],
+)
+# 2 × 1.5 m gable dormer on the south slope. Host sloped area loses
+# the opening; dormer faces add. Not a terrain; 3D still draws. A
+# dormer over two faces, or outside the host, is a named Failure.
 ```
 
 Either winding is accepted. A closed-ring spelling (first point repeated
@@ -173,7 +204,7 @@ spanning both. Differing pitches on those halves are `unsupported`.
 | Attribute | What it is |
 |---|---|
 | `nodes` | Every vertex. Height is metres above datum. Footprint corners sit at the eave height (zero by default). |
-| `faces` | One face per non-gabled footprint edge. `edge_index` is the edge you passed in. Faces from `roof` have no cell index. |
+| `faces` | One face per non-gabled footprint edge, except a wrap group is one face and a gambrel edge is two. `edge_index` is the edge you passed in (the first of a wrap group). `eave_indices` lists every wrapped eave. Faces from `roof` have no cell index. |
 | `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"`, `"ridge"` or `"verge"`; `length` is 3D metres. |
 | `ridge_height` | Highest point above datum. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
@@ -194,7 +225,8 @@ A `Roof` is checked when it is built. If `validity.is_terrain` is false,
 footprints at uniform pitch typically pass. Crossing-arm plans, some
 T-shapes, mixed pitch on some L-shapes, and a gable on some reflex edges
 can come back as a `Roof` that is not a terrain — not as an exception,
-and not always as a `Failure`.
+and not always as a `Failure`. A project with dormers is also not a
+terrain; covering numbers still add up and 3D still draws.
 
 `topology_hash(roof)` is a stable hash of which faces meet which arcs at
 which nodes, not of their coordinates.
@@ -259,11 +291,20 @@ you can show. Nothing the entry point accepts raises.
 | `overlap` | Two cells overlap in plan. |
 | `gable_versus_pitch` | A shared edge is a gable on one cell and pitched on the other. |
 | `unequal_eave_height` | A pitched shared edge sits at two eave heights. |
+| `gable_versus_knee` | The same edge is a gable and has a knee height. |
+| `gambrel_versus_knee` | The same edge is a gambrel and has a knee height. |
+| `gambrel_versus_gable` | The same edge is a gambrel and a gable. |
+| `nonconsecutive_wrap` | A wrap group is not consecutive edges of one ring. |
+| `wrap_pitch` | Wrapped edges do not share one pitch, or a wrap is a gable. |
+| `nonplanar_wrap` | The wrap cannot embed as a planar terrain. |
+| `dormer_two_faces` | A dormer overlaps two host faces. |
+| `dormer_outside` | A dormer does not lie on a host face. |
 
 A `Failure` means no roof was produced. A `Roof` with
 `validity.is_terrain == False` means a roof was produced and then failed
-the checks — treat it as unusable. Units on a valid roof are metres and
-degrees.
+the checks — treat it as unusable, except a project whose only reason is
+dormers: the host has a hole, covering numbers still add up, and 3D
+still draws. Units on a valid roof are metres and degrees.
 
 ## Web demo
 
@@ -279,7 +320,9 @@ Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
 Pick a named footprint from the project's corpus and submit to see the
 matching roof, or a Failure with the input drawn. `concatenated-gables`
 is two cells at plate heights 5 m and 7 m. Click vertices on the plan to
-draw a cell, close the ring, and add another; millimetre tables stay in
+draw a cell, close the ring, and add another. Click an edge to set knee
+height or a gambrel; select consecutive walls for one plane; draw a
+rectangle on a host face for a dormer. Millimetre tables stay in
 sync. Submit is still one form POST.
 
 The same process is what a container runs. `Dockerfile` at the repo root
@@ -316,6 +359,13 @@ height 10 m: each ridge is 3 m above its eave. A 10 m square with pitches
 A 10 m square with a centred 4 m courtyard at 45° has ridge height 1.5 m
 and plan area 84 m²: four hips from the outer corners, four valleys from
 the courtyard corners, and a 7 m ridge square where the wavefronts meet.
+A 10 × 6 m rectangle at 45° with a 3 m knee on the east short edge is a
+vertical gablet: ridge height still 3 m, ridge length 7 m, two verges.
+The same rectangle with long edges gambrel 60° then 30° at break √3 m
+has two faces per long wall; plan areas still sum to 60 m². An L with
+the inner corner wrapped is one face for those two walls and no valley
+at that corner. A 2 × 1.5 m gable dormer on the south slope of the
+rectangle is not a terrain; host sloped area loses the opening.
 
 ## Notebooks
 
@@ -323,11 +373,12 @@ Step-through examples after `uv sync --extra notebooks`:
 
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
   call `roof`, read quantities, gables, holes, overhang, eave height,
-  a project of two cells, concatenated gables and a valley, drawing
-  those cells on the form page, and the views.
+  a project of two cells, concatenated gables and a valley, knee
+  (gablet), gambrel, wrap, a dormer on a host face, drawing those on
+  the form page, and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
-  that fail the terrain check, inherent method limits, and how to read
-  `validity`.
+  that fail the terrain check, the dormer exception (not a terrain, 3D
+  still draws), inherent method limits, and how to read `validity`.
 
 ## Tests
 
