@@ -99,7 +99,8 @@
     <p>
       Click vertices on the plan to draw a cell. Close the ring, then add
       another cell. Click a cell to select it and set its eave height;
-      click an edge to set pitch, a gable, or a knee height.
+      click an edge to set pitch, a gable, or a knee height. Select
+      consecutive edges and choose one plane to wrap them.
     </p>
     <svg id="plan-editor" viewBox="-1 -1 12 8" role="img" aria-label="Plan editor">
       <polygon data-cell="0" data-ring="{% for x, y in footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
@@ -130,7 +131,13 @@
         <input id="selected-knee-height">
         m
       </label>
+      <button type="button" id="one-plane">One plane</button>
     </p>
+    <div id="wrap-fields">
+      {% for group in wrap_groups %}
+      <input type="hidden" name="wrap-{{ loop.index0 }}" value="{{ group }}">
+      {% endfor %}
+    </div>
     <p>
       <label>
         <input type="checkbox" name="edit_vertices" id="edit-vertices"{% if edit_vertices %} checked{% endif %}>
@@ -238,6 +245,9 @@
           m
         </label>
       </p>
+      {% for group in cell.wrap_groups %}
+      <input type="hidden" name="{{ cell.prefix }}wrap-{{ loop.index0 }}" value="{{ group }}">
+      {% endfor %}
     </div>
     {% endfor %}
     </div>

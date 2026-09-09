@@ -33,7 +33,8 @@ process.stdout.write(JSON.stringify({{
   fields: editor.fields(),
   rings: editor.rings(),
   selectedCell: editor.selectedCell(),
-  selectedEdge: editor.selectedEdge()
+  selectedEdge: editor.selectedEdge(),
+  selectedEdges: editor.selectedEdges()
 }}));
 """
     proc = subprocess.run(
@@ -169,6 +170,24 @@ editor.setKneeHeight(3);
     assert result["selectedEdge"] == 1
     assert float(fields["knee-1"]) == 3.0
     assert fields.get("knee-0", "0") in ("0", "0.0", "")
+
+
+def test_selecting_consecutive_edges_sets_one_plane() -> None:
+    result = _run_editor(
+        """
+editor.clickPlan(0, 0);
+editor.clickPlan(10, 0);
+editor.clickPlan(10, 6);
+editor.clickPlan(0, 6);
+editor.closeRing();
+editor.clickPlan(5, 0);
+editor.clickPlan(10, 3);
+editor.setOnePlane();
+"""
+    )
+    fields = result["fields"]
+    assert result["selectedEdges"] == [0, 1]
+    assert fields["wrap-0"] == "0,1"
 
 
 def test_editing_a_table_vertex_moves_it_on_the_plan() -> None:

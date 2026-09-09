@@ -294,6 +294,35 @@ def _terrain_reasons(
     return reasons
 
 
+def _face_eave_indices(face: Face) -> tuple[int, ...]:
+    return face.eave_indices if face.eave_indices else (face.edge_index,)
+
+
+def _nearest_on_segments(
+    x: float,
+    y: float,
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> tuple[float, float]:
+    best = segments[0][0]
+    best_d = float("inf")
+    for a, b in segments:
+        ax, ay = a
+        bx, by = b
+        abx, aby = bx - ax, by - ay
+        ab2 = abx * abx + aby * aby
+        if ab2 < 1e-24:
+            px, py = ax, ay
+        else:
+            t = ((x - ax) * abx + (y - ay) * aby) / ab2
+            t = 0.0 if t < 0.0 else 1.0 if t > 1.0 else t
+            px, py = ax + t * abx, ay + t * aby
+        dist = math.hypot(x - px, y - py)
+        if dist < best_d:
+            best_d = dist
+            best = (px, py)
+    return best
+
+
 def _drainage_reasons(
     nodes: tuple[Node, ...],
     faces: tuple[Face, ...],
@@ -314,11 +343,11 @@ def _drainage_reasons(
             continue
         # z = z0 - (nx(x-x0)+ny(y-y0))/nz  ⇒  grad(z) = (-nx/nz, -ny/nz)
         grad_x, grad_y = -nx / nz, -ny / nz
-        a, b = _edge_endpoints(rings, face.edge_index)
-        mx, my = 0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])
-        pts = [nodes[i] for i in face.node_indices]
-        cx = sum(p.x for p in pts) / len(pts)
-        cy = sum(p.y for p in pts) / len(pts)
+        eave_ids = _face_eave_indices(face)
+        segments = [_edge_endpoints(rings, idx) for idx in eave_ids]
+        ring = [(nodes[i].x, nodes[i].y) for i in face.node_indices]
+        cx, cy = _centroid(ring)
+        mx, my = _nearest_on_segments(cx, cy, segments)
         inward_x, inward_y = cx - mx, cy - my
         if grad_x * inward_x + grad_y * inward_y <= 0.0:
             reasons.append(
@@ -396,6 +425,27 @@ def _on_footprint_edge(
     )
 
 
+def _eave_on_wrapped_face(
+    arc: Arc,
+    nodes: tuple[Node, ...],
+    faces: tuple[Face, ...],
+    rings: list[list[tuple[float, float]]],
+) -> bool:
+    start = nodes[arc.start]
+    end = nodes[arc.end]
+    for face in faces:
+        eaves = _face_eave_indices(face)
+        if len(eaves) < 2:
+            continue
+        for idx in eaves:
+            a, b = _edge_endpoints(rings, idx)
+            if _point_on_segment(start.x, start.y, a, b, HEIGHT_TOL_M * 10) and (
+                _point_on_segment(end.x, end.y, a, b, HEIGHT_TOL_M * 10)
+            ):
+                return True
+    return False
+
+
 def _arc_reasons(
     nodes: tuple[Node, ...],
     faces: tuple[Face, ...],
@@ -419,7 +469,8 @@ def _arc_reasons(
                     f"ridge between nodes {arc.start} and {arc.end} is not horizontal"
                 )
         elif arc.kind == "eave":
-            if abs(a.height - b.height) > HEIGHT_TOL_M:
+            on_wrap = _eave_on_wrapped_face(arc, nodes, faces, rings)
+            if abs(a.height - b.height) > HEIGHT_TOL_M and not on_wrap:
                 reasons.append(
                     "arc classification matches geometry: "
                     f"eave between nodes {arc.start} and {arc.end} "

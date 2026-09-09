@@ -8,13 +8,17 @@ Four limits are inherent to the method. They will not go away by
 adding features. Other roofs — half-hips, gambrels, dormers — are
 simply not produced today; some of those stay reachable later.
 
-## One plane cannot cover several walls
+## One plane can cover several walls only as a wrap
 
-Every roof face rises from exactly one footprint edge. A single plane
-that continues across two or more consecutive walls — wrapping a corner
-without a hip, or treating a jogged wall as one slope — will not come
-out. The library puts a hip or a valley at each corner and gives you
-one face per edge.
+Every roof face still rises from footprint edges. Marking consecutive
+edges of a cell as one plane — wrapping a corner without a hip — is the
+one graph edit: those edges share a pitch and become one face. The cell
+is then embedded from a roof graph rather than the wavefront. Alternate
+ridge layouts that are not "these walls are one plane" stay out; use a
+gable mask or a project of several cells.
+
+A wrap of non-consecutive edges, wrapped edges with disagreeing pitches,
+or a wrap that cannot embed as a planar terrain is a named Failure.
 
 ## One straight wall cannot carry two pitches
 

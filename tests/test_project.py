@@ -261,6 +261,26 @@ def test_knee_on_one_cell_leaves_the_other_cell_unchanged() -> None:
     assert sorted(face.edge_index for face in result.roofs[1].faces) == [0, 1, 2, 3]
 
 
+def test_wrap_on_a_cell_goes_through_project() -> None:
+    l_shape = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (3.0, 6.0),
+        (3.0, 10.0),
+        (0.0, 10.0),
+    ]
+    alone = roof(l_shape, 45.0, wrap=[[2, 3]])
+    result = project([Cell(l_shape, 45.0, wrap=[[2, 3]])])
+    assert isinstance(alone, Roof)
+    assert isinstance(result, Project)
+    assert result.roofs[0] == alone
+    assert len(result.faces) == 5
+    assert {face.edge_index for face in result.faces} == {0, 1, 2, 4, 5}
+    wrapped = next(face for face in result.faces if face.edge_index == 2)
+    assert wrapped.eave_indices == (2, 3)
+
+
 def test_a_bad_cell_is_a_failure_not_an_exception() -> None:
     bowtie = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
     result = project([Cell(bowtie, 45.0)])

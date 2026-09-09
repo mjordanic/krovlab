@@ -35,7 +35,7 @@ _EAVE_HEIGHT_TOL_M = 1e-9
 
 @dataclass(frozen=True)
 class Cell:
-    """One footprint roofed by a single straight skeleton.
+    """One footprint roofed as one roof.
 
     The same arguments :func:`roof` takes, plus an eave height for this
     cell. There is no join to another cell — shared walls are coincident
@@ -64,6 +64,12 @@ class Cell:
     per edge of this cell.
     """
 
+    wrap: list[list[int]] | None = None
+    """Consecutive edge groups to treat as one plane, or ``None``.
+
+    Empty or omitted is the existing skeleton of this cell.
+    """
+
 
 @dataclass(frozen=True)
 class ProjectFace:
@@ -86,6 +92,13 @@ class ProjectFace:
 
     node_indices: tuple[int, ...]
     """``Project.nodes`` indices walking the face boundary, eave first."""
+
+    eave_indices: tuple[int, ...] = ()
+    """Caller-edge indices this face drains to. Empty means ``(edge_index,)``.
+
+    Copied from the cell's :class:`~krovlab.roof.Face` so a wrap still
+    names every consecutive eave after cells are concatenated.
+    """
 
 
 @dataclass(frozen=True)
@@ -157,6 +170,7 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
             overhang=cell.overhang,
             eave_height=cell.eave_height,
             knee_height=cell.knee_height,
+            wrap=cell.wrap,
         )
         if isinstance(built, Failure):
             return built
@@ -219,6 +233,7 @@ def _project_faces(
             plan_area=face.plan_area,
             sloped_area=face.sloped_area,
             node_indices=tuple(i + offset for i in face.node_indices),
+            eave_indices=face.eave_indices,
         )
         for face in faces
     ]

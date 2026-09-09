@@ -306,6 +306,42 @@ def test_posting_eave_height_seven_reports_ridge_height_ten() -> None:
     assert 'name="eave_height" value="7.0"' in page
 
 
+def test_posting_a_two_edge_wrap_shows_one_face_in_describe() -> None:
+    l_shape = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (3.0, 6.0),
+        (3.0, 10.0),
+        (0.0, 10.0),
+    ]
+    built = roof(l_shape, 45.0, wrap=[[2, 3]])
+    assert isinstance(built, Roof)
+    assert len(built.faces) == 5
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "l-shape",
+            "loaded_fixture": "l-shape",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "pitch-4": "45",
+            "pitch-5": "45",
+            "wrap-0": "2,3",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "edges 2, 3: one plane" in page
+    assert "3D solid" in page
+    assert 'name="wrap-0" value="2,3"' in page
+
+
 def test_posting_knee_height_on_an_edge_matches_project() -> None:
     built = project([Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])])
     assert isinstance(built, Project)

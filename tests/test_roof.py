@@ -893,3 +893,75 @@ def test_short_edge_knee_equal_to_ridge_is_a_vertical_gablet() -> None:
     ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
     assert len(ridges) == 1
     assert ridges[0].length == pytest.approx(7.0)
+
+
+def test_no_wrap_groups_match_omitting_the_argument() -> None:
+    omitted = roof(RECTANGLE, 45.0)
+    as_empty = roof(RECTANGLE, 45.0, wrap=[])
+    as_none = roof(RECTANGLE, 45.0, wrap=None)
+    assert isinstance(omitted, Roof)
+    assert as_empty == omitted
+    assert as_none == omitted
+
+
+def test_wrap_of_nonconsecutive_edges_is_a_named_failure() -> None:
+    result = roof(RECTANGLE, 45.0, wrap=[[0, 2]])
+    assert isinstance(result, Failure)
+    assert result.kind == "nonconsecutive_wrap"
+    assert "consecutive" in result.reason.lower()
+
+
+def test_wrap_with_disagreeing_pitches_is_a_named_failure() -> None:
+    result = roof(RECTANGLE, [45.0, 30.0, 45.0, 45.0], wrap=[[0, 1]])
+    assert isinstance(result, Failure)
+    assert result.kind == "wrap_pitch"
+    assert "pitch" in result.reason.lower()
+
+
+def test_l_shape_inner_corner_wrap_is_one_face_with_no_valley() -> None:
+    from invariants import (
+        drainage_runs_to_each_faces_own_eave,
+        every_face_is_planar,
+        plan_areas_sum_to_footprint_area,
+    )
+
+    result = roof(L_SHAPE, 45.0, wrap=[[2, 3]])
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    by_edge = {face.edge_index: face for face in result.faces}
+    assert 3 not in by_edge
+    wrapped = by_edge[2]
+    assert wrapped.pitch == pytest.approx(45.0)
+    assert wrapped.eave_indices == (2, 3)
+    assert len(result.faces) == 5
+    corner = next(
+        node
+        for node in result.nodes
+        if abs(node.x - 3.0) < 1e-6 and abs(node.y - 6.0) < 1e-6
+    )
+    valleys_at_corner = [
+        arc
+        for arc in result.arcs
+        if arc.kind == "valley"
+        and corner in (result.nodes[arc.start], result.nodes[arc.end])
+    ]
+    assert valleys_at_corner == []
+    every_face_is_planar(result)
+    plan_areas_sum_to_footprint_area(result, L_SHAPE)
+    drainage_runs_to_each_faces_own_eave(result, L_SHAPE)
+
+
+def test_a_wrap_that_cannot_be_a_planar_terrain_is_a_named_failure() -> None:
+    result = roof(SQUARE, 45.0, wrap=[[0, 1, 2, 3]])
+    assert isinstance(result, Failure)
+    assert result.kind == "nonplanar_wrap"
+    assert "planar" in result.reason.lower()
+
+
+def test_wrap_is_not_a_public_from_graph_function() -> None:
+    import krovlab
+    import krovlab.roof as roof_mod
+
+    assert not hasattr(krovlab, "from_graph")
+    assert not hasattr(roof_mod, "from_graph")
+    assert "from_graph" not in krovlab.__all__

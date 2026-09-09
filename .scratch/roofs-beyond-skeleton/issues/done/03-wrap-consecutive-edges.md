@@ -21,7 +21,7 @@ POST.
 
 **Blocked by:** None (can start immediately once the prerequisite above holds)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Complexity:** high
 
@@ -32,14 +32,14 @@ Ren et al. 2021 on faces with several outline edges. Existing planarity
 tolerance used by validity. Gable mask and `project` of several cells remain
 the ways to get other styles — wrap is the only graph edit. ADR-0001.
 
-- [ ] A cell with no wrap groups equals today's skeleton of that cell
-- [ ] L-shape, inner corner's two walls wrapped: one face, no valley at that
+- [x] A cell with no wrap groups equals today's skeleton of that cell
+- [x] L-shape, inner corner's two walls wrapped: one face, no valley at that
       corner, planarity holds, terrain if the rest of the cell is a normal hip
-- [ ] Wrapped edges share one pitch; that face reports that pitch
-- [ ] Wrap of non-consecutive edges is a named Failure
-- [ ] Wrap with disagreeing pitches is a named Failure
-- [ ] A wrap that cannot be a planar terrain is a named Failure
-- [ ] No public from-graph function; tests go through `roof` / `project`
-- [ ] POST of a two-edge wrap shows one face for those walls in the describe
+- [x] Wrapped edges share one pitch; that face reports that pitch
+- [x] Wrap of non-consecutive edges is a named Failure
+- [x] Wrap with disagreeing pitches is a named Failure
+- [x] A wrap that cannot be a planar terrain is a named Failure
+- [x] No public from-graph function; tests go through `roof` / `project`
+- [x] POST of a two-edge wrap shows one face for those walls in the describe
       block
-- [ ] Own eave for drainage of a wrapped face is the union of the wrapped edges
+- [x] Own eave for drainage of a wrapped face is the union of the wrapped edges

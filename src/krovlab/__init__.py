@@ -8,7 +8,8 @@ one per edge — and returns a :class:`Roof` or a :class:`Failure`.
 ``pitch = 90`` on an edge is a gable. ``overhang`` offsets the eaves
 outward in metres. ``eave_height`` is metres above datum, added to every
 node after the roof is assessed. ``knee_height`` is metres of vertical
-wall on an edge before that edge's pitch begins. Every roof carries a
+wall on an edge before that edge's pitch begins. ``wrap`` marks
+consecutive edges as one plane. Every roof carries a
 :class:`Validity` result. Units are metres and degrees throughout. Pass
 ``events=True`` on ``roof`` to inspect the wavefront events that produced it.
 """

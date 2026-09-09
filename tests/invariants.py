@@ -12,7 +12,7 @@ import math
 
 from shapely.geometry import Point, Polygon  # type: ignore[import-untyped]
 
-from krovlab import Roof
+from krovlab import Face, Roof
 
 AREA_TOL = 1e-4
 """Square metres. Loose enough for generated polygons, tight for worked examples."""
@@ -199,6 +199,37 @@ def _edge_endpoints(
     )
 
 
+def _face_eave_indices(face: Face) -> tuple[int, ...]:
+    if face.eave_indices:
+        return face.eave_indices
+    return (face.edge_index,)
+
+
+def _nearest_on_segments(
+    x: float,
+    y: float,
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> tuple[float, float]:
+    best = segments[0][0]
+    best_d = float("inf")
+    for a, b in segments:
+        ax, ay = a
+        bx, by = b
+        abx, aby = bx - ax, by - ay
+        ab2 = abx * abx + aby * aby
+        if ab2 < 1e-24:
+            px, py = ax, ay
+        else:
+            t = ((x - ax) * abx + (y - ay) * aby) / ab2
+            t = 0.0 if t < 0.0 else 1.0 if t > 1.0 else t
+            px, py = ax + t * abx, ay + t * aby
+        dist = math.hypot(x - px, y - py)
+        if dist < best_d:
+            best_d = dist
+            best = (px, py)
+    return best
+
+
 def drainage_runs_to_each_faces_own_eave(
     built: Roof,
     footprint: list[tuple[float, float]],
@@ -206,9 +237,8 @@ def drainage_runs_to_each_faces_own_eave(
 ) -> None:
     """Steepest descent on every face points toward that face's own eave.
 
-    The eave is the one named by ``face.edge_index`` on the caller's
-    footprint (outer ring, then holes), not whichever footprint edge
-    happens to be nearest.
+    The eave is the footprint edges named by ``face.eave_indices`` (or
+    ``face.edge_index``), the union of wrapped edges when a face wraps.
     """
     rings = _caller_rings(footprint, holes)
     for face in built.faces:
@@ -230,12 +260,13 @@ def drainage_runs_to_each_faces_own_eave(
         if abs(nz) < 1e-18:
             continue
         grad_x, grad_y = -nx / nz, -ny / nz
-        # Inward: from this face's eave into the face (and so into the building).
-        a, b = _edge_endpoints(rings, face.edge_index)
-        mx, my = 0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])
-        nodes = [built.nodes[i] for i in face.node_indices]
-        cx = sum(p.x for p in nodes) / len(nodes)
-        cy = sum(p.y for p in nodes) / len(nodes)
+        eave_ids = _face_eave_indices(face)
+        segments = [_edge_endpoints(rings, idx) for idx in eave_ids]
+        poly = Polygon(
+            [(built.nodes[i].x, built.nodes[i].y) for i in face.node_indices]
+        )
+        cx, cy = poly.centroid.x, poly.centroid.y
+        mx, my = _nearest_on_segments(cx, cy, segments)
         inward_x, inward_y = cx - mx, cy - my
         # Height must increase as we walk inward from this eave, so the
         # steepest descent (-grad) points back toward the eave.
