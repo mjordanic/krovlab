@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -28,6 +29,10 @@ class EdgeRow:
     gable_name: str
     knee: str
     knee_name: str
+    shallow: str
+    shallow_name: str
+    break_height: str
+    break_name: str
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,7 @@ def create_app() -> Flask:
         extra_views: list[ExtraCellView] = []
         extra_footprints: list[list[tuple[float, float]]] = []
         knees: list[float] = [0.0] * n_edges
+        gambrels: list[tuple[Pitch, Pitch, float] | None] = [None] * n_edges
         posted_wrap_fields = _posted_wraps(request.form)
         wrap_groups: list[str] = _wrap_group_strings(
             posted_wrap_fields if not isinstance(posted_wrap_fields, Failure) else []
@@ -82,6 +88,9 @@ def create_app() -> Flask:
             posted_knees = _posted_knees(request.form, n_edges)
             if not isinstance(posted_knees, Failure):
                 knees = posted_knees
+            posted_gambrels = _posted_gambrels(request.form, n_edges, pitches)
+            if not isinstance(posted_gambrels, Failure):
+                gambrels = posted_gambrels
             result = parse_error
             draw_rings: tuple[
                 list[tuple[float, float]],
@@ -96,6 +105,7 @@ def create_app() -> Flask:
             parsed_eave_height = _posted_eave_height(request.form, preset.eave_height)
             parsed_knees = _posted_knees(request.form, n_edges)
             parsed_wraps = _posted_wraps(request.form)
+            parsed_gambrels = _posted_gambrels(request.form, n_edges, pitches)
             parsed_footprint = cast(list[tuple[float, float]], footprint)
             parsed_holes = cast(list[list[tuple[float, float]]] | None, holes)
             if isinstance(parsed_overhang, Failure):
@@ -113,11 +123,16 @@ def create_app() -> Flask:
             elif isinstance(parsed_wraps, Failure):
                 result = parsed_wraps
                 draw_rings = (parsed_footprint, parsed_holes)
+            elif isinstance(parsed_gambrels, Failure):
+                result = parsed_gambrels
+                draw_rings = (parsed_footprint, parsed_holes)
             else:
                 draw_overhang = parsed_overhang
                 form_overhang = parsed_overhang
                 form_eave_height = parsed_eave_height
                 knees = parsed_knees
+                gambrels = parsed_gambrels
+                posted_gambrel = _optional_gambrel(parsed_gambrels)
                 wrap_groups = _wrap_group_strings(parsed_wraps)
                 draw_rings = (parsed_footprint, parsed_holes)
                 extra_views, extra_parsed = _extra_cells_for_post(
@@ -137,6 +152,7 @@ def create_app() -> Flask:
                                 eave_height=parsed_eave_height,
                                 knee_height=parsed_knees,
                                 wrap=parsed_wraps or None,
+                                gambrel=posted_gambrel,
                             ),
                             *extra_parsed,
                         ]
@@ -150,6 +166,7 @@ def create_app() -> Flask:
                         eave_height=parsed_eave_height,
                         knee_height=parsed_knees,
                         wrap=parsed_wraps or None,
+                        gambrel=posted_gambrel,
                     )
         else:
             pitches = fallback
@@ -161,7 +178,7 @@ def create_app() -> Flask:
             extra_footprints = [cell.footprint for cell in preset.extra_cells]
             result = _from_preset(preset)
             draw_rings = (parsed_footprint, parsed_holes)
-        rows = _edge_rows(footprint, holes, pitches, knees=knees)
+        rows = _edge_rows(footprint, holes, pitches, knees=knees, gambrels=gambrels)
         plan_html, solid_html, footprint_html = _draw(
             result,
             draw_rings[0],
@@ -346,6 +363,51 @@ def _posted_knees(
     return knees
 
 
+def _posted_gambrels(
+    form: Mapping[str, str],
+    n: int,
+    pitches: list[Pitch],
+    *,
+    prefix: str = "",
+) -> list[tuple[Pitch, Pitch, float] | None] | Failure:
+    items: list[tuple[Pitch, Pitch, float] | None] = []
+    for i in range(n):
+        raw_shallow = form.get(f"{prefix}gambrel-shallow-{i}")
+        raw_break = form.get(f"{prefix}gambrel-break-{i}")
+        shallow_blank = raw_shallow is None or str(raw_shallow).strip() == ""
+        break_blank = raw_break is None or str(raw_break).strip() == ""
+        if shallow_blank and break_blank:
+            items.append(None)
+            continue
+        if break_blank:
+            items.append(None)
+            continue
+        try:
+            height = float(str(raw_break))
+        except ValueError:
+            return Failure(
+                kind="degenerate",
+                reason="break height must be a finite number of metres above the eave",
+            )
+        if not math.isfinite(height) or height <= 0.0:
+            items.append(None)
+            continue
+        if shallow_blank:
+            return Failure(
+                kind="degenerate",
+                reason="a gambrel needs a shallow pitch and a break height",
+            )
+        steep = pitches[i] if i < len(pitches) else ""
+        items.append((steep, str(raw_shallow).strip(), height))
+    return items
+
+
+def _optional_gambrel(
+    items: list[tuple[Pitch, Pitch, float] | None],
+) -> list[tuple[Pitch, Pitch, float] | None] | None:
+    return items if any(items) else None
+
+
 def _posted_wraps(
     form: Mapping[str, str],
     *,
@@ -408,6 +470,7 @@ def _edge_rows(
     *,
     prefix: str = "",
     knees: list[float] | None = None,
+    gambrels: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
 ) -> list[EdgeRow]:
     rings = [footprint, *(holes or [])]
     rows: list[EdgeRow] = []
@@ -421,6 +484,15 @@ def _edge_rows(
             knee = 0.0
             if knees is not None and index < len(knees):
                 knee = knees[index]
+            shallow = ""
+            break_height = "0"
+            item = (
+                None if gambrels is None or index >= len(gambrels) else gambrels[index]
+            )
+            if item is not None:
+                _steep, shallow_pitch, height = item
+                shallow = str(shallow_pitch)
+                break_height = str(height)
             rows.append(
                 EdgeRow(
                     index=index,
@@ -432,6 +504,10 @@ def _edge_rows(
                     gable_name=f"{prefix}gable-{index}",
                     knee=str(knee),
                     knee_name=f"{prefix}knee-{index}",
+                    shallow=shallow,
+                    shallow_name=f"{prefix}gambrel-shallow-{index}",
+                    break_height=break_height,
+                    break_name=f"{prefix}gambrel-break-{index}",
                 )
             )
     return rows
@@ -456,6 +532,8 @@ def _from_preset(preset: Preset) -> Roof | Project | Failure:
             overhang=cells[0].overhang,
             eave_height=cells[0].eave_height,
             knee_height=cells[0].knee_height,
+            wrap=cells[0].wrap,
+            gambrel=cells[0].gambrel,
         )
     return project(cells)
 
@@ -490,6 +568,7 @@ def _view_from_cell(index: int, cell: Cell) -> ExtraCellView:
             pitches,
             prefix=prefix,
             knees=knees,
+            gambrels=cell.gambrel,
         ),
         overhang=cell.overhang,
         eave_height=cell.eave_height,
@@ -513,7 +592,11 @@ def _posted_extra_cells(
         pitches = _posted_pitches(form, n_edges, [], apply_to_all, prefix=prefix)
         posted_knees = _posted_knees(form, n_edges, prefix=prefix)
         posted_wraps = _posted_wraps(form, prefix=prefix)
+        posted_gambrels = _posted_gambrels(form, n_edges, pitches, prefix=prefix)
         display_knees = posted_knees if not isinstance(posted_knees, Failure) else None
+        display_gambrels = (
+            posted_gambrels if not isinstance(posted_gambrels, Failure) else None
+        )
         display_wraps = (
             _wrap_group_strings(posted_wraps)
             if not isinstance(posted_wraps, Failure)
@@ -533,6 +616,7 @@ def _posted_extra_cells(
                     pitches,
                     prefix=prefix,
                     knees=display_knees,
+                    gambrels=display_gambrels,
                 ),
                 overhang=raw_overhang,
                 eave_height=raw_eave,
@@ -563,6 +647,8 @@ def _posted_extra_cells(
             return views, posted_knees
         if isinstance(posted_wraps, Failure):
             return views, posted_wraps
+        if isinstance(posted_gambrels, Failure):
+            return views, posted_gambrels
         cells.append(
             Cell(
                 parsed_outer,
@@ -572,6 +658,7 @@ def _posted_extra_cells(
                 eave_height=eave_height,
                 knee_height=posted_knees,
                 wrap=posted_wraps or None,
+                gambrel=_optional_gambrel(posted_gambrels),
             )
         )
         index += 1

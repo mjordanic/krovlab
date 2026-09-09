@@ -369,6 +369,46 @@ def test_posting_knee_height_on_an_edge_matches_project() -> None:
     assert 'name="knee-1" value="3.0"' in page or 'name="knee-1" value="3"' in page
 
 
+def test_posting_gambrel_on_an_edge_matches_project() -> None:
+    import math
+
+    break_height = math.sqrt(3.0)
+    gambrel: list[tuple[float, float, float] | None] = [
+        (60.0, 30.0, break_height),
+        None,
+        (60.0, 30.0, break_height),
+        None,
+    ]
+    built = project([Cell(RECTANGLE, 45.0, gambrel=gambrel)])
+    assert isinstance(built, Project)
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "pitch-0": "60",
+            "pitch-1": "45",
+            "pitch-2": "60",
+            "pitch-3": "45",
+            "gambrel-shallow-0": "30",
+            "gambrel-break-0": str(break_height),
+            "gambrel-shallow-2": "30",
+            "gambrel-break-2": str(break_height),
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"total sloped area: {built.total_sloped_area:.3f} m²" in page
+    assert "edge 0: pitch 60" in page
+    assert "edge 0: pitch 30" in page
+    assert "3D solid" in page
+    assert 'name="gambrel-shallow-0"' in page
+    assert 'name="gambrel-break-0"' in page
+
+
 def test_get_without_eave_height_still_shows_ridge_height_three() -> None:
     page = _client().get("/").get_data(as_text=True)
     assert "ridge height: 3.000 m" in page

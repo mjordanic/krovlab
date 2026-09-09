@@ -171,6 +171,8 @@
       if (on) {
         cell.pitches[selectedEdge] = "90";
         cell.knees[selectedEdge] = "0";
+        cell.shallows[selectedEdge] = "";
+        cell.breaks[selectedEdge] = "0";
       }
     }
 
@@ -182,7 +184,23 @@
       cell.knees[selectedEdge] = String(height);
       if (parseFloat(String(height)) > 0) {
         cell.gables[selectedEdge] = false;
+        cell.shallows[selectedEdge] = "";
+        cell.breaks[selectedEdge] = "0";
       }
+    }
+
+    function setGambrel(steep, shallow, breakHeight) {
+      if (selectedCell < 0 || selectedEdge === null) {
+        return;
+      }
+      var cell = cells[selectedCell];
+      cell.pitches[selectedEdge] = String(steep);
+      cell.shallows = cell.shallows || [];
+      cell.breaks = cell.breaks || [];
+      cell.shallows[selectedEdge] = String(shallow);
+      cell.breaks[selectedEdge] = String(breakHeight);
+      cell.gables[selectedEdge] = false;
+      cell.knees[selectedEdge] = "0";
     }
 
     function setOnePlane() {
@@ -243,6 +261,12 @@
         knees: draft.map(function () {
           return "0";
         }),
+        shallows: draft.map(function () {
+          return "";
+        }),
+        breaks: draft.map(function () {
+          return "0";
+        }),
         wraps: [],
         overhang: "0",
         eaveHeight: "0",
@@ -281,6 +305,16 @@
         (cell.knees || []).forEach(function (knee, i) {
           if (knee !== "" && knee != null) {
             out[p + "knee-" + i] = String(knee);
+          }
+        });
+        (cell.shallows || []).forEach(function (shallow, i) {
+          if (shallow !== "" && shallow != null) {
+            out[p + "gambrel-shallow-" + i] = String(shallow);
+          }
+        });
+        (cell.breaks || []).forEach(function (brk, i) {
+          if (brk !== "" && brk != null && parseFloat(String(brk)) > 0) {
+            out[p + "gambrel-break-" + i] = String(brk);
           }
         });
         (cell.wraps || []).forEach(function (group, i) {
@@ -346,6 +380,8 @@
       var pitches = [];
       var gables = [];
       var knees = [];
+      var shallows = [];
+      var breaks = [];
       var i;
       for (i = 0; i < vertices.length; i += 1) {
         var gable = map[pfx + "gable-" + i] === "on";
@@ -354,12 +390,18 @@
         pitches.push(gable ? "90" : (pitch ? String(pitch) : applyToAll));
         var knee = map[pfx + "knee-" + i];
         knees.push(knee != null && knee !== "" ? String(knee) : "0");
+        var shallow = map[pfx + "gambrel-shallow-" + i];
+        shallows.push(shallow != null && shallow !== "" ? String(shallow) : "");
+        var brk = map[pfx + "gambrel-break-" + i];
+        breaks.push(brk != null && brk !== "" ? String(brk) : "0");
       }
       return {
         vertices: vertices,
         pitches: pitches,
         gables: gables,
         knees: knees,
+        shallows: shallows,
+        breaks: breaks,
         overhang: map[pfx + "overhang"] || "0",
         eaveHeight: map[pfx + "eave_height"] || "0",
         hole: readRingFromMap(map, pfx, "hole"),
@@ -432,7 +474,9 @@
         if (gable) {
           html += " checked";
         }
-        html += "> Gable</label> <label>Knee <input name=\"" + pfx + "knee-" + i + "\" value=\"" + esc((cell.knees && cell.knees[i]) || "0") + "\"> m</label></p>";
+        html += "> Gable</label> <label>Knee <input name=\"" + pfx + "knee-" + i + "\" value=\"" + esc((cell.knees && cell.knees[i]) || "0") + "\"> m</label>";
+        html += " <label>Shallow <input name=\"" + pfx + "gambrel-shallow-" + i + "\" value=\"" + esc((cell.shallows && cell.shallows[i]) || "") + "\"></label>";
+        html += " <label>Break <input name=\"" + pfx + "gambrel-break-" + i + "\" value=\"" + esc((cell.breaks && cell.breaks[i]) || "0") + "\"> m</label></p>";
       });
       return html;
     }
@@ -532,6 +576,7 @@
       setPitch: setPitch,
       setGable: setGable,
       setKneeHeight: setKneeHeight,
+      setGambrel: setGambrel,
       setOnePlane: setOnePlane,
       moveVertex: moveVertex,
       deleteCell: deleteCell,
@@ -636,6 +681,8 @@
     var pitch = form.querySelector("#selected-pitch");
     var gable = form.querySelector("#selected-gable");
     var knee = form.querySelector("#selected-knee-height");
+    var shallow = form.querySelector("#selected-gambrel-shallow");
+    var brk = form.querySelector("#selected-gambrel-break");
     var cellIndex = editor.selectedCell();
     var data = editor.fields();
     var p = cellIndex <= 0 ? "" : "cell-" + cellIndex + "-";
@@ -652,6 +699,12 @@
     }
     if (knee) {
       knee.value = edge === null || cellIndex < 0 ? "" : (data[p + "knee-" + edge] || "0");
+    }
+    if (shallow) {
+      shallow.value = edge === null || cellIndex < 0 ? "" : (data[p + "gambrel-shallow-" + edge] || "");
+    }
+    if (brk) {
+      brk.value = edge === null || cellIndex < 0 ? "" : (data[p + "gambrel-break-" + edge] || "0");
     }
   }
 
@@ -725,6 +778,19 @@
       }
       if (input.id === "selected-knee-height") {
         editor.setKneeHeight(input.value);
+        commit();
+        return;
+      }
+      if (input.id === "selected-gambrel-shallow" || input.id === "selected-gambrel-break") {
+        var steepEl = form.querySelector("#selected-pitch");
+        var shallowEl = form.querySelector("#selected-gambrel-shallow");
+        var breakEl = form.querySelector("#selected-gambrel-break");
+        var steep = steepEl ? steepEl.value : "";
+        var sh = shallowEl ? shallowEl.value : "";
+        var bh = breakEl ? breakEl.value : "";
+        if (sh !== "" && parseFloat(bh) > 0) {
+          editor.setGambrel(steep, sh, bh);
+        }
         commit();
         return;
       }

@@ -5,7 +5,7 @@ build. Read this before deciding whether the tool covers a given
 building.
 
 Four limits are inherent to the method. They will not go away by
-adding features. Other roofs — half-hips, gambrels, dormers — are
+adding features. Other roofs — dormers, and a butterfly — are
 simply not produced today; some of those stay reachable later.
 
 ## One plane can cover several walls only as a wrap
@@ -55,25 +55,21 @@ hip-and-gable roof when you make an edge a gable. A different
 arrangement of hips and ridges on the same footprint — one a builder
 could equally well put up — is not generated.
 
-Gable versus hip on an edge is a choice you do have. A Dutch gable, a
-barn break, or a different ridge layout on the same plan is not.
+Gable versus hip on an edge is a choice you do have. A Dutch gable
+(knee height) and a barn break (gambrel) are also choices on an edge.
+A different ridge layout on the same plan is not.
 
 ## Deferred: roofs that need more than one pitch per wall
 
 These are roofs a builder puts up, and that this library cannot make
-today. Half-hips, knee-walls and gablets need the wall to rise
-vertically for a stretch before it starts to slope. Gambrels and
-mansards need a break in the slope on the same wall — steep, then
-shallow. That is later work, not a closed door: the algorithm was
-written in-house so these stay reachable. An off-the-shelf skeleton
-library would have made them impossible permanently. The reasoning is
-in [future work](future-work.md).
+today. Dormers clip a child roof onto a host face. That is later work,
+not a closed door: the algorithm was written in-house so these stay
+reachable. An off-the-shelf skeleton library would have made them
+impossible permanently. The reasoning is in [future work](future-work.md).
 
-- Half-hips
-- Knee-walls
-- Gablets
-- Gambrels
+- Dormers
 - Mansards
+- Butterfly roofs
 
 ## Not in the model
 

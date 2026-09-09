@@ -172,6 +172,31 @@ editor.setKneeHeight(3);
     assert fields.get("knee-0", "0") in ("0", "0.0", "")
 
 
+def test_clicking_an_edge_sets_gambrel() -> None:
+    result = _run_editor(
+        """
+editor.clickPlan(0, 0);
+editor.clickPlan(10, 0);
+editor.clickPlan(10, 6);
+editor.clickPlan(0, 6);
+editor.closeRing();
+editor.clickPlan(5, 0);
+editor.setGambrel(60, 30, Math.sqrt(3));
+"""
+    )
+    fields = result["fields"]
+    assert result["selectedCell"] == 0
+    assert result["selectedEdge"] == 0
+    assert float(fields["pitch-0"]) == 60.0
+    assert float(fields["gambrel-shallow-0"]) == 30.0
+    assert float(fields["gambrel-break-0"]) == pytest.approx(3**0.5)
+    assert "gambrel-shallow-1" not in fields or fields.get("gambrel-break-1", "0") in (
+        "0",
+        "0.0",
+        "",
+    )
+
+
 def test_selecting_consecutive_edges_sets_one_plane() -> None:
     result = _run_editor(
         """

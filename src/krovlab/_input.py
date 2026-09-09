@@ -123,6 +123,66 @@ def _edge_rings(n_edges: int, ring_sizes: list[int]) -> list[int]:
     return rings
 
 
+def resolve_gambrels(
+    value: object, n_edges: int
+) -> list[tuple[float, float, float] | None] | Failure:
+    """Return one optional barn break per footprint edge, or name why not.
+
+    ``None`` or omitting the argument is no gambrel. A list must have
+    one entry per edge: ``None``, or ``(steep, shallow, break_height)``
+    with break height in metres above that cell's eave.
+    """
+    if value is None:
+        return [None] * n_edges
+    if isinstance(value, bool) or not isinstance(value, list):
+        return _failure(
+            "degenerate",
+            "gambrel must be a list with one entry per edge",
+        )
+    if len(value) != n_edges:
+        return _failure(
+            "degenerate",
+            f"gambrel list has {len(value)} values but the footprint has "
+            f"{n_edges} edges",
+        )
+    parsed: list[tuple[float, float, float] | None] = []
+    for item in value:
+        if item is None:
+            parsed.append(None)
+            continue
+        gambrel = _as_gambrel(item)
+        if not isinstance(gambrel, tuple):
+            return gambrel
+        parsed.append(gambrel)
+    return parsed
+
+
+def _as_gambrel(value: object) -> tuple[float, float, float] | Failure:
+    if not isinstance(value, tuple) or len(value) != 3:
+        return _failure(
+            "degenerate",
+            "a gambrel is a steep pitch, a shallow pitch, and a break height in metres",
+        )
+    steep = degrees_from_pitch(value[0])
+    if not isinstance(steep, float):
+        return steep
+    shallow = degrees_from_pitch(value[1])
+    if not isinstance(shallow, float):
+        return shallow
+    if isinstance(value[2], bool) or not isinstance(value[2], (int, float)):
+        return _failure(
+            "degenerate",
+            "break height must be a finite number of metres above the eave",
+        )
+    break_height = float(value[2])
+    if not math.isfinite(break_height) or break_height <= 0.0:
+        return _failure(
+            "degenerate",
+            "break height must be a finite number of metres above the eave",
+        )
+    return (steep, shallow, break_height)
+
+
 def resolve_knee_heights(value: object, n_edges: int) -> list[float] | Failure:
     """Return one knee height in metres per footprint edge, or name why not.
 

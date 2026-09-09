@@ -102,8 +102,13 @@ variable.
 
 **Flat** — pitch at the practical minimum, not literally zero.
 
-Gambrel, mansard and butterfly roofs are out of scope; they need two pitches per
-edge, which the model does not carry.
+**Gambrel** — two pitches stacked up one wall, steep then shallow, with a
+**break height** in metres above that cell's eave. The takeoff reports two
+faces on that wall. A gambrel cannot share an edge with a knee or a gable.
+_Not: mansard (the same break on every wall), butterfly._
+
+Mansard and butterfly roofs stay out; they need a different story than one
+gambrel on a wall.
 
 ## The algorithm
 

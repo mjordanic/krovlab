@@ -77,6 +77,15 @@
         <input name="{{ edge.knee_name }}" value="{{ edge.knee }}">
         m
       </label>
+      <label>
+        Shallow
+        <input name="{{ edge.shallow_name }}" value="{{ edge.shallow }}">
+      </label>
+      <label>
+        Break
+        <input name="{{ edge.break_name }}" value="{{ edge.break_height }}">
+        m
+      </label>
     </p>
     {% endfor %}
     </div>
@@ -99,7 +108,7 @@
     <p>
       Click vertices on the plan to draw a cell. Close the ring, then add
       another cell. Click a cell to select it and set its eave height;
-      click an edge to set pitch, a gable, or a knee height. Select
+      click an edge to set pitch, a gable, a knee height, or a gambrel. Select
       consecutive edges and choose one plane to wrap them.
     </p>
     <svg id="plan-editor" viewBox="-1 -1 12 8" role="img" aria-label="Plan editor">
@@ -129,6 +138,15 @@
       <label>
         Selected edge knee height
         <input id="selected-knee-height">
+        m
+      </label>
+      <label>
+        Selected edge shallow pitch
+        <input id="selected-gambrel-shallow">
+      </label>
+      <label>
+        Selected edge break height
+        <input id="selected-gambrel-break">
         m
       </label>
       <button type="button" id="one-plane">One plane</button>
@@ -230,6 +248,15 @@
           <input name="{{ edge.knee_name }}" value="{{ edge.knee }}">
           m
         </label>
+        <label>
+          Shallow
+          <input name="{{ edge.shallow_name }}" value="{{ edge.shallow }}">
+        </label>
+        <label>
+          Break
+          <input name="{{ edge.break_name }}" value="{{ edge.break_height }}">
+          m
+        </label>
       </p>
       {% endfor %}
       </div>
@@ -291,13 +318,15 @@
         saved[input.name.slice("pitch-".length)] = {
           pitch: input.value,
           gable: false,
-          knee: "0"
+          knee: "0",
+          shallow: "",
+          breakHeight: "0"
         };
       });
       document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
         var i = box.name.slice("gable-".length);
         if (!saved[i]) {
-          saved[i] = { pitch: "90", gable: box.checked, knee: "0" };
+          saved[i] = { pitch: "90", gable: box.checked, knee: "0", shallow: "", breakHeight: "0" };
         } else {
           saved[i].gable = box.checked;
         }
@@ -305,9 +334,25 @@
       document.querySelectorAll("input[name^='knee-']").forEach(function (input) {
         var i = input.name.slice("knee-".length);
         if (!saved[i]) {
-          saved[i] = { pitch: "45", gable: false, knee: input.value };
+          saved[i] = { pitch: "45", gable: false, knee: input.value, shallow: "", breakHeight: "0" };
         } else {
           saved[i].knee = input.value;
+        }
+      });
+      document.querySelectorAll("input[name^='gambrel-shallow-']").forEach(function (input) {
+        var i = input.name.slice("gambrel-shallow-".length);
+        if (!saved[i]) {
+          saved[i] = { pitch: "45", gable: false, knee: "0", shallow: input.value, breakHeight: "0" };
+        } else {
+          saved[i].shallow = input.value;
+        }
+      });
+      document.querySelectorAll("input[name^='gambrel-break-']").forEach(function (input) {
+        var i = input.name.slice("gambrel-break-".length);
+        if (!saved[i]) {
+          saved[i] = { pitch: "45", gable: false, knee: "0", shallow: "", breakHeight: input.value };
+        } else {
+          saved[i].breakHeight = input.value;
         }
       });
       return saved;
@@ -336,7 +381,7 @@
       rings.forEach(function (ring) {
         ring.forEach(function (start, j) {
           var end = ring[(j + 1) % ring.length];
-          var prev = saved[String(index)] || { pitch: fill, gable: false, knee: "0" };
+          var prev = saved[String(index)] || { pitch: fill, gable: false, knee: "0", shallow: "", breakHeight: "0" };
           html += "<p><label>" + edgeLabel(index, start, end);
           html += " <input name=\"pitch-" + index + "\" value=\"" + esc(prev.pitch) + "\"";
           if (prev.gable) {
@@ -346,7 +391,9 @@
           if (prev.gable) {
             html += " checked";
           }
-          html += "> Gable</label> <label>Knee <input name=\"knee-" + index + "\" value=\"" + esc(prev.knee || "0") + "\"> m</label></p>";
+          html += "> Gable</label> <label>Knee <input name=\"knee-" + index + "\" value=\"" + esc(prev.knee || "0") + "\"> m</label>";
+          html += " <label>Shallow <input name=\"gambrel-shallow-" + index + "\" value=\"" + esc(prev.shallow || "") + "\"></label>";
+          html += " <label>Break <input name=\"gambrel-break-" + index + "\" value=\"" + esc(prev.breakHeight || "0") + "\"> m</label></p>";
           index += 1;
         });
       });

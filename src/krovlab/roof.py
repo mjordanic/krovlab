@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, overload
 
@@ -24,6 +25,7 @@ from krovlab._input import (
     check_adjacent_parallel_pitches,
     check_footprint,
     check_holes,
+    resolve_gambrels,
     resolve_knee_heights,
     resolve_pitches,
     resolve_wrap_groups,
@@ -46,6 +48,8 @@ FailureKind = Literal[
     "gable_versus_pitch",
     "unequal_eave_height",
     "gable_versus_knee",
+    "gambrel_versus_knee",
+    "gambrel_versus_gable",
     "nonconsecutive_wrap",
     "wrap_pitch",
     "nonplanar_wrap",
@@ -67,6 +71,8 @@ FailureKind = Literal[
     on the other.
 ``unequal_eave_height`` — a pitched shared edge sits at two eave heights.
 ``gable_versus_knee`` — the same edge is a gable and has a knee height.
+``gambrel_versus_knee`` — the same edge is a gambrel and has a knee height.
+``gambrel_versus_gable`` — the same edge is a gambrel and a gable.
 ``nonconsecutive_wrap`` — a wrap group is not consecutive edges of one ring.
 ``wrap_pitch`` — wrapped edges do not share one pitch, or a wrap is a gable.
 ``nonplanar_wrap`` — the wrap cannot embed as a planar terrain.
@@ -237,7 +243,8 @@ class Roof:
     faces: tuple[Face, ...]
     """One face per non-gabled footprint edge, in the caller's edge order.
 
-    A wrap group contributes one face, named by its first edge.
+    A wrap group contributes one face, named by its first edge. A gambrel
+    edge contributes two faces, steep then shallow.
     """
 
     arcs: tuple[Arc, ...]
@@ -303,6 +310,7 @@ def roof(
     eave_height: float = 0.0,
     knee_height: float | list[float] = 0.0,
     wrap: list[list[int]] | None = None,
+    gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
     *,
     events: Literal[False] = False,
 ) -> Roof | Failure: ...
@@ -317,6 +325,7 @@ def roof(
     eave_height: float = 0.0,
     knee_height: float | list[float] = 0.0,
     wrap: list[list[int]] | None = None,
+    gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
     *,
     events: Literal[True],
 ) -> tuple[Roof, tuple[Event, ...]] | Failure: ...
@@ -330,6 +339,7 @@ def roof(
     eave_height: float = 0.0,
     knee_height: float | list[float] = 0.0,
     wrap: list[list[int]] | None = None,
+    gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
@@ -374,6 +384,13 @@ def roof(
         edge. Zero on every edge is the same as omitting the argument.
         A gable (pitch 90) with a non-zero knee on the same edge is
         ``gable_versus_knee``.
+    gambrel
+        One optional barn break per footprint edge: ``(steep, shallow,
+        break_height)`` or ``None``. Break height is metres above that
+        cell's eave. Omitting it, or ``None`` on every edge, is a
+        single pitch per wall. A gambrel with a knee on the same edge
+        is ``gambrel_versus_knee``. A gambrel with a gable on the same
+        edge is ``gambrel_versus_gable``.
     wrap
         Groups of consecutive footprint-edge indices to treat as one
         plane. Omitting it, or an empty list, is the existing skeleton.
@@ -451,6 +468,24 @@ def roof(
                 kind="gable_versus_knee",
                 reason="a gable cannot also have a knee height",
             )
+    gambrels = resolve_gambrels(gambrel, n_edges)
+    if isinstance(gambrels, Failure):
+        return gambrels
+    for i, item in enumerate(gambrels):
+        if item is None:
+            continue
+        steep, shallow, _break_height = item
+        if knees[i] > 0.0:
+            return Failure(
+                kind="gambrel_versus_knee",
+                reason="a gambrel cannot also have a knee height",
+            )
+        if parsed[i] >= 90.0 or steep >= 90.0 or shallow >= 90.0:
+            return Failure(
+                kind="gambrel_versus_gable",
+                reason="a gambrel cannot also be a gable",
+            )
+        parsed[i] = steep
     ring_sizes = [len(cleaned)] + [len(h) for h in cleaned_holes]
     wraps = resolve_wrap_groups(wrap, n_edges, ring_sizes)
     if isinstance(wraps, Failure):
@@ -477,6 +512,7 @@ def roof(
     # more slowly. Converted here and nowhere else.
     ring_pitches = [parsed[edge_map[i]] for i in range(len(edge_map))]
     ring_knees = [knees[edge_map[i]] for i in range(len(edge_map))]
+    ring_gambrels = [gambrels[edge_map[i]] for i in range(len(edge_map))]
     offset = 0
     for ring in rings:
         m = len(ring)
@@ -492,9 +528,24 @@ def roof(
             kind="incomplete",
             reason="every edge is a gable (pitch = 90); no roof can close",
         )
+    seconds = [
+        _pitch_to_weight(item[1]) if item is not None else w
+        for item, w in zip(ring_gambrels, weights, strict=True)
+    ]
+    break_times = [item[2] if item is not None else math.inf for item in ring_gambrels]
+    use_motion = (
+        any(k > 0.0 for k in ring_knees)
+        or any(item is not None for item in ring_gambrels)
+    ) and not wraps
     raw = (
-        _skeleton(rings, weights, delays=ring_knees)
-        if any(k > 0.0 for k in ring_knees) and not wraps
+        _skeleton(
+            rings,
+            weights,
+            delays=ring_knees,
+            second_weights=seconds,
+            breaks=break_times,
+        )
+        if use_motion
         else _skeleton(rings, weights)
     )
     if not raw.complete:
@@ -532,6 +583,8 @@ def roof(
         cleaned,
         cleaned_holes,
         float(eave_height),
+        gambrels=ring_gambrels,
+        breaks=raw.breaks,
     )
     if not events:
         return built
@@ -631,10 +684,12 @@ def _roof_from_skeleton(
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]],
     eave_height: float,
+    gambrels: list[tuple[float, float, float] | None] | None = None,
+    breaks: tuple[tuple[int, int, int], ...] = (),
 ) -> Roof:
     """Assemble a :class:`Roof` from the raw skeleton graph."""
     if all(d == 0.0 for d in delays):
-        return _roof_from_plain_skeleton(
+        built = _roof_from_plain_skeleton(
             rings,
             pitches,
             raw_nodes,
@@ -643,7 +698,10 @@ def _roof_from_skeleton(
             footprint,
             holes,
             eave_height,
+            gambrels=gambrels,
+            breaks=breaks,
         )
+        return built
     return _roof_from_kneed_skeleton(
         rings,
         pitches,
@@ -667,6 +725,8 @@ def _roof_from_plain_skeleton(
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]],
     eave_height: float,
+    gambrels: list[tuple[float, float, float] | None] | None = None,
+    breaks: tuple[tuple[int, int, int], ...] = (),
 ) -> Roof:
     """Assemble a roof when every knee height is zero."""
     nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
@@ -726,6 +786,8 @@ def _roof_from_plain_skeleton(
                 node_indices=tuple(cycle),
             )
         )
+    if gambrels is not None and any(item is not None for item in gambrels):
+        faces = _split_gambrel_faces(faces, nodes, gambrels, breaks, edge_map)
     return _finish_roof(nodes, faces, arcs, footprint, holes, eave_height)
 
 
@@ -871,6 +933,85 @@ def _arc_on_knee_wall(
         if delays[face] > 0.0 and _nodes_on_oriented_edge(a, b, face, rings, next_idx):
             return True
     return False
+
+
+def _split_gambrel_faces(
+    faces: list[Face],
+    nodes: tuple[Node, ...],
+    gambrels: list[tuple[float, float, float] | None],
+    breaks: tuple[tuple[int, int, int], ...],
+    edge_map: list[int],
+) -> list[Face]:
+    """Split each gambrel wall into a steep band then a shallow band."""
+    break_of = {edge: (start, end) for edge, start, end in breaks}
+    caller_to_ring = {caller: ring for ring, caller in enumerate(edge_map)}
+    split: list[Face] = []
+    for face in faces:
+        ring_i = caller_to_ring.get(face.edge_index)
+        if ring_i is None:
+            split.append(face)
+            continue
+        item = gambrels[ring_i] if ring_i < len(gambrels) else None
+        pair = break_of.get(ring_i)
+        if item is None or pair is None:
+            split.append(face)
+            continue
+        steep, shallow, _height = item
+        steep_cycle, shallow_cycle = _gambrel_cycles(face.node_indices, pair)
+        if steep_cycle is None or shallow_cycle is None:
+            split.append(
+                Face(
+                    edge_index=face.edge_index,
+                    pitch=steep,
+                    plan_area=face.plan_area,
+                    sloped_area=face.sloped_area,
+                    node_indices=face.node_indices,
+                    eave_indices=face.eave_indices,
+                )
+            )
+            continue
+        split.append(_face_from_cycle(face.edge_index, steep, steep_cycle, nodes))
+        split.append(_face_from_cycle(face.edge_index, shallow, shallow_cycle, nodes))
+    return split
+
+
+def _gambrel_cycles(
+    cycle: tuple[int, ...],
+    pair: tuple[int, int],
+) -> tuple[list[int], list[int]] | tuple[None, None]:
+    """Split a face cycle at the two break nodes into steep then shallow rings."""
+    nodes = list(cycle)
+    if pair[0] not in nodes or pair[1] not in nodes:
+        return None, None
+    i = nodes.index(pair[0])
+    j = nodes.index(pair[1])
+    if i == j:
+        return None, None
+    if i > j:
+        i, j = j, i
+    steep_cycle = nodes[: i + 1] + nodes[j:]
+    shallow_cycle = nodes[i : j + 1]
+    if len(steep_cycle) < 3 or len(shallow_cycle) < 3:
+        return None, None
+    return steep_cycle, shallow_cycle
+
+
+def _face_from_cycle(
+    edge_index: int,
+    pitch: float,
+    cycle: list[int],
+    nodes: tuple[Node, ...],
+) -> Face:
+    plan_area = abs(_signed_area([(nodes[j].x, nodes[j].y) for j in cycle]))
+    cos_pitch = math.cos(math.radians(pitch))
+    sloped_area = plan_area / cos_pitch if cos_pitch != 0.0 else plan_area
+    return Face(
+        edge_index=edge_index,
+        pitch=pitch,
+        plan_area=plan_area,
+        sloped_area=sloped_area,
+        node_indices=tuple(cycle),
+    )
 
 
 def _finish_roof(

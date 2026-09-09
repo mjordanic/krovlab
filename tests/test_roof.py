@@ -871,6 +871,120 @@ def test_gable_plus_knee_on_the_same_edge_is_a_named_failure() -> None:
     assert isinstance(still_gable, Roof)
 
 
+def test_gambrel_plus_knee_on_the_same_edge_is_a_named_failure() -> None:
+    result = roof(
+        RECTANGLE,
+        45.0,
+        knee_height=[1.0, 0.0, 0.0, 0.0],
+        gambrel=[(60.0, 30.0, math.sqrt(3.0)), None, None, None],
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "gambrel_versus_knee"
+    assert "gambrel" in result.reason.lower()
+    assert "knee" in result.reason.lower()
+
+
+def test_gambrel_plus_gable_on_the_same_edge_is_a_named_failure() -> None:
+    result = roof(
+        RECTANGLE,
+        [90.0, 45.0, 45.0, 45.0],
+        gambrel=[(60.0, 30.0, math.sqrt(3.0)), None, None, None],
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "gambrel_versus_gable"
+    assert "gambrel" in result.reason.lower()
+    assert "gable" in result.reason.lower()
+
+
+def test_rectangle_long_edges_gambrel_has_two_faces_per_wall() -> None:
+    # 10 x 6 m. Long walls (edges 0 and 2) are 60° then 30° with the break
+    # √3 m above the eave, so the steep band insets 1 m. Short walls stay 45°.
+    break_height = math.sqrt(3.0)
+    result = roof(
+        RECTANGLE,
+        45.0,
+        gambrel=[
+            (60.0, 30.0, break_height),
+            None,
+            (60.0, 30.0, break_height),
+            None,
+        ],
+    )
+    assert isinstance(result, Roof)
+    long_faces = [face for face in result.faces if face.edge_index in (0, 2)]
+    short_faces = [face for face in result.faces if face.edge_index in (1, 3)]
+    assert len(long_faces) == 4
+    assert len(short_faces) == 2
+    steep_plan = 10.0 - math.sqrt(3.0)
+    shallow_plan = 20.0 - 4.0 * math.sqrt(3.0) - 4.0 / math.sqrt(3.0)
+    for edge in (0, 2):
+        pair = [face for face in result.faces if face.edge_index == edge]
+        assert pair[0].pitch == pytest.approx(60.0)
+        assert pair[1].pitch == pytest.approx(30.0)
+        assert pair[0].plan_area == pytest.approx(steep_plan)
+        assert pair[1].plan_area == pytest.approx(shallow_plan)
+        assert pair[0].sloped_area == pytest.approx(
+            steep_plan / math.cos(math.radians(60.0))
+        )
+        assert pair[1].sloped_area == pytest.approx(
+            shallow_plan / math.cos(math.radians(30.0))
+        )
+    from shapely.geometry import Polygon
+
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(
+        Polygon(RECTANGLE).area
+    )
+
+
+def test_gambrel_break_height_is_metres_above_the_eave() -> None:
+    break_height = math.sqrt(3.0)
+    gambrel = [
+        (60.0, 30.0, break_height),
+        None,
+        (60.0, 30.0, break_height),
+        None,
+    ]
+    at_datum = roof(RECTANGLE, 45.0, gambrel=gambrel)
+    lifted = roof(RECTANGLE, 45.0, eave_height=7.0, gambrel=gambrel)
+    assert isinstance(at_datum, Roof)
+    assert isinstance(lifted, Roof)
+    assert lifted.ridge_height == pytest.approx(at_datum.ridge_height + 7.0)
+    at_break = [
+        node.height for node in at_datum.nodes if abs(node.height - break_height) < 1e-6
+    ]
+    lifted_break = [
+        node.height
+        for node in lifted.nodes
+        if abs(node.height - (7.0 + break_height)) < 1e-6
+    ]
+    assert at_break
+    assert lifted_break
+
+
+def test_gambrel_without_a_dormer_is_still_a_terrain() -> None:
+    from invariants import (
+        drainage_runs_to_each_faces_own_eave,
+        every_face_is_planar,
+        plan_areas_sum_to_footprint_area,
+    )
+
+    result = roof(
+        RECTANGLE,
+        45.0,
+        gambrel=[
+            (60.0, 30.0, math.sqrt(3.0)),
+            None,
+            (60.0, 30.0, math.sqrt(3.0)),
+            None,
+        ],
+    )
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    plan_areas_sum_to_footprint_area(result, RECTANGLE)
+    every_face_is_planar(result)
+    drainage_runs_to_each_faces_own_eave(result, RECTANGLE)
+
+
 def test_short_edge_knee_equal_to_ridge_is_a_vertical_gablet() -> None:
     # 10 x 6 m at 45 degrees: the full hip's ridge is 3 m. Knee 3 m on the east
     # short edge (edge 1) is a vertical gablet; neighbours close over it

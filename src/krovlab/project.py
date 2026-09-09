@@ -70,6 +70,13 @@ class Cell:
     Empty or omitted is the existing skeleton of this cell.
     """
 
+    gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None
+    """Optional barn break per edge: steep pitch, shallow pitch, break height.
+
+    Break height is metres above this cell's eave. ``None`` or omitting
+    it is a single pitch per wall.
+    """
+
 
 @dataclass(frozen=True)
 class ProjectFace:
@@ -171,6 +178,7 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
             eave_height=cell.eave_height,
             knee_height=cell.knee_height,
             wrap=cell.wrap,
+            gambrel=cell.gambrel,
         )
         if isinstance(built, Failure):
             return built

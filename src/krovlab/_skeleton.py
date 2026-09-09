@@ -65,6 +65,7 @@ COLLOCATION_M = 1e-9
 _EVENT_SPLIT = 0
 _EVENT_EDGE = 1
 _EVENT_ACTIVATE = 2
+_EVENT_BREAK = 3
 _ALONG_TOL = 1e-5
 _DIST_TOL_M = 1e-4
 _PARALLEL_DIST_M = 5e-3
@@ -150,12 +151,20 @@ class RawSkeleton:
     An edge with a delay that vanished before the delay expired is
     absent — the wall stayed vertical and there is no remaining hip.
     """
+    breaks: tuple[tuple[int, int, int], ...] = ()
+    """Gambrel-break endpoints: ``(edge_index, start_node, end_node)``.
+
+    An edge that vanished before the break height is absent — there is
+    no shallow band on that wall.
+    """
 
 
 def skeleton(
     rings: list[list[tuple[float, float]]],
     weights: list[float],
     delays: list[float] | None = None,
+    second_weights: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> RawSkeleton:
     """Grow the straight skeleton of one or more oriented rings.
 
@@ -169,6 +178,8 @@ def skeleton(
     Event time equals height because the wavefront rises at unit rate
     as it moves in. ``delays[i]`` is an additive wait in metres (knee
     height) before edge ``i`` starts moving; omitted delays are zero.
+    ``second_weights`` and ``breaks`` change an edge's plan speed at a
+    height (a gambrel); omitted is a single speed for the whole rise.
     """
     pts: list[tuple[float, float]] = []
     next_idx: list[int] = []
@@ -180,6 +191,10 @@ def skeleton(
     n = len(pts)
     if delays is None:
         delays = [0.0] * n
+    if second_weights is None:
+        second_weights = list(weights)
+    if breaks is None:
+        breaks = [math.inf] * n
     prev_of = [0] * n
     for i, nxt in enumerate(next_idx):
         prev_of[nxt] = i
@@ -188,6 +203,7 @@ def skeleton(
     arcs: list[tuple[int, int, int, int]] = []
     events: list[RawEvent] = []
     activations: list[tuple[int, int, int]] = []
+    break_records: list[tuple[int, int, int]] = []
     bisectors = _original_bisectors(prev_of, lines, weights)
 
     verts = [
@@ -216,7 +232,7 @@ def skeleton(
         )
 
     def push_edge(vertex: _Vertex) -> None:
-        event = _edge_event(vertex, lines, weights, delays)
+        event = _edge_event(vertex, lines, weights, delays, second_weights, breaks)
         if event is None:
             return
         t, edge_index, px, py = event
@@ -232,7 +248,16 @@ def skeleton(
             return
         for opp in range(n):
             cand = _split_candidate(
-                vertex, opp, lines, weights, delays, pts, next_idx, bisectors
+                vertex,
+                opp,
+                lines,
+                weights,
+                delays,
+                pts,
+                next_idx,
+                bisectors,
+                second_weights,
+                breaks,
             )
             if cand is None:
                 continue
@@ -265,8 +290,10 @@ def skeleton(
             return True
         return False
 
-    def activate_edge(edge_i: int, t: float) -> None:
-        """Record the knee-eave nodes when a delayed edge starts moving."""
+    def snapshot_edge(
+        edge_i: int, t: float, bucket: list[tuple[int, int, int]]
+    ) -> None:
+        """Record wavefront endpoints of ``edge_i`` at time ``t``."""
         va: _Vertex | None = None
         for vertex in verts:
             if vertex.valid and vertex.right_edge == edge_i:
@@ -277,7 +304,9 @@ def skeleton(
         vb = va.next
         ends: list[int] = []
         for vertex in (va, vb):
-            pos = _position_at(vertex, t, lines, weights, delays)
+            pos = _position_at(
+                vertex, t, lines, weights, delays, second_weights, breaks
+            )
             if pos is None:
                 return
             node_idx = _find_or_add_node(nodes, pos[0], pos[1], t)
@@ -293,7 +322,11 @@ def skeleton(
             vertex.x, vertex.y = pos
             vertex.birth = t
             ends.append(node_idx)
-        activations.append((edge_i, ends[0], ends[1]))
+        bucket.append((edge_i, ends[0], ends[1]))
+
+    def activate_edge(edge_i: int, t: float) -> None:
+        """Record the knee-eave nodes when a delayed edge starts moving."""
+        snapshot_edge(edge_i, t, activations)
 
     for v in verts:
         push_all(v)
@@ -301,6 +334,10 @@ def skeleton(
         if delay > 0.0:
             host = next(v for v in verts if v.right_edge == i)
             push(_EVENT_ACTIVATE, delay, 0.0, 0.0, host, i)
+    for i, brk in enumerate(breaks):
+        if math.isfinite(brk) and brk > 0.0:
+            host = next(v for v in verts if v.right_edge == i)
+            push(_EVENT_BREAK, brk, 0.0, 0.0, host, i)
 
     max_events = max(n * n * 8, 32)
     processed = 0
@@ -318,6 +355,9 @@ def skeleton(
         if kind_rank == _EVENT_ACTIVATE:
             activate_edge(edge_index, t)
             continue
+        if kind_rank == _EVENT_BREAK:
+            snapshot_edge(edge_index, t, break_records)
+            continue
         if not va.valid:
             continue
         processed += 1
@@ -328,19 +368,22 @@ def skeleton(
                 events=tuple(events),
                 complete=False,
                 activations=tuple(activations),
+                breaks=tuple(break_records),
             )
 
         if kind_rank == _EVENT_EDGE:
             vb = va.next
             if not vb.valid:
                 continue
-            event = _edge_event(va, lines, weights, delays)
+            event = _edge_event(va, lines, weights, delays, second_weights, breaks)
             if event is None:
                 continue
             t2, vanishing, px, py = event
             if abs(t2 - t) > 1e-9 or vanishing != edge_index:
                 continue
-            if not _vertices_meet(va, vb, px, py, t2, lines, weights, delays):
+            if not _vertices_meet(
+                va, vb, px, py, t2, lines, weights, delays, second_weights, breaks
+            ):
                 continue
             if already_seen(t2, px, py, va.left_edge, va.right_edge, vb.right_edge):
                 continue
@@ -373,14 +416,34 @@ def skeleton(
             continue
 
         cand = _split_candidate(
-            va, edge_index, lines, weights, delays, pts, next_idx, bisectors
+            va,
+            edge_index,
+            lines,
+            weights,
+            delays,
+            pts,
+            next_idx,
+            bisectors,
+            second_weights,
+            breaks,
         )
         if cand is None:
             continue
         t2, px, py = cand
         if abs(t2 - t) > 1e-9:
             continue
-        found = _find_opposite(edge_index, px, py, t2, verts, lines, weights, delays)
+        found = _find_opposite(
+            edge_index,
+            px,
+            py,
+            t2,
+            verts,
+            lines,
+            weights,
+            delays,
+            second_weights,
+            breaks,
+        )
         if found is None:
             continue
         vo, vp = found
@@ -441,6 +504,7 @@ def skeleton(
         events=tuple(events),
         complete=complete,
         activations=tuple(activations),
+        breaks=tuple(break_records),
     )
 
 
@@ -479,14 +543,55 @@ def _is_straight_same_weight(
     return weights[left] > 0.0
 
 
-def _edge_offset(i: int, t: float, weights: list[float], delays: list[float]) -> float:
-    """Inward offset of edge ``i`` at time ``t`` after its delay."""
-    return weights[i] * max(0.0, t - delays[i])
+def _constant_motion(
+    delays: list[float],
+    breaks: list[float] | None,
+    indices: tuple[int, ...],
+) -> bool:
+    """True when every named edge has one speed from t = 0."""
+    if any(delays[i] > 0.0 for i in indices):
+        return False
+    if breaks is None:
+        return True
+    return all(not math.isfinite(breaks[i]) for i in indices)
 
 
-def _edge_speed(i: int, t: float, weights: list[float], delays: list[float]) -> float:
+def _edge_offset(
+    i: int,
+    t: float,
+    weights: list[float],
+    delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
+) -> float:
+    """Inward offset of edge ``i`` at time ``t`` after its delay and break."""
+    if t <= delays[i]:
+        return 0.0
+    w1 = weights[i]
+    if (
+        seconds is None
+        or breaks is None
+        or not math.isfinite(breaks[i])
+        or t <= breaks[i]
+    ):
+        return w1 * (t - delays[i])
+    return w1 * (breaks[i] - delays[i]) + seconds[i] * (t - breaks[i])
+
+
+def _edge_speed(
+    i: int,
+    t: float,
+    weights: list[float],
+    delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
+) -> float:
     """Instantaneous plan speed of edge ``i`` at time ``t``."""
-    return 0.0 if t < delays[i] else weights[i]
+    if t < delays[i]:
+        return 0.0
+    if seconds is None or breaks is None or t < breaks[i]:
+        return weights[i]
+    return seconds[i]
 
 
 def _vertex_velocity(
@@ -496,6 +601,8 @@ def _vertex_velocity(
     weights: list[float],
     delays: list[float] | None = None,
     t: float = 0.0,
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, float] | None:
     """Plan velocity of the wavefront vertex between edges ``left`` and ``right``.
 
@@ -503,9 +610,15 @@ def _vertex_velocity(
     supports of equal weight: the inward normal times weight — the 180°
     bisector is perpendicular to the wall.
     """
-    w_left = weights[left] if delays is None else _edge_speed(left, t, weights, delays)
+    w_left = (
+        weights[left]
+        if delays is None
+        else _edge_speed(left, t, weights, delays, seconds, breaks)
+    )
     w_right = (
-        weights[right] if delays is None else _edge_speed(right, t, weights, delays)
+        weights[right]
+        if delays is None
+        else _edge_speed(right, t, weights, delays, seconds, breaks)
     )
     vel = _solve2(
         lines[left].nx,
@@ -576,12 +689,16 @@ def _split_candidate(
     pts: list[tuple[float, float]],
     next_idx: list[int],
     bisectors: list[tuple[float, float]],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, float, float] | None:
     """Time and point at which ``vertex`` hits original edge ``opp``, if ever."""
     if opp == vertex.left_edge or opp == vertex.right_edge:
         return None
     if _supports_coincide(lines[vertex.left_edge], lines[vertex.right_edge]):
-        hit = _straight_hit_opposite(vertex, opp, lines, weights, delays)
+        hit = _straight_hit_opposite(
+            vertex, opp, lines, weights, delays, seconds, breaks
+        )
         if hit is None:
             return None
         t, px, py = hit
@@ -593,6 +710,8 @@ def _split_candidate(
             lines,
             weights,
             delays,
+            seconds,
+            breaks,
         )
         if solved is None:
             return None
@@ -612,13 +731,12 @@ def _straight_hit_opposite(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, float, float] | None:
     """When a same-weight collinear vertex's normal-ray meets opposite ``opp``."""
-    if (
-        delays[opp] == 0.0
-        and delays[vertex.left_edge] == 0.0
-        and delays[vertex.right_edge] == 0.0
-    ):
+    involved = (opp, vertex.left_edge, vertex.right_edge)
+    if _constant_motion(delays, breaks, involved):
         vel = _vertex_velocity(vertex.left_edge, vertex.right_edge, lines, weights)
         if vel is None:
             return None
@@ -638,19 +756,26 @@ def _straight_hit_opposite(
         py = p0y + vel[1] * (t - vertex.birth)
         return t, px, py
     vel = _vertex_velocity(
-        vertex.left_edge, vertex.right_edge, lines, weights, delays, vertex.birth
+        vertex.left_edge,
+        vertex.right_edge,
+        lines,
+        weights,
+        delays,
+        vertex.birth,
+        seconds,
+        breaks,
     )
     if vel is None:
         return None
     opp_line = lines[opp]
-    w_opp = _edge_speed(opp, vertex.birth, weights, delays)
+    w_opp = _edge_speed(opp, vertex.birth, weights, delays, seconds, breaks)
     denom = opp_line.nx * vel[0] + opp_line.ny * vel[1] - w_opp
     if abs(denom) < 1e-18:
         return None
     p0x, p0y = vertex.x, vertex.y
     rhs = (
         opp_line.c
-        + _edge_offset(opp, vertex.birth, weights, delays)
+        + _edge_offset(opp, vertex.birth, weights, delays, seconds, breaks)
         - (opp_line.nx * p0x + opp_line.ny * p0y)
     )
     t = vertex.birth + rhs / denom
@@ -689,10 +814,12 @@ def _position_at(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, float] | None:
     """Plan position of a wavefront vertex at time ``t`` along its bisector."""
     left, right = vertex.left_edge, vertex.right_edge
-    if delays[left] == 0.0 and delays[right] == 0.0:
+    if _constant_motion(delays, breaks, (left, right)):
         pos = _intersect_offsets(
             lines[left],
             weights[left] * t,
@@ -702,16 +829,16 @@ def _position_at(
     else:
         pos = _intersect_offsets(
             lines[left],
-            _edge_offset(left, t, weights, delays),
+            _edge_offset(left, t, weights, delays, seconds, breaks),
             lines[right],
-            _edge_offset(right, t, weights, delays),
+            _edge_offset(right, t, weights, delays, seconds, breaks),
         )
     if pos is not None:
         return pos
-    if delays[left] == 0.0 and delays[right] == 0.0:
+    if _constant_motion(delays, breaks, (left, right)):
         vel = _vertex_velocity(left, right, lines, weights)
     else:
-        vel = _vertex_velocity(left, right, lines, weights, delays, t)
+        vel = _vertex_velocity(left, right, lines, weights, delays, t, seconds, breaks)
     if vel is not None and _supports_coincide(
         lines[vertex.left_edge], lines[vertex.right_edge]
     ):
@@ -721,7 +848,14 @@ def _position_at(
     # on that collapsed line. Unique motion is undefined, so keep the
     # birth point.
     if _offsets_coincide(
-        vertex.left_edge, vertex.right_edge, t, lines, weights, delays
+        vertex.left_edge,
+        vertex.right_edge,
+        t,
+        lines,
+        weights,
+        delays,
+        seconds,
+        breaks,
     ):
         return (vertex.x, vertex.y)
     return None
@@ -734,16 +868,18 @@ def _offsets_coincide(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> bool:
     """True if original edges ``i`` and ``j`` have met as a single offset line."""
     a, b = lines[i], lines[j]
     dot = a.nx * b.nx + a.ny * b.ny
-    if delays[i] == 0.0 and delays[j] == 0.0:
+    if _constant_motion(delays, breaks, (i, j)):
         off_i = weights[i] * t
         off_j = weights[j] * t
     else:
-        off_i = _edge_offset(i, t, weights, delays)
-        off_j = _edge_offset(j, t, weights, delays)
+        off_i = _edge_offset(i, t, weights, delays, seconds, breaks)
+        off_j = _edge_offset(j, t, weights, delays, seconds, breaks)
     if dot < -0.999:
         gap = abs(a.c + b.c)
         return abs(gap - (off_i + off_j)) <= 1e-9
@@ -762,16 +898,20 @@ def _vertices_meet(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> bool:
     """True if both wavefront vertices are at the edge-event point at time ``t``."""
-    pa = _position_at(va, t, lines, weights, delays)
-    pb = _position_at(vb, t, lines, weights, delays)
+    pa = _position_at(va, t, lines, weights, delays, seconds, breaks)
+    pb = _position_at(vb, t, lines, weights, delays, seconds, breaks)
     if pa is None or pb is None:
         return False
     tol = _DIST_TOL_M
     if _offsets_coincide(
-        va.left_edge, va.right_edge, t, lines, weights, delays
-    ) or _offsets_coincide(vb.left_edge, vb.right_edge, t, lines, weights, delays):
+        va.left_edge, va.right_edge, t, lines, weights, delays, seconds, breaks
+    ) or _offsets_coincide(
+        vb.left_edge, vb.right_edge, t, lines, weights, delays, seconds, breaks
+    ):
         tol = _PARALLEL_DIST_M
     return (
         math.hypot(pa[0] - px, pa[1] - py) < tol
@@ -788,6 +928,8 @@ def _on_offset_segment(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> bool:
     """True if ``(px, py)`` lies on the wavefront edge ``va → vb`` at time ``t``.
 
@@ -797,8 +939,8 @@ def _on_offset_segment(
     meeting is handled by their own events, and treating it as a split
     loops.
     """
-    a = _position_at(va, t, lines, weights, delays)
-    b = _position_at(vb, t, lines, weights, delays)
+    a = _position_at(va, t, lines, weights, delays, seconds, breaks)
+    b = _position_at(vb, t, lines, weights, delays, seconds, breaks)
     if a is None or b is None:
         return False
     ax, ay = a
@@ -830,6 +972,8 @@ def _find_opposite(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[_Vertex, _Vertex] | None:
     """Current LAV endpoints of original edge ``opp`` that contain the point."""
     for vertex in verts:
@@ -838,7 +982,9 @@ def _find_opposite(
         other = vertex.next
         if not other.valid:
             continue
-        if _on_offset_segment(px, py, t, vertex, other, lines, weights, delays):
+        if _on_offset_segment(
+            px, py, t, vertex, other, lines, weights, delays, seconds, breaks
+        ):
             return vertex, other
     return None
 
@@ -848,6 +994,8 @@ def _edge_event(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, int, float, float] | None:
     """Time and point at which the wavefront edge between ``va`` and its next vanishes.
 
@@ -863,9 +1011,11 @@ def _edge_event(
         lines,
         weights,
         delays,
+        seconds,
+        breaks,
     )
     if solved is None:
-        hit = _trajectories_meet(va, vb, lines, weights, delays)
+        hit = _trajectories_meet(va, vb, lines, weights, delays, seconds, breaks)
         if hit is None:
             return None
         px, py, t = hit
@@ -884,26 +1034,30 @@ def _trajectories_meet(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, float, float] | None:
     """When two adjacent wavefront vertices coincide, from linear motions."""
     involved = (va.left_edge, va.right_edge, vb.left_edge, vb.right_edge)
-    if all(delays[i] == 0.0 for i in involved):
+    if _constant_motion(delays, breaks, involved):
         return _trajectories_meet_constant(va, vb, lines, weights)
     t_start = max(va.birth, vb.birth, 0.0)
     cuts = {t_start}
     for i in involved:
         if delays[i] > t_start:
             cuts.add(delays[i])
+        if breaks is not None and math.isfinite(breaks[i]) and breaks[i] > t_start:
+            cuts.add(breaks[i])
     ordered = sorted(cuts)
     bounds = [*ordered, float("inf")]
     for t0, t1 in pairwise(bounds):
-        pa = _position_at(va, t0, lines, weights, delays)
-        pb = _position_at(vb, t0, lines, weights, delays)
+        pa = _position_at(va, t0, lines, weights, delays, seconds, breaks)
+        pb = _position_at(vb, t0, lines, weights, delays, seconds, breaks)
         vel_a = _vertex_velocity(
-            va.left_edge, va.right_edge, lines, weights, delays, t0
+            va.left_edge, va.right_edge, lines, weights, delays, t0, seconds, breaks
         )
         vel_b = _vertex_velocity(
-            vb.left_edge, vb.right_edge, lines, weights, delays, t0
+            vb.left_edge, vb.right_edge, lines, weights, delays, t0, seconds, breaks
         )
         if pa is None or pb is None or vel_a is None or vel_b is None:
             continue
@@ -959,6 +1113,28 @@ def _trajectories_meet_constant(
     return px, py, t
 
 
+def _stage_speed_and_c(
+    i: int,
+    t0: float,
+    lines: list[_Line],
+    weights: list[float],
+    delays: list[float],
+    seconds: list[float] | None,
+    breaks: list[float] | None,
+) -> tuple[float, float]:
+    """Effective ``(speed, c)`` so ``n · p = c + speed * t`` on ``t0``'s interval."""
+    line = lines[i]
+    delay = delays[i]
+    break_at = math.inf if breaks is None or not math.isfinite(breaks[i]) else breaks[i]
+    first = weights[i]
+    second = weights[i] if seconds is None else seconds[i]
+    if t0 < delay:
+        return 0.0, line.c
+    if t0 < break_at:
+        return first, line.c - first * delay
+    return second, line.c + first * (break_at - delay) - second * break_at
+
+
 def _offset_meet(
     i1: int,
     i2: int,
@@ -966,14 +1142,16 @@ def _offset_meet(
     lines: list[_Line],
     weights: list[float],
     delays: list[float],
+    seconds: list[float] | None = None,
+    breaks: list[float] | None = None,
 ) -> tuple[float, float, float] | None:
     """Intersection of three inward-offset supporting lines.
 
-    Each line moves inward at its weight after its delay, so the point
-    ``p`` at time ``t`` satisfies ``n_i · p = c_i + w_i max(0, t - a_i)``.
-    The resulting ``t`` is height. Piecewise over the three delays.
+    Each line moves inward at its weight after its delay, and may change
+    speed at a break height, so the point ``p`` at time ``t`` satisfies
+    a piecewise ``n_i · p = c_i + w_i(t)``. The resulting ``t`` is height.
     """
-    if delays[i1] == 0.0 and delays[i2] == 0.0 and delays[i3] == 0.0:
+    if _constant_motion(delays, breaks, (i1, i2, i3)):
         l1, l2, l3 = lines[i1], lines[i2], lines[i3]
         return _solve3(
             l1.nx,
@@ -993,6 +1171,8 @@ def _offset_meet(
     for i in (i1, i2, i3):
         if delays[i] > 0.0:
             cuts.add(delays[i])
+        if breaks is not None and math.isfinite(breaks[i]):
+            cuts.add(breaks[i])
     ordered = sorted(cuts)
     best: tuple[float, float, float] | None = None
     for k, t0 in enumerate(ordered):
@@ -1002,12 +1182,11 @@ def _offset_meet(
         ls: list[_Line] = []
         for i in (i1, i2, i3):
             ls.append(lines[i])
-            if delays[i] <= t0:
-                w_eff.append(weights[i])
-                c_eff.append(lines[i].c - weights[i] * delays[i])
-            else:
-                w_eff.append(0.0)
-                c_eff.append(lines[i].c)
+            speed, intercept = _stage_speed_and_c(
+                i, t0, lines, weights, delays, seconds, breaks
+            )
+            w_eff.append(speed)
+            c_eff.append(intercept)
         solved = _solve3(
             ls[0].nx,
             ls[0].ny,

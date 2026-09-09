@@ -13,7 +13,7 @@ Submit is still POST.
 
 **Blocked by:** 01 knee height
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Complexity:** high
 
@@ -24,12 +24,12 @@ Testing Decisions (60° then 30° on the long walls, known break). Ticket 01 own
 knee and gable-plus-knee; this ticket owns the remaining combinations. Pitch
 spellings already accepted by `roof`. Form POST; Flask test client.
 
-- [ ] Rectangle, long edges gambrel 60° then 30° at a known break: two faces per
+- [x] Rectangle, long edges gambrel 60° then 30° at a known break: two faces per
       long wall, plan areas sum to the footprint, sloped area is the sum of the
       two bands
-- [ ] Break height is metres above that cell's eave, not a paper delay unit
-- [ ] Gambrel plus knee on the same edge is a named Failure
-- [ ] Gambrel plus gable on the same edge is a named Failure
-- [ ] POST of those three numbers on an edge matches a cell with that gambrel
-- [ ] Where there is no dormer, the result remains a terrain: plan-area,
+- [x] Break height is metres above that cell's eave, not a paper delay unit
+- [x] Gambrel plus knee on the same edge is a named Failure
+- [x] Gambrel plus gable on the same edge is a named Failure
+- [x] POST of those three numbers on an edge matches a cell with that gambrel
+- [x] Where there is no dormer, the result remains a terrain: plan-area,
       planarity, and drainage-to-own-eave still hold
