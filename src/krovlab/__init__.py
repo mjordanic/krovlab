@@ -7,9 +7,10 @@ one per edge — and returns a :class:`Roof` or a :class:`Failure`.
 :class:`Project` or a Failure. A footprint may include holes.
 ``pitch = 90`` on an edge is a gable. ``overhang`` offsets the eaves
 outward in metres. ``eave_height`` is metres above datum, added to every
-node after the roof is assessed. Every roof carries a :class:`Validity`
-result. Units are metres and degrees throughout. Pass ``events=True`` on
-``roof`` to inspect the wavefront events that produced it.
+node after the roof is assessed. ``knee_height`` is metres of vertical
+wall on an edge before that edge's pitch begins. Every roof carries a
+:class:`Validity` result. Units are metres and degrees throughout. Pass
+``events=True`` on ``roof`` to inspect the wavefront events that produced it.
 """
 
 from krovlab.project import Cell, Project, ProjectFace, project

@@ -131,9 +131,9 @@ how a gable end is expressed, and it is the only degenerate weight the model
 permits.
 
 **Additive weight** — a delay before an edge starts moving, so the wall rises
-vertically to some height and only then slopes. Would give half-hips and
-knee-walls. Not part of this model, but not foreclosed either; see
-`docs/future-work.md`.
+vertically to some height and only then slopes. This is how **knee height**
+is implemented: the architect sets metres of vertical wall; conversion to
+delay happens at the boundary. Not exposed as a weight.
 
 **Time** — how far the wavefront has propagated. Because the wavefront rises at
 unit rate as it moves in, the time at which a skeleton node is created *is* the

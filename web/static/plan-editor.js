@@ -143,6 +143,18 @@
       cell.gables[selectedEdge] = !!on;
       if (on) {
         cell.pitches[selectedEdge] = "90";
+        cell.knees[selectedEdge] = "0";
+      }
+    }
+
+    function setKneeHeight(height) {
+      if (selectedCell < 0 || selectedEdge === null) {
+        return;
+      }
+      var cell = cells[selectedCell];
+      cell.knees[selectedEdge] = String(height);
+      if (parseFloat(String(height)) > 0) {
+        cell.gables[selectedEdge] = false;
       }
     }
 
@@ -190,6 +202,9 @@
         gables: draft.map(function () {
           return false;
         }),
+        knees: draft.map(function () {
+          return "0";
+        }),
         overhang: "0",
         eaveHeight: "0",
         hole: [],
@@ -221,6 +236,11 @@
         cell.gables.forEach(function (gable, i) {
           if (gable) {
             out[p + "gable-" + i] = "on";
+          }
+        });
+        (cell.knees || []).forEach(function (knee, i) {
+          if (knee !== "" && knee != null) {
+            out[p + "knee-" + i] = String(knee);
           }
         });
         out[p + "overhang"] = cell.overhang;
@@ -265,17 +285,21 @@
     function cellFromMap(map, pfx, vertices) {
       var pitches = [];
       var gables = [];
+      var knees = [];
       var i;
       for (i = 0; i < vertices.length; i += 1) {
         var gable = map[pfx + "gable-" + i] === "on";
         gables.push(gable);
         var pitch = map[pfx + "pitch-" + i];
         pitches.push(gable ? "90" : (pitch ? String(pitch) : applyToAll));
+        var knee = map[pfx + "knee-" + i];
+        knees.push(knee != null && knee !== "" ? String(knee) : "0");
       }
       return {
         vertices: vertices,
         pitches: pitches,
         gables: gables,
+        knees: knees,
         overhang: map[pfx + "overhang"] || "0",
         eaveHeight: map[pfx + "eave_height"] || "0",
         hole: readRingFromMap(map, pfx, "hole"),
@@ -347,7 +371,7 @@
         if (gable) {
           html += " checked";
         }
-        html += "> Gable</label></p>";
+        html += "> Gable</label> <label>Knee <input name=\"" + pfx + "knee-" + i + "\" value=\"" + esc((cell.knees && cell.knees[i]) || "0") + "\"> m</label></p>";
       });
       return html;
     }
@@ -428,6 +452,7 @@
       setEaveHeight: setEaveHeight,
       setPitch: setPitch,
       setGable: setGable,
+      setKneeHeight: setKneeHeight,
       moveVertex: moveVertex,
       deleteCell: deleteCell,
       fields: fields,
@@ -527,6 +552,7 @@
     var eave = form.querySelector("#selected-eave-height");
     var pitch = form.querySelector("#selected-pitch");
     var gable = form.querySelector("#selected-gable");
+    var knee = form.querySelector("#selected-knee-height");
     var cellIndex = editor.selectedCell();
     var data = editor.fields();
     var p = cellIndex <= 0 ? "" : "cell-" + cellIndex + "-";
@@ -540,6 +566,9 @@
     }
     if (gable) {
       gable.checked = !!(edge !== null && data[p + "gable-" + edge]);
+    }
+    if (knee) {
+      knee.value = edge === null || cellIndex < 0 ? "" : (data[p + "knee-" + edge] || "0");
     }
   }
 
@@ -601,6 +630,11 @@
       }
       if (input.id === "selected-pitch") {
         editor.setPitch(input.value);
+        commit();
+        return;
+      }
+      if (input.id === "selected-knee-height") {
+        editor.setKneeHeight(input.value);
         commit();
         return;
       }

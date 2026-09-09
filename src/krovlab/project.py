@@ -57,6 +57,13 @@ class Cell:
     eave_height: float = 0.0
     """Metres above datum of this cell's eave plane. Zero is omitting it."""
 
+    knee_height: float | list[float] = 0.0
+    """Metres of vertical wall on an edge before that edge's pitch begins.
+
+    Zero on every edge is the same as omitting it. A list is one value
+    per edge of this cell.
+    """
+
 
 @dataclass(frozen=True)
 class ProjectFace:
@@ -149,6 +156,7 @@ def project(cells: Sequence[Cell]) -> Project | Failure:
             holes=cell.holes,
             overhang=cell.overhang,
             eave_height=cell.eave_height,
+            knee_height=cell.knee_height,
         )
         if isinstance(built, Failure):
             return built
@@ -251,15 +259,10 @@ def _shared_edge_agreement(
                                 "pitched on the other"
                             ),
                         )
-                    if (
-                        abs(cell.eave_height - other.eave_height)
-                        > _EAVE_HEIGHT_TOL_M
-                    ):
+                    if abs(cell.eave_height - other.eave_height) > _EAVE_HEIGHT_TOL_M:
                         return Failure(
                             kind="unequal_eave_height",
-                            reason=(
-                                "a pitched shared edge has unequal eave heights"
-                            ),
+                            reason=("a pitched shared edge has unequal eave heights"),
                         )
                     valleys.append((a0, a1))
     return valleys
@@ -473,9 +476,7 @@ def _segments_properly_cross(
     o3 = _orient_points(c, d, a)
     o4 = _orient_points(c, d, b)
     return (
-        (o1 > orient_tol and o2 < -orient_tol)
-        or (o1 < -orient_tol and o2 > orient_tol)
+        (o1 > orient_tol and o2 < -orient_tol) or (o1 < -orient_tol and o2 > orient_tol)
     ) and (
-        (o3 > orient_tol and o4 < -orient_tol)
-        or (o3 < -orient_tol and o4 > orient_tol)
+        (o3 > orient_tol and o4 < -orient_tol) or (o3 < -orient_tol and o4 > orient_tol)
     )

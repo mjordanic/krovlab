@@ -175,7 +175,9 @@ def test_roof_reports_node_heights_ridge_height_and_total_sloped_area() -> None:
 
 
 def test_returned_roof_carries_no_weight() -> None:
-    for cls in (Roof, Face, Arc, Node):
+    from krovlab import Cell
+
+    for cls in (Roof, Face, Arc, Node, Cell):
         assert "weight" not in cls.__dataclass_fields__
     result = roof(SQUARE, 45.0)
     assert isinstance(result, Roof)
@@ -185,6 +187,10 @@ def test_returned_roof_carries_no_weight() -> None:
     mixed = roof(SQUARE, mixed_pitches)
     assert isinstance(mixed, Roof)
     assert "weight" not in str(mixed)
+    kneed = roof(RECTANGLE, 45.0, knee_height=[0.0, 0.0, 0.0, 0.0])
+    assert isinstance(kneed, Roof)
+    assert "weight" not in str(kneed)
+    assert "weight" not in str(Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0]))
 
 
 def test_one_footprint_faces_have_no_cell_index() -> None:
@@ -762,9 +768,7 @@ def test_rectangle_with_overhang_has_eaves_outside_the_walls() -> None:
     result = roof(RECTANGLE, 45.0, overhang=OVERHANG_M)
     assert isinstance(result, Roof)
     walls = Polygon(RECTANGLE)
-    enlarged = walls.buffer(
-        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
-    )
+    enlarged = walls.buffer(OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0)
     assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
     eaves = [arc for arc in result.arcs if arc.kind == "eave"]
     assert len(eaves) == 4
@@ -804,9 +808,7 @@ def test_overhang_offsets_a_hole_inward() -> None:
     assert isinstance(result, Roof)
     assert result.validity.is_terrain is True
     walls = Polygon(SQUARE, [COURTYARD_HOLE])
-    enlarged = walls.buffer(
-        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
-    )
+    enlarged = walls.buffer(OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0)
     assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
     courtyard = Polygon(COURTYARD_HOLE)
     inner_eaves = []
@@ -840,7 +842,54 @@ def test_overhang_that_collapses_a_concave_footprint_is_a_stated_failure() -> No
 def test_wavefront_and_event_handling_do_not_refer_to_overhang() -> None:
     from pathlib import Path
 
-    skeleton = (
-        Path(__file__).resolve().parents[1] / "src" / "krovlab" / "_skeleton.py"
-    )
+    skeleton = Path(__file__).resolve().parents[1] / "src" / "krovlab" / "_skeleton.py"
     assert "overhang" not in skeleton.read_text(encoding="utf-8").lower()
+
+
+def test_zero_knee_height_matches_omitting_the_argument() -> None:
+    omitted = roof(RECTANGLE, 45.0)
+    as_scalar = roof(RECTANGLE, 45.0, knee_height=0.0)
+    as_list = roof(RECTANGLE, 45.0, knee_height=[0.0, 0.0, 0.0, 0.0])
+    assert isinstance(omitted, Roof)
+    assert isinstance(as_scalar, Roof)
+    assert isinstance(as_list, Roof)
+    assert omitted == as_scalar
+    assert omitted == as_list
+    assert omitted.validity.is_terrain is True
+    assert omitted.ridge_height == pytest.approx(3.0)
+
+
+def test_gable_plus_knee_on_the_same_edge_is_a_named_failure() -> None:
+    result = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0], knee_height=[0.0, 3.0, 0.0, 0.0])
+    assert isinstance(result, Failure)
+    assert result.kind == "gable_versus_knee"
+    assert "gable" in result.reason.lower()
+    assert "knee" in result.reason.lower()
+    still_gable = roof(
+        RECTANGLE, [45.0, 90.0, 45.0, 45.0], knee_height=[0.0, 0.0, 0.0, 0.0]
+    )
+    assert isinstance(still_gable, Roof)
+
+
+def test_short_edge_knee_equal_to_ridge_is_a_vertical_gablet() -> None:
+    # 10 x 6 m at 45 degrees: the full hip's ridge is 3 m. Knee 3 m on the east
+    # short edge (edge 1) is a vertical gablet; neighbours close over it
+    # as verges; ridge height matches the un-kneed rectangle.
+    un_kneed = roof(RECTANGLE, 45.0)
+    result = roof(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])
+    assert isinstance(un_kneed, Roof)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert result.ridge_height == pytest.approx(un_kneed.ridge_height)
+    by_edge = {face.edge_index: face for face in result.faces}
+    assert 1 not in by_edge
+    assert sorted(by_edge) == [0, 2, 3]
+    for face in result.faces:
+        assert face.pitch == pytest.approx(45.0)
+    verges = [arc for arc in result.arcs if arc.kind == "verge"]
+    assert len(verges) == 2
+    verge_3d = 3.0 * math.sqrt(2.0)
+    assert sorted(arc.length for arc in verges) == pytest.approx([verge_3d, verge_3d])
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    assert len(ridges) == 1
+    assert ridges[0].length == pytest.approx(7.0)

@@ -155,11 +155,13 @@ def roof_is_a_terrain(
     assert samples, "roof is a terrain: no sample points landed inside the footprint"
     for x, y in samples:
         heights: list[float] = []
+        sample = Point(x, y)
         for face in built.faces:
             face_poly = Polygon(
                 [(built.nodes[i].x, built.nodes[i].y) for i in face.node_indices]
             )
-            if face_poly.covers(Point(x, y)):
+            # GEOS `covers` can miss a point that sits on a verge to ~1e-16 m.
+            if face_poly.covers(sample) or face_poly.distance(sample) <= HEIGHT_TOL_M:
                 pts = [
                     (built.nodes[i].x, built.nodes[i].y, built.nodes[i].height)
                     for i in face.node_indices
@@ -304,11 +306,11 @@ def arc_classification_matches_geometry(
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]] | None = None,
 ) -> None:
-    """Ridges horizontal; hips convex; valleys reflex; verges on gable walls."""
+    """Ridges and knee eaves horizontal; hips convex; valleys reflex;
+    verges on walls.
+    """
     rings = _caller_rings(footprint, holes)
     n_edges = sum(len(ring) for ring in rings)
-    faced = {face.edge_index for face in built.faces}
-    gabled = [i for i in range(n_edges) if i not in faced]
     for arc in built.arcs:
         a, b = built.nodes[arc.start], built.nodes[arc.end]
         if arc.kind == "ridge":
@@ -321,24 +323,38 @@ def arc_classification_matches_geometry(
                 f"ridge between nodes {arc.start} and {arc.end} is not horizontal"
             )
         elif arc.kind == "eave":
-            assert a.height <= HEIGHT_TOL_M and b.height <= HEIGHT_TOL_M, (
+            assert abs(a.height - b.height) <= HEIGHT_TOL_M, (
                 "arc classification matches geometry: "
-                f"eave between nodes {arc.start} and {arc.end} leaves the eave plane"
+                f"eave between nodes {arc.start} and {arc.end} is not horizontal"
             )
-        elif arc.kind == "verge":
-            on_gable = all(
+            on_wall = all(
                 any(
                     _point_on_segment(
                         end.x, end.y, *_edge_endpoints(rings, idx), HEIGHT_TOL_M * 10
                     )
-                    for idx in gabled
+                    for idx in range(n_edges)
                 )
                 for end in (a, b)
             )
-            assert on_gable, (
+            assert on_wall, (
+                "arc classification matches geometry: "
+                f"eave between nodes {arc.start} and {arc.end} "
+                "does not lie on a footprint edge"
+            )
+        elif arc.kind == "verge":
+            on_wall = all(
+                any(
+                    _point_on_segment(
+                        end.x, end.y, *_edge_endpoints(rings, idx), HEIGHT_TOL_M * 10
+                    )
+                    for idx in range(n_edges)
+                )
+                for end in (a, b)
+            )
+            assert on_wall, (
                 "arc classification matches geometry: "
                 f"verge between nodes {arc.start} and {arc.end} "
-                "does not lie on a gable wall"
+                "does not lie on a wall"
             )
         elif arc.kind in ("hip", "valley"):
             # Sloping. The first segment of a hip/valley meets a footprint

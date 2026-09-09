@@ -383,23 +383,16 @@ def _point_on_segment(
     return dist <= tol
 
 
-def _gabled_edge_indices(
-    faces: tuple[Face, ...], rings: list[list[tuple[float, float]]]
-) -> list[int]:
-    n_edges = sum(len(ring) for ring in rings)
-    faced = {face.edge_index for face in faces}
-    return [i for i in range(n_edges) if i not in faced]
-
-
-def _on_gabled_edge(
+def _on_footprint_edge(
     x: float,
     y: float,
     rings: list[list[tuple[float, float]]],
-    gabled: list[int],
     tol: float,
 ) -> bool:
+    n_edges = sum(len(ring) for ring in rings)
     return any(
-        _point_on_segment(x, y, *_edge_endpoints(rings, idx), tol) for idx in gabled
+        _point_on_segment(x, y, *_edge_endpoints(rings, idx), tol)
+        for idx in range(n_edges)
     )
 
 
@@ -411,7 +404,6 @@ def _arc_reasons(
     holes: list[list[tuple[float, float]]],
 ) -> list[str]:
     rings = _caller_rings(footprint, holes)
-    gabled = _gabled_edge_indices(faces, rings)
     reasons: list[str] = []
     for arc in arcs:
         a, b = nodes[arc.start], nodes[arc.end]
@@ -427,17 +419,26 @@ def _arc_reasons(
                     f"ridge between nodes {arc.start} and {arc.end} is not horizontal"
                 )
         elif arc.kind == "eave":
-            if a.height > HEIGHT_TOL_M or b.height > HEIGHT_TOL_M:
+            if abs(a.height - b.height) > HEIGHT_TOL_M:
                 reasons.append(
                     "arc classification matches geometry: "
                     f"eave between nodes {arc.start} and {arc.end} "
-                    "leaves the eave plane"
+                    "is not horizontal"
+                )
+            elif not (
+                _on_footprint_edge(a.x, a.y, rings, tol=HEIGHT_TOL_M * 10)
+                and _on_footprint_edge(b.x, b.y, rings, tol=HEIGHT_TOL_M * 10)
+            ):
+                reasons.append(
+                    "arc classification matches geometry: "
+                    f"eave between nodes {arc.start} and {arc.end} "
+                    "does not lie on a footprint edge"
                 )
         elif arc.kind == "verge":
             tol = HEIGHT_TOL_M * 10
             if not (
-                _on_gabled_edge(a.x, a.y, rings, gabled, tol)
-                and _on_gabled_edge(b.x, b.y, rings, gabled, tol)
+                _on_footprint_edge(a.x, a.y, rings, tol)
+                and _on_footprint_edge(b.x, b.y, rings, tol)
             ):
                 reasons.append(
                     "arc classification matches geometry: "

@@ -72,6 +72,11 @@
         <input type="checkbox" name="{{ edge.gable_name }}"{% if edge.gable %} checked{% endif %}>
         Gable
       </label>
+      <label>
+        Knee
+        <input name="{{ edge.knee_name }}" value="{{ edge.knee }}">
+        m
+      </label>
     </p>
     {% endfor %}
     </div>
@@ -94,7 +99,7 @@
     <p>
       Click vertices on the plan to draw a cell. Close the ring, then add
       another cell. Click a cell to select it and set its eave height;
-      click an edge to set pitch or mark a gable.
+      click an edge to set pitch, a gable, or a knee height.
     </p>
     <svg id="plan-editor" viewBox="-1 -1 12 8" role="img" aria-label="Plan editor">
       <polygon data-cell="0" data-ring="{% for x, y in footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
@@ -119,6 +124,11 @@
       <label>
         <input type="checkbox" id="selected-gable">
         Gable
+      </label>
+      <label>
+        Selected edge knee height
+        <input id="selected-knee-height">
+        m
       </label>
     </p>
     <p>
@@ -208,6 +218,11 @@
           <input type="checkbox" name="{{ edge.gable_name }}"{% if edge.gable %} checked{% endif %}>
           Gable
         </label>
+        <label>
+          Knee
+          <input name="{{ edge.knee_name }}" value="{{ edge.knee }}">
+          m
+        </label>
       </p>
       {% endfor %}
       </div>
@@ -265,15 +280,24 @@
       document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
         saved[input.name.slice("pitch-".length)] = {
           pitch: input.value,
-          gable: false
+          gable: false,
+          knee: "0"
         };
       });
       document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
         var i = box.name.slice("gable-".length);
         if (!saved[i]) {
-          saved[i] = { pitch: "90", gable: box.checked };
+          saved[i] = { pitch: "90", gable: box.checked, knee: "0" };
         } else {
           saved[i].gable = box.checked;
+        }
+      });
+      document.querySelectorAll("input[name^='knee-']").forEach(function (input) {
+        var i = input.name.slice("knee-".length);
+        if (!saved[i]) {
+          saved[i] = { pitch: "45", gable: false, knee: input.value };
+        } else {
+          saved[i].knee = input.value;
         }
       });
       return saved;
@@ -302,7 +326,7 @@
       rings.forEach(function (ring) {
         ring.forEach(function (start, j) {
           var end = ring[(j + 1) % ring.length];
-          var prev = saved[String(index)] || { pitch: fill, gable: false };
+          var prev = saved[String(index)] || { pitch: fill, gable: false, knee: "0" };
           html += "<p><label>" + edgeLabel(index, start, end);
           html += " <input name=\"pitch-" + index + "\" value=\"" + esc(prev.pitch) + "\"";
           if (prev.gable) {
@@ -312,7 +336,7 @@
           if (prev.gable) {
             html += " checked";
           }
-          html += "> Gable</label></p>";
+          html += "> Gable</label> <label>Knee <input name=\"knee-" + index + "\" value=\"" + esc(prev.knee || "0") + "\"> m</label></p>";
           index += 1;
         });
       });

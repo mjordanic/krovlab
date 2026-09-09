@@ -24,6 +24,7 @@ from krovlab._input import (
     check_adjacent_parallel_pitches,
     check_footprint,
     check_holes,
+    resolve_knee_heights,
     resolve_pitches,
 )
 from krovlab._offset import apply_overhang
@@ -43,6 +44,7 @@ FailureKind = Literal[
     "overlap",
     "gable_versus_pitch",
     "unequal_eave_height",
+    "gable_versus_knee",
 ]
 """Why :func:`roof` or :func:`krovlab.project.project` refused.
 
@@ -60,6 +62,7 @@ FailureKind = Literal[
 ``gable_versus_pitch`` — a shared edge is a gable on one cell and pitched
     on the other.
 ``unequal_eave_height`` — a pitched shared edge sits at two eave heights.
+``gable_versus_knee`` — the same edge is a gable and has a knee height.
 """
 
 
@@ -280,6 +283,7 @@ def roof(
     holes: list[list[tuple[float, float]]] | None = None,
     overhang: float = 0.0,
     eave_height: float = 0.0,
+    knee_height: float | list[float] = 0.0,
     *,
     events: Literal[False] = False,
 ) -> Roof | Failure: ...
@@ -292,6 +296,7 @@ def roof(
     holes: list[list[tuple[float, float]]] | None = None,
     overhang: float = 0.0,
     eave_height: float = 0.0,
+    knee_height: float | list[float] = 0.0,
     *,
     events: Literal[True],
 ) -> tuple[Roof, tuple[Event, ...]] | Failure: ...
@@ -303,6 +308,7 @@ def roof(
     holes: list[list[tuple[float, float]]] | None = None,
     overhang: float = 0.0,
     eave_height: float = 0.0,
+    knee_height: float | list[float] = 0.0,
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
@@ -341,6 +347,12 @@ def roof(
         Plate height in metres above datum, added to every node after the
         roof is built and assessed at the eave plane. Zero is the same as
         omitting the argument.
+    knee_height
+        Metres of vertical wall on an edge before that edge's pitch
+        begins. One value for every edge, or a list with one value per
+        edge. Zero on every edge is the same as omitting the argument.
+        A gable (pitch 90) with a non-zero knee on the same edge is
+        ``gable_versus_knee``.
     events
         If true, return ``(Roof, events)`` so the processed wavefront
         events can be inspected in order. The roof itself is unchanged;
@@ -402,6 +414,15 @@ def roof(
     parsed = resolve_pitches(pitch, n_edges)
     if isinstance(parsed, Failure):
         return parsed
+    knees = resolve_knee_heights(knee_height, n_edges)
+    if isinstance(knees, Failure):
+        return knees
+    for pitch_deg, knee in zip(parsed, knees, strict=True):
+        if pitch_deg >= 90.0 and knee > 0.0:
+            return Failure(
+                kind="gable_versus_knee",
+                reason="a gable cannot also have a knee height",
+            )
     expanded = apply_overhang(cleaned, cleaned_holes, float(overhang))
     if isinstance(expanded, Failure):
         return expanded
@@ -411,6 +432,7 @@ def roof(
     # wavefront's plan speed: cot(pitch) so a steeper face moves inward
     # more slowly. Converted here and nowhere else.
     ring_pitches = [parsed[edge_map[i]] for i in range(len(edge_map))]
+    ring_knees = [knees[edge_map[i]] for i in range(len(edge_map))]
     offset = 0
     for ring in rings:
         m = len(ring)
@@ -426,7 +448,11 @@ def roof(
             kind="incomplete",
             reason="every edge is a gable (pitch = 90); no roof can close",
         )
-    raw = _skeleton(rings, weights)
+    raw = (
+        _skeleton(rings, weights, delays=ring_knees)
+        if any(k > 0.0 for k in ring_knees)
+        else _skeleton(rings, weights)
+    )
     if not raw.complete:
         return Failure(
             kind="incomplete",
@@ -435,8 +461,10 @@ def roof(
     built = _roof_from_skeleton(
         rings,
         ring_pitches,
+        ring_knees,
         raw.nodes,
         raw.arcs,
+        raw.activations,
         edge_map,
         cleaned,
         cleaned_holes,
@@ -532,6 +560,44 @@ def _next_indices(rings: list[list[tuple[float, float]]]) -> list[int]:
 def _roof_from_skeleton(
     rings: list[list[tuple[float, float]]],
     pitches: list[float],
+    delays: list[float],
+    raw_nodes: tuple[tuple[float, float, float], ...],
+    raw_arcs: tuple[tuple[int, int, int, int], ...],
+    activations: tuple[tuple[int, int, int], ...],
+    edge_map: list[int],
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+    eave_height: float,
+) -> Roof:
+    """Assemble a :class:`Roof` from the raw skeleton graph."""
+    if all(d == 0.0 for d in delays):
+        return _roof_from_plain_skeleton(
+            rings,
+            pitches,
+            raw_nodes,
+            raw_arcs,
+            edge_map,
+            footprint,
+            holes,
+            eave_height,
+        )
+    return _roof_from_kneed_skeleton(
+        rings,
+        pitches,
+        delays,
+        raw_nodes,
+        raw_arcs,
+        activations,
+        edge_map,
+        footprint,
+        holes,
+        eave_height,
+    )
+
+
+def _roof_from_plain_skeleton(
+    rings: list[list[tuple[float, float]]],
+    pitches: list[float],
     raw_nodes: tuple[tuple[float, float, float], ...],
     raw_arcs: tuple[tuple[int, int, int, int], ...],
     edge_map: list[int],
@@ -539,12 +605,11 @@ def _roof_from_skeleton(
     holes: list[list[tuple[float, float]]],
     eave_height: float,
 ) -> Roof:
-    """Assemble a :class:`Roof` from the raw skeleton graph."""
+    """Assemble a roof when every knee height is zero."""
     nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
     next_idx = _next_indices(rings)
     n = len(next_idx)
     gabled = [p >= 90.0 for p in pitches]
-    # Per-face adjacency of node indices, used to walk each face cycle.
     adj: list[dict[int, list[int]]] = [{} for _ in range(n)]
 
     def _link(face: int, a: int, b: int) -> None:
@@ -598,14 +663,166 @@ def _roof_from_skeleton(
                 node_indices=tuple(cycle),
             )
         )
+    return _finish_roof(nodes, faces, arcs, footprint, holes, eave_height)
 
+
+def _roof_from_kneed_skeleton(
+    rings: list[list[tuple[float, float]]],
+    pitches: list[float],
+    delays: list[float],
+    raw_nodes: tuple[tuple[float, float, float], ...],
+    raw_arcs: tuple[tuple[int, int, int, int], ...],
+    activations: tuple[tuple[int, int, int], ...],
+    edge_map: list[int],
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+    eave_height: float,
+) -> Roof:
+    nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
+    next_idx = _next_indices(rings)
+    n = len(next_idx)
+    gabled = [p >= 90.0 for p in pitches]
+    knee_eave = {edge: (a, b) for edge, a, b in activations}
+    no_face = [gabled[i] or (delays[i] > 0.0 and i not in knee_eave) for i in range(n)]
+    # Per-face adjacency of node indices, used to walk each face cycle.
+    adj: list[dict[int, list[int]]] = [{} for _ in range(n)]
+
+    def _link(face: int, a: int, b: int) -> None:
+        nbrs = adj[face].setdefault(a, [])
+        if b not in nbrs:
+            nbrs.append(b)
+        nbrs_b = adj[face].setdefault(b, [])
+        if a not in nbrs_b:
+            nbrs_b.append(a)
+
+    eave_from: list[int] = list(range(n))
+    eave_to: list[int] = list(next_idx)
+    arcs: list[Arc] = []
+    for i in range(n):
+        if no_face[i]:
+            continue
+        if i in knee_eave:
+            a, b = knee_eave[i]
+            eave_from[i] = a
+            eave_to[i] = b
+        else:
+            a, b = i, next_idx[i]
+        _link(i, a, b)
+        arcs.append(
+            Arc(start=a, end=b, kind="eave", length=_node_distance(nodes[a], nodes[b]))
+        )
+
+    height_tol = 1e-9
+    for a, b, face_a, face_b in raw_arcs:
+        if no_face[face_a] and no_face[face_b]:
+            continue
+        on_knee_wall = _arc_on_knee_wall(
+            nodes[a], nodes[b], face_a, face_b, delays, rings, next_idx
+        )
+        if no_face[face_a] or no_face[face_b] or on_knee_wall:
+            kind: ArcKind = "verge"
+        else:
+            kind = _classify_arc(nodes[a], nodes[b], rings, height_tol)
+        for face in (face_a, face_b):
+            if no_face[face]:
+                continue
+            if delays[face] > 0.0 and _nodes_on_oriented_edge(
+                nodes[a], nodes[b], face, rings, next_idx
+            ):
+                continue
+            _link(face, a, b)
+        arcs.append(
+            Arc(start=a, end=b, kind=kind, length=_node_distance(nodes[a], nodes[b]))
+        )
+
+    faces: list[Face] = []
+    for i in range(n):
+        if no_face[i]:
+            continue
+        cycle = _walk_cycle(adj[i], eave_from[i], eave_to[i])
+        plan_area = abs(_signed_area([(nodes[j].x, nodes[j].y) for j in cycle]))
+        cos_pitch = math.cos(math.radians(pitches[i]))
+        sloped_area = plan_area / cos_pitch if cos_pitch != 0.0 else plan_area
+        faces.append(
+            Face(
+                edge_index=edge_map[i],
+                pitch=pitches[i],
+                plan_area=plan_area,
+                sloped_area=sloped_area,
+                node_indices=tuple(cycle),
+            )
+        )
+
+    return _finish_roof(nodes, faces, arcs, footprint, holes, eave_height)
+
+
+def _plan_on_segment(
+    px: float,
+    py: float,
+    ax: float,
+    ay: float,
+    bx: float,
+    by: float,
+    tol: float,
+) -> bool:
+    abx, aby = bx - ax, by - ay
+    apx, apy = px - ax, py - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 < 1e-24:
+        return math.hypot(apx, apy) <= tol
+    along = (apx * abx + apy * aby) / ab2
+    if along < -1e-9 or along > 1.0 + 1e-9:
+        return False
+    dist = abs(apx * aby - apy * abx) / math.sqrt(ab2)
+    return dist <= tol
+
+
+def _nodes_on_oriented_edge(
+    a: Node,
+    b: Node,
+    edge_i: int,
+    rings: list[list[tuple[float, float]]],
+    next_idx: list[int],
+    tol: float = 1e-6,
+) -> bool:
+    pts: list[tuple[float, float]] = []
+    for ring in rings:
+        pts.extend(ring)
+    start = pts[edge_i]
+    end = pts[next_idx[edge_i]]
+    return _plan_on_segment(a.x, a.y, *start, *end, tol) and _plan_on_segment(
+        b.x, b.y, *start, *end, tol
+    )
+
+
+def _arc_on_knee_wall(
+    a: Node,
+    b: Node,
+    face_a: int,
+    face_b: int,
+    delays: list[float],
+    rings: list[list[tuple[float, float]]],
+    next_idx: list[int],
+) -> bool:
+    for face in (face_a, face_b):
+        if delays[face] > 0.0 and _nodes_on_oriented_edge(a, b, face, rings, next_idx):
+            return True
+    return False
+
+
+def _finish_roof(
+    nodes: tuple[Node, ...],
+    faces: list[Face],
+    arcs: list[Arc],
+    footprint: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+    eave_height: float,
+) -> Roof:
     built_faces = tuple(faces)
     built_arcs = tuple(arcs)
     validity = Validity.assess(nodes, built_faces, built_arcs, footprint, holes)
     if eave_height != 0.0:
-        nodes = tuple(
-            Node(node.x, node.y, node.height + eave_height) for node in nodes
-        )
+        nodes = tuple(Node(node.x, node.y, node.height + eave_height) for node in nodes)
     return Roof(
         nodes=nodes,
         faces=built_faces,

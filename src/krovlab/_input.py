@@ -24,6 +24,54 @@ def _failure(kind: FailureKind, reason: str) -> Failure:
     return Failure(kind=kind, reason=reason)
 
 
+def resolve_knee_heights(value: object, n_edges: int) -> list[float] | Failure:
+    """Return one knee height in metres per footprint edge, or name why not.
+
+    A scalar is repeated for every edge. ``None`` or omitting the
+    argument is zero on every edge. A list must have one value per edge.
+    """
+    if value is None:
+        return [0.0] * n_edges
+    if isinstance(value, bool) or not isinstance(value, (int, float, list)):
+        return _failure(
+            "degenerate",
+            "knee height must be a finite number of metres, zero or positive",
+        )
+    if isinstance(value, list):
+        if len(value) != n_edges:
+            return _failure(
+                "degenerate",
+                f"knee height list has {len(value)} values but the footprint "
+                f"has {n_edges} edges",
+            )
+        parsed: list[float] = []
+        for item in value:
+            height = _as_knee_height(item)
+            if not isinstance(height, float):
+                return height
+            parsed.append(height)
+        return parsed
+    height = _as_knee_height(value)
+    if not isinstance(height, float):
+        return height
+    return [height] * n_edges
+
+
+def _as_knee_height(value: object) -> float | Failure:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _failure(
+            "degenerate",
+            "knee height must be a finite number of metres, zero or positive",
+        )
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        return _failure(
+            "degenerate",
+            "knee height must be a finite number of metres, zero or positive",
+        )
+    return parsed
+
+
 def resolve_pitches(pitch: object, n_edges: int) -> list[float] | Failure:
     """Return one pitch in degrees per footprint edge, or name why not.
 
@@ -286,9 +334,7 @@ def _ring_inside(
     return all(_point_in_ring(x, y, outer) == "in" for x, y in inner)
 
 
-def _point_in_ring(
-    x: float, y: float, ring: list[tuple[float, float]]
-) -> str:
+def _point_in_ring(x: float, y: float, ring: list[tuple[float, float]]) -> str:
     """``"in"``, ``"on"``, or ``"out"`` for a closed ring."""
     n = len(ring)
     for i in range(n):
@@ -385,11 +431,9 @@ def _segments_intersect(
     o3 = _orient(c, d, a)
     o4 = _orient(c, d, b)
     proper = (
-        (o1 > _ORIENT_M2 and o2 < -_ORIENT_M2)
-        or (o1 < -_ORIENT_M2 and o2 > _ORIENT_M2)
+        (o1 > _ORIENT_M2 and o2 < -_ORIENT_M2) or (o1 < -_ORIENT_M2 and o2 > _ORIENT_M2)
     ) and (
-        (o3 > _ORIENT_M2 and o4 < -_ORIENT_M2)
-        or (o3 < -_ORIENT_M2 and o4 > _ORIENT_M2)
+        (o3 > _ORIENT_M2 and o4 < -_ORIENT_M2) or (o3 < -_ORIENT_M2 and o4 > _ORIENT_M2)
     )
     if proper:
         return True

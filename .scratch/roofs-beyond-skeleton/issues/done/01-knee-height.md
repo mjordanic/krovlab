@@ -20,7 +20,7 @@ keep working.
 
 **Blocked by:** None (can start immediately once the prerequisite above holds)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Complexity:** high
 
@@ -34,17 +34,17 @@ client; form POST. Worked example: rectangle, one short-edge knee equal to the
 would-be full-hip ridge — that edge is a vertical gablet; neighbouring faces
 close as verges above the knee; ridge height matches the un-kneed rectangle.
 
-- [ ] Zero knee height on every edge equals today's roof of the same footprint
+- [x] Zero knee height on every edge equals today's roof of the same footprint
       and pitches
-- [ ] Rectangle, one short-edge knee height equal to the full-hip ridge: that
+- [x] Rectangle, one short-edge knee height equal to the full-hip ridge: that
       edge is a vertical gablet, neighbours close over it as verges above the
       knee, ridge height matches the un-kneed rectangle
-- [ ] Pitch is still the public parameter; no weight appears on the cell or the
+- [x] Pitch is still the public parameter; no weight appears on the cell or the
       returned roof
-- [ ] Gable plus knee on the same edge is a named Failure
-- [ ] A knee on one edge of a two-cell project leaves the other cell's roof
+- [x] Gable plus knee on the same edge is a named Failure
+- [x] A knee on one edge of a two-cell project leaves the other cell's roof
       unchanged
-- [ ] POST of a knee height on an edge matches `project` of a cell with that
+- [x] POST of a knee height on an edge matches `project` of a cell with that
       knee; click-to-set is enough, tables still work
-- [ ] Core still imports no Flask; Failure is a value; same input, same project
-- [ ] A plus-shape POST still shows plan, validity reasons, and no 3D
+- [x] Core still imports no Flask; Failure is a value; same input, same project
+- [x] A plus-shape POST still shows plan, validity reasons, and no 3D

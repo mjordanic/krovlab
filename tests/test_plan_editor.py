@@ -152,6 +152,25 @@ editor.setPitch("30");
     assert "gable-2" not in fields
 
 
+def test_clicking_an_edge_sets_knee_height() -> None:
+    result = _run_editor(
+        """
+editor.clickPlan(0, 0);
+editor.clickPlan(10, 0);
+editor.clickPlan(10, 6);
+editor.clickPlan(0, 6);
+editor.closeRing();
+editor.clickPlan(10, 3);
+editor.setKneeHeight(3);
+"""
+    )
+    fields = result["fields"]
+    assert result["selectedCell"] == 0
+    assert result["selectedEdge"] == 1
+    assert float(fields["knee-1"]) == 3.0
+    assert fields.get("knee-0", "0") in ("0", "0.0", "")
+
+
 def test_editing_a_table_vertex_moves_it_on_the_plan() -> None:
     result = _run_editor(
         """

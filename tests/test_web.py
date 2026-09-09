@@ -67,26 +67,30 @@ def test_posting_vertices_without_edit_checked_uses_the_named_footprint() -> Non
     assert isinstance(named, Roof)
     assert f"{edited.ridge_height:.3f}" != f"{named.ridge_height:.3f}"
 
-    page = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "4",
-            "outer-x-3": "0",
-            "outer-y-3": "4",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
-    ).get_data(as_text=True)
+    page = (
+        _client()
+        .post(
+            "/",
+            data={
+                "fixture": "rectangle-10x6",
+                "loaded_fixture": "rectangle-10x6",
+                "outer-x-0": "0",
+                "outer-y-0": "0",
+                "outer-x-1": "10",
+                "outer-y-1": "0",
+                "outer-x-2": "10",
+                "outer-y-2": "4",
+                "outer-x-3": "0",
+                "outer-y-3": "4",
+                "pitch-0": "45",
+                "pitch-1": "45",
+                "pitch-2": "45",
+                "pitch-3": "45",
+                "overhang": "0",
+            },
+        )
+        .get_data(as_text=True)
+    )
     assert f"ridge height: {named.ridge_height:.3f} m" in page
     assert f"ridge height: {edited.ridge_height:.3f} m" not in page
 
@@ -158,8 +162,8 @@ def test_posting_the_gabled_rectangle_shows_a_verge_and_3d() -> None:
 
 
 def test_posting_a_fixture_fills_the_form_from_the_corpus() -> None:
-    page = _client().post("/", data={"fixture": "rectangle-gabled"}).get_data(
-        as_text=True
+    page = (
+        _client().post("/", data={"fixture": "rectangle-gabled"}).get_data(as_text=True)
     )
     assert 'value="rectangle-gabled" selected' in page
     assert "(0.0, 0.0)" in page
@@ -300,6 +304,33 @@ def test_posting_eave_height_seven_reports_ridge_height_ten() -> None:
     assert "<h2>Plan</h2>" in page
     assert "3D solid" in page
     assert 'name="eave_height" value="7.0"' in page
+
+
+def test_posting_knee_height_on_an_edge_matches_project() -> None:
+    built = project([Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])])
+    assert isinstance(built, Project)
+    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "knee-1": "3",
+            "overhang": "0",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"verge: {verge_m:.3f} m" in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" in page
+    assert 'name="knee-1" value="3.0"' in page or 'name="knee-1" value="3"' in page
 
 
 def test_get_without_eave_height_still_shows_ridge_height_three() -> None:
@@ -875,9 +906,7 @@ def test_get_serves_the_plan_editor_script() -> None:
 def test_app_has_no_json_api() -> None:
     app = create_app()
     rules = sorted(
-        rule.rule
-        for rule in app.url_map.iter_rules()
-        if rule.endpoint != "static"
+        rule.rule for rule in app.url_map.iter_rules() if rule.endpoint != "static"
     )
     assert rules == ["/"]
     response = _client().get("/api/roofs")
@@ -978,7 +1007,3 @@ def test_posting_overlapping_cells_is_a_failure_not_500() -> None:
     assert "Input footprint" in page
     assert "3D solid" not in page
     assert "<h2>Plan</h2>" not in page
-
-
-
-

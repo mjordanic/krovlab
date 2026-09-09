@@ -152,9 +152,7 @@ def test_shared_pitched_eaves_at_the_same_height_are_one_valley() -> None:
 
 
 def test_shared_edge_gable_versus_pitch_is_a_named_failure() -> None:
-    result = project(
-        [Cell(RECT_5X6, GABLES), Cell(NEIGHBOUR_5X6, 45.0)]
-    )
+    result = project([Cell(RECT_5X6, GABLES), Cell(NEIGHBOUR_5X6, 45.0)])
     assert isinstance(result, Failure)
     assert result.kind == "gable_versus_pitch"
     assert "gable" in result.reason.lower()
@@ -241,6 +239,26 @@ def test_same_cells_produce_the_same_project() -> None:
     first = project(cells)
     second = project(cells)
     assert first == second
+
+
+def test_knee_on_one_cell_leaves_the_other_cell_unchanged() -> None:
+    house = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+    garage = [(12.0, 0.0), (22.0, 0.0), (22.0, 6.0), (12.0, 6.0)]
+    alone_house = roof(house, 45.0)
+    alone_garage = roof(garage, 45.0)
+    result = project(
+        [
+            Cell(house, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0]),
+            Cell(garage, 45.0),
+        ]
+    )
+    assert isinstance(alone_house, Roof)
+    assert isinstance(alone_garage, Roof)
+    assert isinstance(result, Project)
+    assert result.roofs[1] == alone_garage
+    assert result.roofs[0].ridge_height == pytest.approx(alone_house.ridge_height)
+    assert 1 not in {face.edge_index for face in result.roofs[0].faces}
+    assert sorted(face.edge_index for face in result.roofs[1].faces) == [0, 1, 2, 3]
 
 
 def test_a_bad_cell_is_a_failure_not_an_exception() -> None:

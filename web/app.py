@@ -26,6 +26,8 @@ class EdgeRow:
     gable: bool
     pitch_name: str
     gable_name: str
+    knee: str
+    knee_name: str
 
 
 @dataclass(frozen=True)
@@ -65,14 +67,16 @@ def create_app() -> Flask:
         form_eave_height: float | str = 0.0
         extra_views: list[ExtraCellView] = []
         extra_footprints: list[list[tuple[float, float]]] = []
+        knees: list[float] = [0.0] * n_edges
         result: Roof | Project | Failure
         if parse_error is not None:
             apply_to_all = request.form.get("apply_to_all") or (
                 str(fallback[0]) if fallback else ""
             )
-            pitches = _posted_pitches(
-                request.form, n_edges, fallback, apply_to_all
-            )
+            pitches = _posted_pitches(request.form, n_edges, fallback, apply_to_all)
+            posted_knees = _posted_knees(request.form, n_edges)
+            if not isinstance(posted_knees, Failure):
+                knees = posted_knees
             result = parse_error
             draw_rings: tuple[
                 list[tuple[float, float]],
@@ -80,19 +84,14 @@ def create_app() -> Flask:
             ] = ([], None)
         elif request.method == "POST" and not stale:
             apply_to_all = request.form.get("apply_to_all") or ""
-            pitches = _posted_pitches(
-                request.form, n_edges, fallback, apply_to_all
-            )
+            pitches = _posted_pitches(request.form, n_edges, fallback, apply_to_all)
             if not apply_to_all:
                 apply_to_all = str(pitches[0]) if pitches else ""
             parsed_overhang = _posted_overhang(request.form, preset.overhang)
-            parsed_eave_height = _posted_eave_height(
-                request.form, preset.eave_height
-            )
+            parsed_eave_height = _posted_eave_height(request.form, preset.eave_height)
+            parsed_knees = _posted_knees(request.form, n_edges)
             parsed_footprint = cast(list[tuple[float, float]], footprint)
-            parsed_holes = cast(
-                list[list[tuple[float, float]]] | None, holes
-            )
+            parsed_holes = cast(list[list[tuple[float, float]]] | None, holes)
             if isinstance(parsed_overhang, Failure):
                 result = parsed_overhang
                 form_overhang = request.form.get("overhang") or preset.overhang
@@ -102,10 +101,14 @@ def create_app() -> Flask:
                 result = parsed_eave_height
                 form_eave_height = request.form.get("eave_height") or 0.0
                 draw_rings = (parsed_footprint, parsed_holes)
+            elif isinstance(parsed_knees, Failure):
+                result = parsed_knees
+                draw_rings = (parsed_footprint, parsed_holes)
             else:
                 draw_overhang = parsed_overhang
                 form_overhang = parsed_overhang
                 form_eave_height = parsed_eave_height
+                knees = parsed_knees
                 draw_rings = (parsed_footprint, parsed_holes)
                 extra_views, extra_parsed = _extra_cells_for_post(
                     request.form, apply_to_all, preset
@@ -122,6 +125,7 @@ def create_app() -> Flask:
                                 holes=parsed_holes,
                                 overhang=parsed_overhang,
                                 eave_height=parsed_eave_height,
+                                knee_height=parsed_knees,
                             ),
                             *extra_parsed,
                         ]
@@ -133,20 +137,19 @@ def create_app() -> Flask:
                         holes=parsed_holes,
                         overhang=parsed_overhang,
                         eave_height=parsed_eave_height,
+                        knee_height=parsed_knees,
                     )
         else:
             pitches = fallback
             apply_to_all = str(pitches[0]) if pitches else ""
             form_eave_height = preset.eave_height
             parsed_footprint = cast(list[tuple[float, float]], footprint)
-            parsed_holes = cast(
-                list[list[tuple[float, float]]] | None, holes
-            )
+            parsed_holes = cast(list[list[tuple[float, float]]] | None, holes)
             extra_views = _extra_views_from_cells(preset.extra_cells)
             extra_footprints = [cell.footprint for cell in preset.extra_cells]
             result = _from_preset(preset)
             draw_rings = (parsed_footprint, parsed_holes)
-        rows = _edge_rows(footprint, holes, pitches)
+        rows = _edge_rows(footprint, holes, pitches, knees=knees)
         plan_html, solid_html, footprint_html = _draw(
             result,
             draw_rings[0],
@@ -170,10 +173,7 @@ def create_app() -> Flask:
             solid_html=solid_html,
             footprint_html=footprint_html,
             edit_vertices=bool(
-                (
-                    request.method == "POST"
-                    and request.form.get("edit_vertices")
-                )
+                (request.method == "POST" and request.form.get("edit_vertices"))
                 or extra_views
             ),
         )
@@ -220,9 +220,7 @@ def _rings_for_request(
     return parsed_outer, [parsed_hole], None
 
 
-def _posted_ring(
-    form: Mapping[str, str], prefix: str
-) -> list[tuple[str, str]] | None:
+def _posted_ring(form: Mapping[str, str], prefix: str) -> list[tuple[str, str]] | None:
     points: list[tuple[str, str]] = []
     i = 0
     while True:
@@ -310,6 +308,37 @@ def _posted_eave_height(
         )
 
 
+def _posted_knees(
+    form: Mapping[str, str],
+    n: int,
+    *,
+    prefix: str = "",
+) -> list[float] | Failure:
+    knees: list[float] = []
+    for i in range(n):
+        raw = form.get(f"{prefix}knee-{i}")
+        if raw is None or str(raw).strip() == "":
+            knees.append(0.0)
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            return Failure(
+                kind="degenerate",
+                reason=(
+                    "knee height must be a finite number of metres, zero or positive"
+                ),
+            )
+        knees.append(value)
+    return knees
+
+
+def _expand_knees(value: float | list[float], n: int) -> list[float]:
+    if isinstance(value, list):
+        return [float(item) for item in value]
+    return [float(value)] * n
+
+
 def _expand_pitches(pitch: Pitch | list[Pitch], n: int) -> list[Pitch]:
     if isinstance(pitch, list):
         return list(pitch)
@@ -331,6 +360,7 @@ def _edge_rows(
     pitches: list[Pitch],
     *,
     prefix: str = "",
+    knees: list[float] | None = None,
 ) -> list[EdgeRow]:
     rings = [footprint, *(holes or [])]
     rows: list[EdgeRow] = []
@@ -341,6 +371,9 @@ def _edge_rows(
             raw = pitches[len(rows)] if len(rows) < len(pitches) else ""
             gable = _is_gable(raw)
             index = len(rows)
+            knee = 0.0
+            if knees is not None and index < len(knees):
+                knee = knees[index]
             rows.append(
                 EdgeRow(
                     index=index,
@@ -350,6 +383,8 @@ def _edge_rows(
                     gable=gable,
                     pitch_name=f"{prefix}pitch-{index}",
                     gable_name=f"{prefix}gable-{index}",
+                    knee=str(knee),
+                    knee_name=f"{prefix}knee-{index}",
                 )
             )
     return rows
@@ -373,6 +408,7 @@ def _from_preset(preset: Preset) -> Roof | Project | Failure:
             holes=cells[0].holes,
             overhang=cells[0].overhang,
             eave_height=cells[0].eave_height,
+            knee_height=cells[0].knee_height,
         )
     return project(cells)
 
@@ -395,6 +431,7 @@ def _view_from_cell(index: int, cell: Cell) -> ExtraCellView:
     hole = cell.holes[0] if cell.holes else []
     n_edges = len(cell.footprint) + len(hole)
     pitches = _expand_pitches(cell.pitch, n_edges)
+    knees = _expand_knees(cell.knee_height, n_edges)
     return ExtraCellView(
         index=index,
         prefix=prefix,
@@ -405,6 +442,7 @@ def _view_from_cell(index: int, cell: Cell) -> ExtraCellView:
             [hole] if hole else None,
             pitches,
             prefix=prefix,
+            knees=knees,
         ),
         overhang=cell.overhang,
         eave_height=cell.eave_height,
@@ -424,9 +462,9 @@ def _posted_extra_cells(
         outer_display = posted_outer or []
         hole_display = posted_hole or []
         n_edges = len(outer_display) + len(hole_display)
-        pitches = _posted_pitches(
-            form, n_edges, [], apply_to_all, prefix=prefix
-        )
+        pitches = _posted_pitches(form, n_edges, [], apply_to_all, prefix=prefix)
+        posted_knees = _posted_knees(form, n_edges, prefix=prefix)
+        display_knees = posted_knees if not isinstance(posted_knees, Failure) else None
         raw_overhang = form.get(f"{prefix}overhang") or "0"
         raw_eave = form.get(f"{prefix}eave_height") or "0"
         views.append(
@@ -440,6 +478,7 @@ def _posted_extra_cells(
                     [hole_display] if hole_display else None,
                     pitches,
                     prefix=prefix,
+                    knees=display_knees,
                 ),
                 overhang=raw_overhang,
                 eave_height=raw_eave,
@@ -465,6 +504,8 @@ def _posted_extra_cells(
         eave_height = _posted_eave_height(form, field=f"{prefix}eave_height")
         if isinstance(eave_height, Failure):
             return views, eave_height
+        if isinstance(posted_knees, Failure):
+            return views, posted_knees
         cells.append(
             Cell(
                 parsed_outer,
@@ -472,6 +513,7 @@ def _posted_extra_cells(
                 holes=parsed_holes,
                 overhang=overhang,
                 eave_height=eave_height,
+                knee_height=posted_knees,
             )
         )
         index += 1
