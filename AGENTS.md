@@ -82,26 +82,30 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 `/implement-issues` drives dependency-ordered, unattended implementation of
 `ready-for-agent` issues in a `.scratch/<feature>/` folder. It builds a wave plan, then
-dispatches subagents:
+dispatches subagents. Each issue is implemented by reading `/implement` (not a private
+loop inside the orchestrator).
 
-- `wave-runner` — runs one wave; owns git worktrees, cherry-pick integration, and report
-  updates (a context firewall — only a small summary returns).
-- `issue-implementer` — implements one issue via `/tdd`, one commit prefixed `<id>:`, then
-  moves the issue file to `issues/done/`.
+- `wave-runner` — runs one wave; owns isolation (local git worktrees or Cursor cloud VMs),
+  cherry-pick integration, and report updates (a context firewall — only a small summary
+  returns).
+- `issue-implementer` — follows `.agents/skills/implement/SKILL.md`, one commit prefixed
+  `<id>:`, then moves the issue file to `issues/done/`.
 
-These are kept tool-agnostic the same way the skills are: the canonical files live under
-`.agents/commands/implement-issues.md` and `.agents/agents/{wave-runner,issue-implementer}.md`,
-and are symlinked into `.claude/commands/` and `.claude/agents/` so Claude Code discovers them
-as a native `/`-command and subagents. Other coding assistants read the `.agents/` copies
-directly. (Unlike the skills — which are installed fresh via `npx skills@latest add
-mattpocock/skills` and git-ignored — these are project-local and committed to the repo:
-not part of the `mattpocock/skills` collection or its `skills-lock.json`.)
+Canonical files live under `.agents/skills/implement-issues/` (the skill) and
+`.agents/agents/{wave-runner,issue-implementer}.md`. Discovery:
 
-Questions are allowed only in Phases 0–1 (preflight + plan); from wave dispatch onward
-the run is fully unattended and resumable. Relies on the issue-tracker layout, the five
-triage labels, and `/tdd` above. First run audits `.claude/settings.local.json` against
-its Required Bash patterns appendix and will prompt once to add any missing `permissions.allow`
-entries (local git/filesystem only; the remote-touching deny list stays intact).
+- **Cursor**: `/implement-issues` from `.agents/skills/implement-issues/` (also linked from `.cursor/skills/implement-issues`). Subagents from `.cursor/agents/`. Isolation, models, and resume: read that skill. Default implementer model is `grok` (see the skill's `references/models.md`).
+- **Claude Code**: `.claude/commands/implement-issues.md` and `.claude/agents/` are
+  symlinks to the same canonical files. First run audits `.claude/settings.local.json`
+  against the skill's permissions reference.
+
+Unlike mattpocock/skills (installed fresh, git-ignored), this orchestrator and `/implement`
+(`.agents/skills/implement/`) are committed. `.agents/commands/implement-issues.md` is a
+compatibility symlink to the skill.
+
+Questions are allowed only in Phases 0–1; from wave dispatch onward the run is unattended
+and resumable via `implementation_report.md`, git, and Task/Agent ids. Relies on the
+issue-tracker layout, the five triage labels, and `/implement` → `/tdd` + `/code-review`.
 
 ## Agent skills (mattpocock/skills)
 

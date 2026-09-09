@@ -13,14 +13,27 @@ __pycache__/
 .ipynb_checkpoints/
 
 # installed fresh, not vendored: npx skills@latest add mattpocock/skills
-.agents/skills/
+.agents/skills/*
+!.agents/skills/implement-issues/
+!.agents/skills/implement-issues/**
+!.agents/skills/implement/
+!.agents/skills/implement/**
 .claude/skills/
-.cursor/
+.cursor/*
+!.cursor/agents/
+!.cursor/agents/**
+!.cursor/skills/
+!.cursor/skills/implement-issues/
+!.cursor/skills/implement-issues/**
+!.cursor/environment.json
+!.cursor/Dockerfile
+!.cursor/worktrees.json
 skills-lock.json
 
 # local agent config
 .claude/settings.local.json
 .claude/worktrees/
+.agents/worktrees/
 
 # env / secrets
 .env
