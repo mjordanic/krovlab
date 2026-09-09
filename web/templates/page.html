@@ -43,10 +43,10 @@
     <p>
       <label>
         {{ edge.index }}: ({{ edge.start[0] }}, {{ edge.start[1] }}) → ({{ edge.end[0] }}, {{ edge.end[1] }})
-        <input name="pitch-{{ edge.index }}" value="{{ edge.pitch }}"{% if edge.gable %} disabled{% endif %}>
+        <input name="{{ edge.pitch_name }}" value="{{ edge.pitch }}"{% if edge.gable %} disabled{% endif %}>
       </label>
       <label>
-        <input type="checkbox" name="gable-{{ edge.index }}"{% if edge.gable %} checked{% endif %}>
+        <input type="checkbox" name="{{ edge.gable_name }}"{% if edge.gable %} checked{% endif %}>
         Gable
       </label>
     </p>
@@ -73,6 +73,7 @@
         <input type="checkbox" name="edit_vertices" id="edit-vertices"{% if edit_vertices %} checked{% endif %}>
         Edit vertices
       </label>
+      <button type="button" id="add-cell">Add cell</button>
     </p>
     <div id="vertex-editor"{% if not edit_vertices %} hidden{% endif %}>
     <p>Outer vertices (m)</p>
@@ -111,6 +112,67 @@
       <button type="button" id="add-hole">Add hole vertex</button>
       <button type="button" id="remove-hole">Remove hole vertex</button>
     </p>
+    <div id="extra-cells">
+    {% for cell in extra_cells %}
+    <div class="cell-block" data-cell="{{ cell.index }}">
+      <p>Cell {{ cell.index }}</p>
+      <p>Outer vertices (m)</p>
+      <table>
+        <thead>
+          <tr><th>x</th><th>y</th></tr>
+        </thead>
+        <tbody id="{{ cell.prefix }}outer-vertices">
+          {% for x, y in cell.footprint %}
+          <tr>
+            <td><input name="{{ cell.prefix }}outer-x-{{ loop.index0 }}" value="{{ x }}"></td>
+            <td><input name="{{ cell.prefix }}outer-y-{{ loop.index0 }}" value="{{ y }}"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p>Hole vertices (m)</p>
+      <table>
+        <thead>
+          <tr><th>x</th><th>y</th></tr>
+        </thead>
+        <tbody id="{{ cell.prefix }}hole-vertices">
+          {% for x, y in cell.hole %}
+          <tr>
+            <td><input name="{{ cell.prefix }}hole-x-{{ loop.index0 }}" value="{{ x }}"></td>
+            <td><input name="{{ cell.prefix }}hole-y-{{ loop.index0 }}" value="{{ y }}"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div>
+      {% for edge in cell.edges %}
+      <p>
+        <label>
+          {{ edge.index }}: ({{ edge.start[0] }}, {{ edge.start[1] }}) → ({{ edge.end[0] }}, {{ edge.end[1] }})
+          <input name="{{ edge.pitch_name }}" value="{{ edge.pitch }}"{% if edge.gable %} disabled{% endif %}>
+        </label>
+        <label>
+          <input type="checkbox" name="{{ edge.gable_name }}"{% if edge.gable %} checked{% endif %}>
+          Gable
+        </label>
+      </p>
+      {% endfor %}
+      </div>
+      <p>
+        <label>
+          Overhang
+          <input name="{{ cell.prefix }}overhang" value="{{ cell.overhang }}">
+          m
+        </label>
+        <label>
+          Eave height
+          <input name="{{ cell.prefix }}eave_height" value="{{ cell.eave_height }}">
+          m
+        </label>
+      </p>
+    </div>
+    {% endfor %}
+    </div>
     </div>
     <button type="submit">Submit</button>
   </form>
@@ -269,6 +331,50 @@
       document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
         input.disabled = false;
       });
+      document.querySelectorAll("input[name*='-pitch-']").forEach(function (input) {
+        input.disabled = false;
+      });
+    });
+
+    function nextCellIndex() {
+      var max = 0;
+      document.querySelectorAll("#extra-cells .cell-block").forEach(function (block) {
+        var n = parseInt(block.getAttribute("data-cell"), 10);
+        if (n > max) {
+          max = n;
+        }
+      });
+      return max + 1;
+    }
+
+    function emptyCellHtml(index) {
+      var prefix = "cell-" + index + "-";
+      var fill = document.querySelector("[name=apply_to_all]").value;
+      var html = '<div class="cell-block" data-cell="' + index + '">';
+      html += "<p>Cell " + index + "</p>";
+      html += "<p>Outer vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>";
+      html += '<tbody id="' + prefix + 'outer-vertices">';
+      var i;
+      for (i = 0; i < 4; i++) {
+        html += '<tr><td><input name="' + prefix + "outer-x-" + i + '"></td>';
+        html += '<td><input name="' + prefix + "outer-y-" + i + '"></td></tr>';
+      }
+      html += "</tbody></table>";
+      html += "<p>Hole vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>";
+      html += '<tbody id="' + prefix + 'hole-vertices"></tbody></table><div>';
+      for (i = 0; i < 4; i++) {
+        html += "<p><label>" + i + ': <input name="' + prefix + "pitch-" + i + '" value="' + esc(fill) + '"></label> ';
+        html += '<label><input type="checkbox" name="' + prefix + "gable-" + i + '"> Gable</label></p>';
+      }
+      html += "</div><p><label>Overhang <input name=\"" + prefix + 'overhang" value="0"> m</label> ';
+      html += '<label>Eave height <input name="' + prefix + 'eave_height" value="0"> m</label></p></div>';
+      return html;
+    }
+
+    document.getElementById("add-cell").addEventListener("click", function () {
+      document.getElementById("edit-vertices").checked = true;
+      document.getElementById("vertex-editor").hidden = false;
+      document.getElementById("extra-cells").insertAdjacentHTML("beforeend", emptyCellHtml(nextCellIndex()));
     });
   </script>
 </body>

@@ -1,4 +1,4 @@
-"""HTTP form wrapping ``roof`` and the existing Plotly views."""
+"""HTTP form wrapping ``roof`` / ``project`` and the existing Plotly views."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from flask import Flask, render_template, request
 
-from krovlab import Failure, Pitch, Roof, roof
+from krovlab import Cell, Failure, Pitch, Project, Roof, project, roof
 from krovlab.viz import plan_view, solid_view
 from web.corpus import DEFAULT_PRESET, Preset, load_presets
 from web.figures import input_footprint
@@ -24,6 +24,21 @@ class EdgeRow:
     end: tuple[Any, Any]
     pitch: str
     gable: bool
+    pitch_name: str
+    gable_name: str
+
+
+@dataclass(frozen=True)
+class ExtraCellView:
+    """Posted tables for a cell after the first, so the form can round-trip."""
+
+    index: int
+    prefix: str
+    footprint: list[tuple[Any, Any]]
+    hole: list[tuple[Any, Any]]
+    edges: list[EdgeRow]
+    overhang: float | str
+    eave_height: float | str
 
 
 def create_app() -> Flask:
@@ -48,7 +63,9 @@ def create_app() -> Flask:
         draw_overhang = preset.overhang
         form_overhang: float | str = preset.overhang
         form_eave_height: float | str = 0.0
-        result: Roof | Failure
+        extra_views: list[ExtraCellView] = []
+        extra_footprints: list[list[tuple[float, float]]] = []
+        result: Roof | Project | Failure
         if parse_error is not None:
             apply_to_all = request.form.get("apply_to_all") or (
                 str(fallback[0]) if fallback else ""
@@ -87,14 +104,36 @@ def create_app() -> Flask:
                 draw_overhang = parsed_overhang
                 form_overhang = parsed_overhang
                 form_eave_height = parsed_eave_height
-                result = roof(
-                    parsed_footprint,
-                    pitches,
-                    holes=parsed_holes,
-                    overhang=parsed_overhang,
-                    eave_height=parsed_eave_height,
-                )
                 draw_rings = (parsed_footprint, parsed_holes)
+                extra_views, extra_parsed = (
+                    _posted_extra_cells(request.form, apply_to_all)
+                    if request.form.get("edit_vertices")
+                    else ([], [])
+                )
+                if isinstance(extra_parsed, Failure):
+                    result = extra_parsed
+                elif extra_parsed:
+                    extra_footprints = [cell.footprint for cell in extra_parsed]
+                    result = project(
+                        [
+                            Cell(
+                                parsed_footprint,
+                                pitches,
+                                holes=parsed_holes,
+                                overhang=parsed_overhang,
+                                eave_height=parsed_eave_height,
+                            ),
+                            *extra_parsed,
+                        ]
+                    )
+                else:
+                    result = roof(
+                        parsed_footprint,
+                        pitches,
+                        holes=parsed_holes,
+                        overhang=parsed_overhang,
+                        eave_height=parsed_eave_height,
+                    )
         else:
             pitches = fallback
             apply_to_all = str(pitches[0]) if pitches else ""
@@ -111,7 +150,11 @@ def create_app() -> Flask:
             draw_rings = (parsed_footprint, parsed_holes)
         rows = _edge_rows(footprint, holes, pitches)
         plan_html, solid_html, footprint_html = _draw(
-            result, draw_rings[0], draw_rings[1], draw_overhang
+            result,
+            draw_rings[0],
+            draw_rings[1],
+            draw_overhang,
+            extra_footprints,
         )
         return render_template(
             "page.html",
@@ -123,6 +166,7 @@ def create_app() -> Flask:
             edges=rows,
             footprint=footprint,
             hole=holes[0] if holes else [],
+            extra_cells=extra_views,
             describe=_describe(result),
             plan_html=plan_html,
             solid_html=solid_html,
@@ -213,13 +257,15 @@ def _posted_pitches(
     n: int,
     fallback: list[Pitch],
     apply_to_all: str,
+    *,
+    prefix: str = "",
 ) -> list[Pitch]:
     pitches: list[Pitch] = []
     for i in range(n):
-        if form.get(f"gable-{i}"):
+        if form.get(f"{prefix}gable-{i}"):
             pitches.append("90")
             continue
-        posted = form.get(f"pitch-{i}")
+        posted = form.get(f"{prefix}pitch-{i}")
         if posted is not None and posted != "":
             pitches.append(posted)
         elif apply_to_all:
@@ -230,9 +276,9 @@ def _posted_pitches(
 
 
 def _posted_overhang(
-    form: Mapping[str, str], fallback: float
+    form: Mapping[str, str], fallback: float, *, field: str = "overhang"
 ) -> float | Failure:
-    raw = form.get("overhang")
+    raw = form.get(field)
     if raw is None or raw.strip() == "":
         return fallback
     try:
@@ -244,8 +290,10 @@ def _posted_overhang(
         )
 
 
-def _posted_eave_height(form: Mapping[str, str]) -> float | Failure:
-    raw = form.get("eave_height")
+def _posted_eave_height(
+    form: Mapping[str, str], *, field: str = "eave_height"
+) -> float | Failure:
+    raw = form.get(field)
     if raw is None or raw.strip() == "":
         return 0.0
     try:
@@ -276,6 +324,8 @@ def _edge_rows(
     footprint: list[tuple[Any, Any]],
     holes: list[list[tuple[Any, Any]]] | None,
     pitches: list[Pitch],
+    *,
+    prefix: str = "",
 ) -> list[EdgeRow]:
     rings = [footprint, *(holes or [])]
     rows: list[EdgeRow] = []
@@ -285,19 +335,89 @@ def _edge_rows(
             end = ring[(i + 1) % count]
             raw = pitches[len(rows)] if len(rows) < len(pitches) else ""
             gable = _is_gable(raw)
+            index = len(rows)
             rows.append(
                 EdgeRow(
-                    index=len(rows),
+                    index=index,
                     start=start,
                     end=end,
                     pitch="90" if gable else str(raw),
                     gable=gable,
+                    pitch_name=f"{prefix}pitch-{index}",
+                    gable_name=f"{prefix}gable-{index}",
                 )
             )
     return rows
 
 
-def _describe(result: Roof | Failure) -> str:
+def _posted_extra_cells(
+    form: Mapping[str, str], apply_to_all: str
+) -> tuple[list[ExtraCellView], list[Cell] | Failure]:
+    views: list[ExtraCellView] = []
+    cells: list[Cell] = []
+    index = 1
+    while form.get(f"cell-{index}-outer-x-0") is not None:
+        prefix = f"cell-{index}-"
+        posted_outer = _posted_ring(form, f"{prefix}outer")
+        posted_hole = _posted_ring(form, f"{prefix}hole")
+        outer_display = posted_outer or []
+        hole_display = posted_hole or []
+        n_edges = len(outer_display) + len(hole_display)
+        pitches = _posted_pitches(
+            form, n_edges, [], apply_to_all, prefix=prefix
+        )
+        raw_overhang = form.get(f"{prefix}overhang") or "0"
+        raw_eave = form.get(f"{prefix}eave_height") or "0"
+        views.append(
+            ExtraCellView(
+                index=index,
+                prefix=prefix,
+                footprint=outer_display,
+                hole=hole_display,
+                edges=_edge_rows(
+                    outer_display,
+                    [hole_display] if hole_display else None,
+                    pitches,
+                    prefix=prefix,
+                ),
+                overhang=raw_overhang,
+                eave_height=raw_eave,
+            )
+        )
+        if posted_outer is None:
+            return views, Failure(
+                kind="degenerate",
+                reason=f"cell {index} needs an outer ring",
+            )
+        parsed_outer = _as_xy_ring(posted_outer, f"cell {index} footprint")
+        if isinstance(parsed_outer, Failure):
+            return views, parsed_outer
+        parsed_holes: list[list[tuple[float, float]]] | None = None
+        if posted_hole:
+            parsed_hole = _as_xy_ring(posted_hole, f"cell {index} hole")
+            if isinstance(parsed_hole, Failure):
+                return views, parsed_hole
+            parsed_holes = [parsed_hole]
+        overhang = _posted_overhang(form, 0.0, field=f"{prefix}overhang")
+        if isinstance(overhang, Failure):
+            return views, overhang
+        eave_height = _posted_eave_height(form, field=f"{prefix}eave_height")
+        if isinstance(eave_height, Failure):
+            return views, eave_height
+        cells.append(
+            Cell(
+                parsed_outer,
+                pitches,
+                holes=parsed_holes,
+                overhang=overhang,
+                eave_height=eave_height,
+            )
+        )
+        index += 1
+    return views, cells
+
+
+def _describe(result: Roof | Project | Failure) -> str:
     if isinstance(result, Failure):
         return f"Failure\nkind: {result.kind}\n{result.reason}"
     lines = [
@@ -319,22 +439,33 @@ def _describe(result: Roof | Failure) -> str:
 
 
 def _draw(
-    result: Roof | Failure,
+    result: Roof | Project | Failure,
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]] | None,
     overhang: float,
+    extra_footprints: list[list[tuple[float, float]]] | None = None,
 ) -> tuple[str | None, str | None, str | None]:
+    extras = extra_footprints or []
     if isinstance(result, Failure):
         return (
             None,
             None,
-            _embed(input_footprint(footprint, holes), include_js=True),
+            _embed(
+                input_footprint(footprint, holes, extras),
+                include_js=True,
+            ),
         )
+    if isinstance(result, Project):
+        plan_html = _embed(plan_view(result), include_js=True)
+        solid_html: str | None = None
+        if result.validity.is_terrain:
+            solid_html = _embed(solid_view(result), include_js=False)
+        return plan_html, solid_html, None
     walls: dict[str, Any] = {}
     if overhang != 0.0:
         walls = {"walls": footprint, "wall_holes": holes}
     plan_html = _embed(plan_view(result, **walls), include_js=True)
-    solid_html: str | None = None
+    solid_html = None
     if result.validity.is_terrain:
         solid_html = _embed(solid_view(result, **walls), include_js=False)
     return plan_html, solid_html, None

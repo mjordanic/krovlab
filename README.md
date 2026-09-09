@@ -2,7 +2,7 @@
 
 Give a building footprint in metres and a pitch in degrees. Get back
 the faces, hips, ridges, valleys and quantities of a hipped roof — or a
-named failure.
+named failure. Give several footprints as cells and get one project.
 
 The roofs it generates are a strict subset of roofs you can build. Read
 [what it cannot represent](docs/limitations.md) before deciding whether
@@ -31,7 +31,7 @@ uv sync --extra web         # Flask form server wrapping roof
 ## Quick start
 
 ```python
-from krovlab import Failure, Roof, roof, topology_hash
+from krovlab import Cell, Failure, Roof, project, roof, topology_hash
 
 footprint = [(0, 0), (10, 0), (10, 6), (0, 6)]  # metres, either winding
 result = roof(footprint, 45)                    # degrees
@@ -45,8 +45,9 @@ else:
     print(topology_hash(result))        # combinatorial structure, not coordinates
 ```
 
-`roof` is the only entry point. Everything else — the wavefront, the event
-queue, the conversion of pitch to weight — stays behind it.
+`roof` roofs one footprint. `project` roofs a list of cells. Everything
+else — the wavefront, the event queue, the conversion of pitch to weight —
+stays behind those two functions.
 
 ## Examples
 
@@ -76,12 +77,12 @@ and the neighbouring faces meet the wall at verges. Gabling every edge is
 Weight (`cot(pitch)`) is an internal wavefront speed. It never appears on
 the returned roof.
 
-### A rectangle, an L, a courtyard, a gable, an overhang, an eave height
+### A rectangle, an L, a courtyard, a gable, an overhang, an eave height, two cells
 
 ```python
 import math
 
-from krovlab import roof
+from krovlab import Cell, project, roof
 
 rect = [(0, 0), (10, 0), (10, 6), (0, 6)]
 l_shape = [(0, 0), (10, 0), (10, 6), (3, 6), (3, 10), (0, 10)]
@@ -133,6 +134,19 @@ eaves = roof(rect, 45, overhang=0.5)
 lifted = roof(rect, 45, eave_height=7)
 # Same roof on a 7 m plate. Ridge height 10 m. Plan areas unchanged.
 # Terrain is assessed at the eave plane, then every node is lifted.
+
+house = [(0, 0), (5, 0), (5, 6), (0, 6)]
+garage = [(8, 0), (13, 0), (13, 6), (8, 6)]
+lot = project(
+    [
+        Cell(house, 45, eave_height=5),
+        Cell(garage, 45, eave_height=7),
+    ]
+)
+# Two detached 5 × 6 m hips. Plan areas sum to 60 m². Project ridge
+# height is 9.5 m. Each face names its cell and that cell's edge.
+# Overlapping cells are a named Failure. An L drawn as one polygon is
+# still one cell — the library does not cut it.
 ```
 
 Either winding is accepted. A closed-ring spelling (first point repeated
@@ -145,7 +159,7 @@ spanning both. Differing pitches on those halves are `unsupported`.
 | Attribute | What it is |
 |---|---|
 | `nodes` | Every vertex. Height is metres above datum. Footprint corners sit at the eave height (zero by default). |
-| `faces` | One face per non-gabled footprint edge. `edge_index` is the edge you passed in. |
+| `faces` | One face per non-gabled footprint edge. `edge_index` is the edge you passed in. Faces from `roof` have no cell index. |
 | `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"`, `"ridge"` or `"verge"`; `length` is 3D metres. |
 | `ridge_height` | Highest point above datum. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
@@ -158,7 +172,8 @@ is applied.
 
 `Face.edge_index` `i` is the edge from `footprint[i]` to
 `footprint[(i + 1) % n]` on the outer ring, then continues through each
-hole in order, even if you passed a ring clockwise.
+hole in order, even if you passed a ring clockwise. A `Project` face
+adds `cell_index`: which cell that edge belongs to.
 
 A `Roof` is checked when it is built. If `validity.is_terrain` is false,
 `validity.reasons` names the invariant that broke. Simple convex, L and U
@@ -212,7 +227,7 @@ polygon at a chosen time (time is height).
 The core never imports this module. Without the extra, `import krovlab`
 still works.
 
-### When `roof` cannot start
+### When `roof` or `project` cannot start
 
 Bad input is a `Failure` with a `kind` you can branch on and a `reason`
 you can show. Nothing the entry point accepts raises.
@@ -226,6 +241,8 @@ you can show. Nothing the entry point accepts raises.
 | `hole_intersects` | A hole touches or crosses the outer ring, or another hole. |
 | `unsupported` | Adjacent parallel edges of differing pitch (no unique skeleton). |
 | `incomplete` | The wavefront stopped before the skeleton finished, including when every edge is a gable. |
+| `empty` | `project` was given no cells. |
+| `overlap` | Two cells overlap in plan. |
 
 A `Failure` means no roof was produced. A `Roof` with
 `validity.is_terrain == False` means a roof was produced and then failed
@@ -234,7 +251,7 @@ degrees.
 
 ## Web demo
 
-A form page that wraps `roof` and the existing plan and 3D views. From the
+A form page that wraps `roof` / `project` and the existing plan and 3D views. From the
 repo root:
 
 ```bash
@@ -244,7 +261,8 @@ uv run --extra web python -m web
 
 Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
 Pick a named footprint from the project's corpus and submit to see the
-matching roof, or a Failure with the input drawn.
+matching roof, or a Failure with the input drawn. Edit vertices and Add
+cell to type a second footprint; submit is still one form POST.
 
 The same process is what a container runs. `Dockerfile` at the repo root
 starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
@@ -272,7 +290,9 @@ gcloud run deploy krovlab \
 A 10 m square at 45° has apex height 5 m and four faces of 25 m² plan /
 `25 / cos(45°)` sloped. A 10 × 6 m rectangle at 45° has a 4 m ridge at
 height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. The same roof at eave height
-7 m has ridge height 10 m. A 10 m square with pitches
+7 m has ridge height 10 m. Two detached 5 × 6 m hips at eave heights 5 m
+and 7 m have project ridge height 9.5 m and plan area 60 m². A 10 m square
+with pitches
 `[60, 45, 60, 45]` has a 5 m ridge along `x = 5` of length `10 - 10/√3`.
 A 10 m square with a centred 4 m courtyard at 45° has ridge height 1.5 m
 and plan area 84 m²: four hips from the outer corners, four valleys from
@@ -284,7 +304,7 @@ Step-through examples after `uv sync --extra notebooks`:
 
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
   call `roof`, read quantities, gables, holes, overhang, eave height,
-  and the views.
+  a project of two cells, and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, inherent method limits, and how to read
   `validity`.

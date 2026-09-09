@@ -17,18 +17,23 @@ except ImportError as exc:  # pragma: no cover
 def input_footprint(
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]] | None = None,
+    extra: list[list[tuple[float, float]]] | None = None,
 ) -> go.Figure:
     """Plan of the submitted rings — used when there is no roof to draw."""
     fig = go.Figure()
-    if footprint:
-        xs = [p[0] for p in footprint] + [footprint[0][0]]
-        ys = [p[1] for p in footprint] + [footprint[0][1]]
+    rings = [footprint, *(extra or [])]
+    for r, ring in enumerate(rings):
+        if not ring:
+            continue
+        xs = [p[0] for p in ring] + [ring[0][0]]
+        ys = [p[1] for p in ring] + [ring[0][1]]
+        name = "walls" if r == 0 else f"cell {r}"
         fig.add_trace(
             go.Scatter(
                 x=xs,
                 y=ys,
                 mode="lines+markers",
-                name="walls",
+                name=name,
                 line={"color": "#7c2d12", "width": 2},
                 fill="toself",
                 fillcolor="rgba(124, 45, 18, 0.10)",

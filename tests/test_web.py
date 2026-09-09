@@ -8,7 +8,7 @@ branch rendered, and the worked-example numbers. Not CSS, not pixels.
 from flask.testing import FlaskClient
 from web.app import create_app
 
-from krovlab import Failure, Roof, roof
+from krovlab import Cell, Failure, Project, Roof, project, roof
 
 RECTANGLE = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
 BOWTIE = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
@@ -728,6 +728,112 @@ def test_posting_unreadable_overhang_returns_a_failure_not_500() -> None:
     assert "overhang must be a finite number of metres" in page
     assert 'name="overhang" value="nope"' in page
     assert "3D solid" not in page
+
+
+CELL_A = [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
+CELL_B = [(8.0, 0.0), (13.0, 0.0), (13.0, 6.0), (8.0, 6.0)]
+
+
+def _cell_fields(
+    ring: list[tuple[float, float]],
+    *,
+    prefix: str = "",
+    pitch: str = "45",
+    overhang: str = "0",
+    eave_height: str = "0",
+) -> dict[str, str]:
+    data: dict[str, str] = {
+        f"{prefix}overhang": overhang,
+        f"{prefix}eave_height": eave_height,
+    }
+    for i, (x, y) in enumerate(ring):
+        data[f"{prefix}outer-x-{i}"] = str(x)
+        data[f"{prefix}outer-y-{i}"] = str(y)
+        data[f"{prefix}pitch-{i}"] = pitch
+    return data
+
+
+def test_posting_two_detached_cells_shows_combined_plan_and_3d() -> None:
+    built = project(
+        [
+            Cell(CELL_A, 45.0, eave_height=5.0),
+            Cell(CELL_B, 45.0, eave_height=7.0),
+        ]
+    )
+    assert isinstance(built, Project)
+    assert built.validity.is_terrain is True
+
+    data: dict[str, str] = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        "edit_vertices": "on",
+    }
+    data.update(_cell_fields(CELL_A, eave_height="5"))
+    data.update(_cell_fields(CELL_B, prefix="cell-1-", eave_height="7"))
+    response = _client().post("/", data=data)
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" in page
+    assert "Input footprint" not in page
+    assert 'name="cell-1-outer-x-0"' in page
+
+
+def test_posting_a_one_ring_preset_is_still_one_cell() -> None:
+    built = roof(RECTANGLE, 45.0)
+    assert isinstance(built, Roof)
+    page = (
+        _client()
+        .post(
+            "/",
+            data={
+                "fixture": "rectangle-10x6",
+                "cell-1-outer-x-0": "8",
+                "cell-1-outer-y-0": "0",
+                "cell-1-outer-x-1": "13",
+                "cell-1-outer-y-1": "0",
+                "cell-1-outer-x-2": "13",
+                "cell-1-outer-y-2": "6",
+                "cell-1-outer-x-3": "8",
+                "cell-1-outer-y-3": "6",
+                "cell-1-pitch-0": "45",
+                "cell-1-eave_height": "7",
+            },
+        )
+        .get_data(as_text=True)
+    )
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert "ridge height: 9.500 m" not in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" in page
+
+
+def test_get_offers_a_second_cell_table() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert "Add cell" in page
+    assert "ridge height: 3.000 m" in page
+
+
+def test_posting_overlapping_cells_is_a_failure_not_500() -> None:
+    overlap = [(2.0, 0.0), (7.0, 0.0), (7.0, 6.0), (2.0, 6.0)]
+    data: dict[str, str] = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        "edit_vertices": "on",
+    }
+    data.update(_cell_fields(CELL_A))
+    data.update(_cell_fields(overlap, prefix="cell-1-"))
+    response = _client().post("/", data=data)
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Failure" in page
+    assert "overlap" in page
+    assert "Input footprint" in page
+    assert "3D solid" not in page
+    assert "<h2>Plan</h2>" not in page
 
 
 

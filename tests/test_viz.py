@@ -366,3 +366,58 @@ def test_core_does_not_import_viz() -> None:
                 assert module != "krovlab.viz"
                 assert not module.startswith("krovlab.viz.")
                 assert "viz" not in module.split(".")
+
+
+def test_plan_view_of_a_project_draws_every_cell() -> None:
+    from krovlab import Cell, Project, project
+    from krovlab.viz import plan_view
+
+    garage = [(12.0, 0.0), (17.0, 0.0), (17.0, 6.0), (12.0, 6.0)]
+    result = project([Cell(RECTANGLE, 45.0), Cell(garage, 45.0)])
+    assert isinstance(result, Project)
+    fig = plan_view(result)
+    fills = [trace for trace in fig.data if trace.name and "footprint" in trace.name]
+    assert len(fills) == len(result.roofs)
+    xs = [float(x) for trace in fills for x in trace.x if x == x]
+    assert min(xs) == pytest.approx(0.0)
+    assert max(xs) == pytest.approx(17.0)
+
+
+def test_plan_view_builds_from_a_two_cell_project() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Project, project
+    from krovlab.viz import plan_view
+
+    garage = [(12.0, 0.0), (17.0, 0.0), (17.0, 6.0), (12.0, 6.0)]
+    result = project([Cell(RECTANGLE, 45.0), Cell(garage, 45.0)])
+    assert isinstance(result, Project)
+    fig = plan_view(result)
+    assert isinstance(fig, Figure)
+    assert fig.data
+    names = {trace.name for trace in fig.data}
+    for kind in GLOSSARY_ARC_KINDS:
+        assert kind in names
+
+
+def test_solid_view_builds_from_a_two_cell_project() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Project, project
+    from krovlab.viz import solid_view
+
+    garage = [(12.0, 0.0), (17.0, 0.0), (17.0, 6.0), (12.0, 6.0)]
+    result = project(
+        [
+            Cell(RECTANGLE, 45.0, eave_height=5.0),
+            Cell(garage, 45.0, eave_height=7.0),
+        ]
+    )
+    assert isinstance(result, Project)
+    fig = solid_view(result)
+    assert isinstance(fig, Figure)
+    mesh = next(trace for trace in fig.data if trace.type == "mesh3d")
+    assert list(mesh.z) == [node.height for node in result.nodes]
+    used = set(mesh.i) | set(mesh.j) | set(mesh.k)
+    for face in result.faces:
+        assert set(face.node_indices) <= used

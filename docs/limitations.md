@@ -80,8 +80,8 @@ not carry them:
   (a courtyard hole is at eave height, with inward faces; a chimney would
   cut the slope above the eaves, which is a different thing)
 - Curved walls
-- Eaves at more than one height, and split-level buildings
-- Several disconnected wings in one call — roof each wing separately
+- Split-level eaves on one cell — each cell has one eave height; two
+  eave heights are two cells in a `project`
 
 ## A returned `Roof` can still be wrong
 

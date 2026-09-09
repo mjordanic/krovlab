@@ -1,11 +1,12 @@
-"""Public roof value and the single library entry point.
+"""Public roof value and the one-footprint library entry point.
 
 Call :func:`roof` with a footprint and a pitch. Everything behind that
 call — the wavefront, the event queue, the conversion of pitch to weight —
-is internal. The returned :class:`Roof` is data: faces, arcs, nodes,
-quantities and a :class:`Validity` result. It has no rendering concepts
-and no weight. Unroofable input is a :class:`Failure` with a ``kind``,
-never an exception. Wavefront events are opt-in via ``events=True``;
+is internal. Composition of several cells is :func:`krovlab.project.project`.
+The returned :class:`Roof` is data: faces, arcs, nodes, quantities and a
+:class:`Validity` result. It has no rendering concepts and no weight.
+Unroofable input is a :class:`Failure` with a ``kind``, never an
+exception. Wavefront events are opt-in via ``events=True``;
 :func:`topology_hash` hashes incidence, not coordinates. An ``overhang``
 is applied by offsetting the footprint before the skeleton runs.
 ``eave_height`` lifts every node after the terrain is assessed.
@@ -38,8 +39,10 @@ FailureKind = Literal[
     "hole_intersects",
     "unsupported",
     "incomplete",
+    "empty",
+    "overlap",
 ]
-"""Why :func:`roof` refused.
+"""Why :func:`roof` or :func:`krovlab.project.project` refused.
 
 ``invalid_pitch`` — unreadable spelling, or outside ``0 < pitch <= 90``.
 ``pitch_count`` — a pitch list whose length is not the number of edges.
@@ -50,6 +53,8 @@ FailureKind = Literal[
     skeleton).
 ``incomplete`` — the wavefront stopped before the skeleton finished,
     including when every edge is a gable.
+``empty`` — ``project`` was given no cells.
+``overlap`` — two cells overlap in plan.
 """
 
 

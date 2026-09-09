@@ -1,8 +1,9 @@
-"""Optional visualisation. Consumes a :class:`Roof`, never the algorithm.
+"""Optional visualisation. Consumes a :class:`Roof` or a :class:`Project`.
 
 Plan, 3D solid and wavefront views all return Plotly figures. Install
 the ``viz`` extra (``uv sync --extra viz``) to use this module. The
-core package does not import it.
+core package does not import it. A project is one plan of every cell
+and one 3D solid of the lot.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ except ImportError as exc:  # pragma: no cover
         "krovlab.viz requires the viz extra. Install with: uv sync --extra viz"
     ) from exc
 
+from krovlab.project import Project
 from krovlab.roof import Event, Roof
 
 # Glossary names from CONTEXT.md. Empty kinds still appear in the legend.
@@ -30,7 +32,7 @@ ARC_KINDS = ("eave", "verge", "hip", "valley", "ridge")
 
 
 def plan_view(
-    roof: Roof,
+    roof: Roof | Project,
     *,
     walls: list[tuple[float, float]] | None = None,
     wall_holes: list[list[tuple[float, float]]] | None = None,
@@ -38,7 +40,8 @@ def plan_view(
     """Return a plan figure of the roof with the skeleton drawn over it.
 
     Arcs are coloured by classification, using the glossary names in the
-    legend. Node heights are annotated in metres.
+    legend. Node heights are annotated in metres. A project draws every
+    cell's plan extent.
 
     Pass ``walls`` (and ``wall_holes``) when the eaves are not the walls:
     an overhang. The dark ``walls`` line is the building; the eave arcs
@@ -46,7 +49,10 @@ def plan_view(
     """
     fig = go.Figure()
     fill_name = "roof" if walls is not None else "footprint"
-    _add_footprint_trace(fig, roof, name=fill_name)
+    cells = _roofs_of(roof)
+    for i, built in enumerate(cells):
+        name = fill_name if len(cells) == 1 else f"{fill_name} {i}"
+        _add_footprint_trace(fig, built, name=name)
     if walls is not None:
         _add_wall_plan_traces(fig, walls, wall_holes)
 
@@ -97,7 +103,7 @@ def plan_view(
 
 
 def solid_view(
-    roof: Roof,
+    roof: Roof | Project,
     *,
     walls: list[tuple[float, float]] | None = None,
     wall_holes: list[list[tuple[float, float]]] | None = None,
@@ -105,8 +111,9 @@ def solid_view(
     """Return an orbitable 3D figure of the roof solid.
 
     Face vertices use the node heights the roof already reports. There
-    is no lifting step. ``walls`` is the building outline at height 0,
-    drawn inside the eaves when an overhang is applied.
+    is no lifting step. A project is one solid of every cell. ``walls``
+    is the building outline at height 0, drawn inside the eaves when an
+    overhang is applied.
     """
     fig = go.Figure()
     xs = [node.x for node in roof.nodes]
@@ -261,6 +268,13 @@ def write_html(fig: go.Figure, path: str | Path) -> Path:
         full_html=True,
     )
     return destination
+
+
+def _roofs_of(geometry: Roof | Project) -> tuple[Roof, ...]:
+    """The cell roofs to draw. A single roof is a one-cell tuple."""
+    if isinstance(geometry, Project):
+        return geometry.roofs
+    return (geometry,)
 
 
 def _add_footprint_trace(

@@ -211,7 +211,8 @@ def skeleton(
 
     def push_splits(vertex: _Vertex) -> None:
         if not (
-            _is_reflex(vertex, lines) or _is_straight_same_weight(vertex, lines, weights)
+            _is_reflex(vertex, lines)
+            or _is_straight_same_weight(vertex, lines, weights)
         ):
             return
         for opp in range(n):

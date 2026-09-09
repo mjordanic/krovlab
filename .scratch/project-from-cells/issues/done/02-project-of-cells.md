@@ -27,7 +27,7 @@ behind those seams.
 
 **Blocked by:** 01 eave height on a single roof
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Complexity:** high
 
@@ -43,20 +43,30 @@ three result branches from the form-server spec. Corpus one-ring presets
 (`rectangle-10x6`, `l-shape`, `courtyard`, `rectangle-gabled`, `bowtie`). Do not
 re-assert single-cell terrain invariants already owned by the library tests.
 
-- [ ] `project` of one cell equals that cell passed through `roof` with the same
+- [x] `project` of one cell equals that cell passed through `roof` with the same
       eave height (quantities, terrain flag, no extra faces)
-- [ ] Two detached 5 × 6 m rectangles at eave heights 5 m and 7 m, both 45°
+- [x] Two detached 5 × 6 m rectangles at eave heights 5 m and 7 m, both 45°
       hips, return a project whose plan areas sum to 60 m², total sloped area is
       the sum of the cells, and ridge height is the max lifted node
-- [ ] Each face names the cell index and that cell's edge index
-- [ ] Overlapping cells return a named Failure, not a double-counted takeoff
-- [ ] An empty list of cells returns a named Failure
-- [ ] An L as one polygon is one cell; the library does not cut it into two
-- [ ] A cell with a hole, an overhang, or the opposite winding still roofs
-- [ ] A non-terrain cell keeps `validity.reasons` on the project
-- [ ] Same input, byte-identical project; Failure is a value, never an exception
-- [ ] POST of two cell tables (detached) shows combined plan and 3D when both
+- [x] Each face names the cell index and that cell's edge index
+- [x] Overlapping cells return a named Failure, not a double-counted takeoff
+- [x] An empty list of cells returns a named Failure
+- [x] An L as one polygon is one cell; the library does not cut it into two
+- [x] A cell with a hole, an overhang, or the opposite winding still roofs
+- [x] A non-terrain cell keeps `validity.reasons` on the project
+- [x] Same input, byte-identical project; Failure is a value, never an exception
+- [x] POST of two cell tables (detached) shows combined plan and 3D when both
       are terrains, and does not 500
-- [ ] Existing one-ring presets still POST as one cell
-- [ ] Core package still imports no Flask and no I/O
-- [ ] Tests do not open the event queue
+- [x] Existing one-ring presets still POST as one cell
+- [x] Core package still imports no Flask and no I/O
+- [x] Tests do not open the event queue
+
+## Comments
+
+`project` roofs each cell through `roof`, then refuses overlapping plan
+regions (`overlap`) and an empty list (`empty`). Faces on a `Project` carry
+`cell_index`; `Face` from the one-footprint call does not. Shared-wall
+agreement is ticket 03 — coincident edges that only share a wall are not
+an overlap. The form keeps cell 0 on the existing field names; further
+cells post as `cell-N-*` when Edit vertices is checked. `plan_view` and
+`solid_view` consume a `Project` as one plan of every cell and one solid.
