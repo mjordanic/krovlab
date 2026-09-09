@@ -137,7 +137,8 @@ lifted = roof(rect, 45, eave_height=7)
 
 Either winding is accepted. A closed-ring spelling (first point repeated
 at the end) is accepted. Collinear extra vertices on a straight wall are
-accepted as input, but often fail the terrain check — leave them off.
+kept when they share a pitch — two faces of one plane, not one face
+spanning both. Differing pitches on those halves are `unsupported`.
 
 ### Reading a `Roof`
 

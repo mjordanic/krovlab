@@ -4,22 +4,37 @@ The roofs this library generates are a strict subset of roofs you can
 build. Read this before deciding whether the tool covers a given
 building.
 
-Three limits are inherent to the method. They will not go away by
+Four limits are inherent to the method. They will not go away by
 adding features. Other roofs — half-hips, gambrels, dormers — are
 simply not produced today; some of those stay reachable later.
 
 ## One plane cannot cover several walls
 
-Every roof face rises from exactly one wall. A single plane that
-continues across two or more consecutive walls — wrapping a corner
+Every roof face rises from exactly one footprint edge. A single plane
+that continues across two or more consecutive walls — wrapping a corner
 without a hip, or treating a jogged wall as one slope — will not come
 out. The library puts a hip or a valley at each corner and gives you
-one face per wall.
+one face per edge.
 
-If two consecutive walls are collinear (the same wall, with a vertex in
-the middle), the method still wants two faces, not one plane spanning
-both. Today that extra vertex often fails the terrain check — leave
-straight walls as two endpoints.
+## One straight wall cannot carry two pitches
+
+The dual of the limit above. Two collinear eaves share one supporting
+line at eave height. Two planes that contain that line and dip at
+different pitches only meet on the wall; inland they give two heights
+to the same plan point, so the surface is not a terrain.
+
+The weighted skeleton has no unique answer either: adjacent parallel
+edges of differing weight never meet (Biedl et al., 2015). Their
+suggested resolution is not two faces — the faster edge takes over and
+the slower face has zero area. The library refuses that input as
+`unsupported`. Give the wall one pitch, or make a corner in the
+footprint so the two eaves are no longer collinear.
+
+A midpoint on an otherwise straight eave, both halves the same pitch,
+is a different case: one geometric plane, two combinatorial faces. The
+extra vertex traces inland perpendicular to the wall. That roof is a
+terrain; it is still not one face spanning both halves. Leave a
+straight wall as two endpoints unless you want that split.
 
 ## Extra vertices that are not on the building
 
@@ -84,8 +99,6 @@ Cases that currently do this, rather than raising or returning
 - Mixed pitch on some L-shapes, especially a large gap between a
   shallow face and a steep neighbour
 - A gable on some edges of an L or a U — not every gable, only some
-- An extra vertex on an otherwise straight wall (the collinear case
-  above)
 
 Simple convex rectangles, L and U at one pitch, rectangular courtyards,
 and a gable on a rectangle are the shapes the tests exercise hardest.

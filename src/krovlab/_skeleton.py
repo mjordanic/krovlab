@@ -30,7 +30,9 @@ Consecutive edges that share a supporting line (a collinear vertex) have
 no unique weighted skeleton if their weights differ: the two offset
 lines stay parallel and never meet. The public entry point refuses that
 input rather than picking an arbitrary answer. Same-weight collinear
-vertices are kept — they are one eave with an extra point.
+vertices are kept — they are one eave with an extra point. The vertex
+moves along the inward normal (Biedl: the 180° bisector is
+perpendicular to the wall) and may split against an opposite edge.
 
 Holes
 -----
@@ -208,7 +210,9 @@ def skeleton(
         push(_EVENT_EDGE, t, px, py, vertex, edge_index)
 
     def push_splits(vertex: _Vertex) -> None:
-        if not _is_reflex(vertex, lines):
+        if not (
+            _is_reflex(vertex, lines) or _is_straight_same_weight(vertex, lines, weights)
+        ):
             return
         for opp in range(n):
             cand = _split_candidate(
@@ -401,6 +405,52 @@ def _is_reflex(vertex: _Vertex, lines: list[_Line]) -> bool:
     return left.nx * right.ny - left.ny * right.nx < -_REGION_TOL
 
 
+def _supports_coincide(a: _Line, b: _Line) -> bool:
+    """True if two supporting lines are the same oriented line."""
+    if a.nx * b.nx + a.ny * b.ny < 0.999:
+        return False
+    return abs(a.c - b.c) <= 1e-9
+
+
+def _is_straight_same_weight(
+    vertex: _Vertex, lines: list[_Line], weights: list[float]
+) -> bool:
+    """True when the vertex sits on a same-weight collinear eave (180°)."""
+    left, right = vertex.left_edge, vertex.right_edge
+    if not _supports_coincide(lines[left], lines[right]):
+        return False
+    if abs(weights[left] - weights[right]) > 1e-9:
+        return False
+    return weights[left] > 0.0
+
+
+def _vertex_velocity(
+    left: int, right: int, lines: list[_Line], weights: list[float]
+) -> tuple[float, float] | None:
+    """Plan velocity of the wavefront vertex between edges ``left`` and ``right``.
+
+    Distinct supports: the unique solution of ``n · v = w``. Identical
+    supports of equal weight: the inward normal times weight — the 180°
+    bisector is perpendicular to the wall.
+    """
+    vel = _solve2(
+        lines[left].nx,
+        lines[left].ny,
+        weights[left],
+        lines[right].nx,
+        lines[right].ny,
+        weights[right],
+    )
+    if vel is not None:
+        return vel
+    if not _supports_coincide(lines[left], lines[right]):
+        return None
+    if abs(weights[left] - weights[right]) > 1e-9:
+        return None
+    w = weights[left]
+    return (lines[left].nx * w, lines[left].ny * w)
+
+
 def _original_bisectors(
     prev_of: list[int], lines: list[_Line], weights: list[float]
 ) -> list[tuple[float, float]]:
@@ -408,15 +458,7 @@ def _original_bisectors(
     n = len(prev_of)
     out: list[tuple[float, float]] = []
     for i in range(n):
-        left = prev_of[i]
-        vel = _solve2(
-            lines[left].nx,
-            lines[left].ny,
-            weights[left],
-            lines[i].nx,
-            lines[i].ny,
-            weights[i],
-        )
+        vel = _vertex_velocity(prev_of[i], i, lines, weights)
         if vel is None:
             out.append((0.0, 0.0))
             continue
@@ -464,23 +506,54 @@ def _split_candidate(
     """Time and point at which ``vertex`` hits original edge ``opp``, if ever."""
     if opp == vertex.left_edge or opp == vertex.right_edge:
         return None
-    solved = _offset_meet(
-        lines[vertex.left_edge],
-        weights[vertex.left_edge],
-        lines[vertex.right_edge],
-        weights[vertex.right_edge],
-        lines[opp],
-        weights[opp],
-    )
-    if solved is None:
-        return None
-    px, py, t = solved
+    if _supports_coincide(lines[vertex.left_edge], lines[vertex.right_edge]):
+        hit = _straight_hit_opposite(vertex, opp, lines, weights)
+        if hit is None:
+            return None
+        t, px, py = hit
+    else:
+        solved = _offset_meet(
+            lines[vertex.left_edge],
+            weights[vertex.left_edge],
+            lines[vertex.right_edge],
+            weights[vertex.right_edge],
+            lines[opp],
+            weights[opp],
+        )
+        if solved is None:
+            return None
+        px, py, t = solved
     if t < vertex.birth - 1e-12:
         return None
     if t < 0.0:
         t = 0.0
     if not _in_felkel_region(px, py, opp, pts, next_idx, bisectors):
         return None
+    return t, px, py
+
+
+def _straight_hit_opposite(
+    vertex: _Vertex, opp: int, lines: list[_Line], weights: list[float]
+) -> tuple[float, float, float] | None:
+    """When a same-weight collinear vertex's normal-ray meets opposite ``opp``."""
+    vel = _vertex_velocity(vertex.left_edge, vertex.right_edge, lines, weights)
+    if vel is None:
+        return None
+    opp_line = lines[opp]
+    w_opp = weights[opp]
+    # n_opp · (p0 + vel * (t - birth)) = c_opp + w_opp * t
+    denom = opp_line.nx * vel[0] + opp_line.ny * vel[1] - w_opp
+    if abs(denom) < 1e-18:
+        return None
+    p0x, p0y = vertex.x, vertex.y
+    rhs = (
+        opp_line.c
+        - (opp_line.nx * p0x + opp_line.ny * p0y)
+        + (opp_line.nx * vel[0] + opp_line.ny * vel[1]) * vertex.birth
+    )
+    t = rhs / denom
+    px = p0x + vel[0] * (t - vertex.birth)
+    py = p0y + vel[1] * (t - vertex.birth)
     return t, px, py
 
 
@@ -521,8 +594,15 @@ def _position_at(
     )
     if pos is not None:
         return pos
-    # Parallel supports coincide at one instant: the vertex sits on that
-    # collapsed line. Unique motion is undefined, so keep the birth point.
+    vel = _vertex_velocity(vertex.left_edge, vertex.right_edge, lines, weights)
+    if vel is not None and _supports_coincide(
+        lines[vertex.left_edge], lines[vertex.right_edge]
+    ):
+        dt = t - vertex.birth
+        return (vertex.x + vel[0] * dt, vertex.y + vel[1] * dt)
+    # Opposite parallel supports coincide at one instant: the vertex sits
+    # on that collapsed line. Unique motion is undefined, so keep the
+    # birth point.
     if _offsets_coincide(vertex.left_edge, vertex.right_edge, t, lines, weights):
         return (vertex.x, vertex.y)
     return None
@@ -649,13 +729,44 @@ def _edge_event(
         weights[vb.right_edge],
     )
     if solved is None:
-        return None
-    px, py, t = solved
+        hit = _trajectories_meet(va, vb, lines, weights)
+        if hit is None:
+            return None
+        px, py, t = hit
+    else:
+        px, py, t = solved
     if t < -1e-12:
         return None
     if t < 0.0:
         t = 0.0
     return t, i, px, py
+
+
+def _trajectories_meet(
+    va: _Vertex, vb: _Vertex, lines: list[_Line], weights: list[float]
+) -> tuple[float, float, float] | None:
+    """When two adjacent wavefront vertices coincide, from linear motions."""
+    vel_a = _vertex_velocity(va.left_edge, va.right_edge, lines, weights)
+    vel_b = _vertex_velocity(vb.left_edge, vb.right_edge, lines, weights)
+    if vel_a is None or vel_b is None:
+        return None
+    dx = vel_a[0] - vel_b[0]
+    dy = vel_a[1] - vel_b[1]
+    rx = (vb.x - vel_b[0] * vb.birth) - (va.x - vel_a[0] * va.birth)
+    ry = (vb.y - vel_b[1] * vb.birth) - (va.y - vel_a[1] * va.birth)
+    if abs(dx) < 1e-18 and abs(dy) < 1e-18:
+        return None
+    if abs(dx) >= abs(dy):
+        t = rx / dx
+        if abs(dy) > 1e-12 and abs(dy * t - ry) > 1e-6:
+            return None
+    else:
+        t = ry / dy
+        if abs(dx) > 1e-12 and abs(dx * t - rx) > 1e-6:
+            return None
+    px = va.x + vel_a[0] * (t - va.birth)
+    py = va.y + vel_a[1] * (t - va.birth)
+    return px, py, t
 
 
 def _offset_meet(

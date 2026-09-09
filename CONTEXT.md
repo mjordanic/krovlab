@@ -13,16 +13,33 @@ listed as "not:" so we don't drift.
 Always counter-clockwise, always in metres. A footprint may have holes.
 _Not: outline, boundary, plan, slab._
 
+**Wall** — one straight run of facade between corners. The skeleton's unit is
+a footprint edge; a straight wall is one edge. Two collinear edges on the
+same wall are still two edges, not one wall with two pitches.
+_Not: outline wall._
+
 **Hole** — an interior ring of a footprint that the roof does not cover: a
 courtyard, light well or atrium. A footprint with a hole is still one footprint,
 not two.
 
-**Wing** — one connected footprint within a project that has more than one. Two
-wings are separate polygons; a single L-shaped building is one footprint, not
-two wings.
+**Wing** — a footprint that does not share a wall with another in the same
+project. Two detached masses are two wings. A single L-shaped building is
+one footprint, not two wings.
+_Not: cell._
 
-**Eave height** — the height above project datum of the footprint plane, i.e.
-where the roof surface meets the wall. Uniform across a footprint unless stated.
+**Cell** — one footprint roofed by a single straight skeleton, with one eave
+height. Two gable roofs that meet at a party wall are two cells. An L-shaped
+building drawn as one polygon is one cell.
+_Not: wing, zone, part, massing._
+
+**Project** — the roofs of one building, made of one or more cells. Takeoff
+sums across cells. A project need not be a single terrain: cells may sit at
+different eave heights.
+_Not: site, file, model._
+
+**Eave height** — the height above project datum of a cell's footprint plane,
+i.e. where that cell's roof meets the wall. Uniform across a cell. A project
+may give each cell its own eave height.
 
 ## The roof surface
 

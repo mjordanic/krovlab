@@ -551,6 +551,20 @@ def test_get_offers_add_and_remove_vertex_rows() -> None:
 
 
 COLLINEAR = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+PLUS = [
+    (2.0, 0.0),
+    (4.0, 0.0),
+    (4.0, 2.0),
+    (6.0, 2.0),
+    (6.0, 4.0),
+    (4.0, 4.0),
+    (4.0, 6.0),
+    (2.0, 6.0),
+    (2.0, 4.0),
+    (0.0, 4.0),
+    (0.0, 2.0),
+    (2.0, 2.0),
+]
 
 
 def test_posting_an_unreadable_pitch_returns_invalid_pitch_not_500() -> None:
@@ -587,11 +601,10 @@ def test_posting_an_unreadable_pitch_returns_invalid_pitch_not_500() -> None:
     assert "<h2>Plan</h2>" not in page
 
 
-def test_posting_a_collinear_extra_vertex_shows_plan_and_validity_reasons() -> None:
+def test_posting_a_collinear_extra_vertex_is_a_terrain() -> None:
     built = roof(COLLINEAR, 45.0)
     assert isinstance(built, Roof)
-    assert built.validity.is_terrain is False
-    assert built.validity.reasons
+    assert built.validity.is_terrain is True
 
     response = _client().post(
         "/",
@@ -618,6 +631,32 @@ def test_posting_a_collinear_extra_vertex_shows_plan_and_validity_reasons() -> N
             "overhang": "0",
         },
     )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" in page
+    assert "Input footprint" not in page
+
+
+def test_posting_a_plus_shape_shows_plan_and_validity_reasons() -> None:
+    built = roof(PLUS, 45.0)
+    assert isinstance(built, Roof)
+    assert built.validity.is_terrain is False
+    assert built.validity.reasons
+
+    data: dict[str, str] = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        "edit_vertices": "on",
+        "apply_to_all": "45",
+        "overhang": "0",
+    }
+    for i, (x, y) in enumerate(PLUS):
+        data[f"outer-x-{i}"] = str(x)
+        data[f"outer-y-{i}"] = str(y)
+        data[f"pitch-{i}"] = "45"
+    response = _client().post("/", data=data)
     assert response.status_code == 200
     page = response.get_data(as_text=True)
     assert "terrain: False" in page
