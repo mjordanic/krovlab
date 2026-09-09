@@ -5,10 +5,11 @@ pitch (degrees, rise:run, or a percentage) — one value, or one per
 footprint edge — and get back a :class:`Roof` you can read quantities
 off, or a :class:`Failure` with a ``kind`` you can branch on. A
 footprint may include holes. ``pitch = 90`` on an edge is a gable.
-``overhang`` offsets the eaves outward in metres. Every roof carries a
-:class:`Validity` result: the terrain invariants have been checked.
-Units are metres and degrees throughout. Pass ``events=True`` to inspect
-the wavefront events that produced it.
+``overhang`` offsets the eaves outward in metres. ``eave_height`` is
+metres above datum, added to every node after the roof is assessed.
+Every roof carries a :class:`Validity` result: the terrain invariants
+have been checked. Units are metres and degrees throughout. Pass
+``events=True`` to inspect the wavefront events that produced it.
 """
 
 from krovlab.roof import (

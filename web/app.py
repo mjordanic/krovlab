@@ -47,6 +47,7 @@ def create_app() -> Flask:
         fallback = _expand_pitches(preset.pitch, n_edges)
         draw_overhang = preset.overhang
         form_overhang: float | str = preset.overhang
+        form_eave_height: float | str = 0.0
         result: Roof | Failure
         if parse_error is not None:
             apply_to_all = request.form.get("apply_to_all") or (
@@ -68,6 +69,7 @@ def create_app() -> Flask:
             if not apply_to_all:
                 apply_to_all = str(pitches[0]) if pitches else ""
             parsed_overhang = _posted_overhang(request.form, preset.overhang)
+            parsed_eave_height = _posted_eave_height(request.form)
             parsed_footprint = cast(list[tuple[float, float]], footprint)
             parsed_holes = cast(
                 list[list[tuple[float, float]]] | None, holes
@@ -77,14 +79,20 @@ def create_app() -> Flask:
                 form_overhang = request.form.get("overhang") or preset.overhang
                 draw_overhang = 0.0
                 draw_rings = (parsed_footprint, parsed_holes)
+            elif isinstance(parsed_eave_height, Failure):
+                result = parsed_eave_height
+                form_eave_height = request.form.get("eave_height") or 0.0
+                draw_rings = (parsed_footprint, parsed_holes)
             else:
                 draw_overhang = parsed_overhang
                 form_overhang = parsed_overhang
+                form_eave_height = parsed_eave_height
                 result = roof(
                     parsed_footprint,
                     pitches,
                     holes=parsed_holes,
                     overhang=parsed_overhang,
+                    eave_height=parsed_eave_height,
                 )
                 draw_rings = (parsed_footprint, parsed_holes)
         else:
@@ -111,6 +119,7 @@ def create_app() -> Flask:
             selected=preset.name,
             apply_to_all=apply_to_all,
             overhang=form_overhang,
+            eave_height=form_eave_height,
             edges=rows,
             footprint=footprint,
             hole=holes[0] if holes else [],
@@ -232,6 +241,19 @@ def _posted_overhang(
         return Failure(
             kind="degenerate",
             reason="overhang must be a finite number of metres, zero or positive",
+        )
+
+
+def _posted_eave_height(form: Mapping[str, str]) -> float | Failure:
+    raw = form.get("eave_height")
+    if raw is None or raw.strip() == "":
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return Failure(
+            kind="degenerate",
+            reason="eave height must be a finite number of metres above datum",
         )
 
 

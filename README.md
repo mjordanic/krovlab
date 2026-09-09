@@ -129,6 +129,10 @@ eaves = roof(rect, 45, overhang=0.5)
 # In the drawings, pass the original walls so they stay distinct from the eaves:
 #   plan_view(eaves, walls=rect)     # brown = walls, grey eave = roof edge
 #   solid_view(eaves, walls=rect)
+
+lifted = roof(rect, 45, eave_height=7)
+# Same roof on a 7 m plate. Ridge height 10 m. Plan areas unchanged.
+# Terrain is assessed at the eave plane, then every node is lifted.
 ```
 
 Either winding is accepted. A closed-ring spelling (first point repeated
@@ -139,10 +143,10 @@ accepted as input, but often fail the terrain check — leave them off.
 
 | Attribute | What it is |
 |---|---|
-| `nodes` | Every vertex. Footprint corners have `height == 0`. |
+| `nodes` | Every vertex. Height is metres above datum. Footprint corners sit at the eave height (zero by default). |
 | `faces` | One face per non-gabled footprint edge. `edge_index` is the edge you passed in. |
 | `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"`, `"ridge"` or `"verge"`; `length` is 3D metres. |
-| `ridge_height` | Highest point above the eave plane. |
+| `ridge_height` | Highest point above datum. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
 | `validity` | Whether the roof is a terrain. Check `is_terrain` before using anything else. |
 
@@ -266,7 +270,8 @@ gcloud run deploy krovlab \
 
 A 10 m square at 45° has apex height 5 m and four faces of 25 m² plan /
 `25 / cos(45°)` sloped. A 10 × 6 m rectangle at 45° has a 4 m ridge at
-height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. A 10 m square with pitches
+height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. The same roof at eave height
+7 m has ridge height 10 m. A 10 m square with pitches
 `[60, 45, 60, 45]` has a 5 m ridge along `x = 5` of length `10 - 10/√3`.
 A 10 m square with a centred 4 m courtyard at 45° has ridge height 1.5 m
 and plan area 84 m²: four hips from the outer corners, four valleys from

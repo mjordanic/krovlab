@@ -8,6 +8,7 @@ and no weight. Unroofable input is a :class:`Failure` with a ``kind``,
 never an exception. Wavefront events are opt-in via ``events=True``;
 :func:`topology_hash` hashes incidence, not coordinates. An ``overhang``
 is applied by offsetting the footprint before the skeleton runs.
+``eave_height`` lifts every node after the terrain is assessed.
 """
 
 from __future__ import annotations
@@ -107,9 +108,9 @@ class Failure:
 class Node:
     """A vertex of the roof, in metres.
 
-    Footprint corners have ``height == 0``. Skeleton nodes (ridge ends,
-    the apex of a hip roof) carry the height at which the wavefront
-    created them — that time *is* the height; nothing is lifted afterwards.
+    Footprint corners sit at the eave height (zero by default). Skeleton
+    nodes (ridge ends, the apex of a hip roof) carry that eave height
+    plus the wavefront time at which they were created.
     """
 
     x: float
@@ -119,7 +120,7 @@ class Node:
     """Plan y, metres."""
 
     height: float
-    """Height above the eave plane, metres."""
+    """Height above datum, metres."""
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,7 @@ class Roof:
     """A roof as data: faces, arcs, nodes, quantities and a validity result."""
 
     nodes: tuple[Node, ...]
-    """Every vertex, including the original footprint corners at height 0."""
+    """Every vertex, including the original footprint corners at eave height."""
 
     faces: tuple[Face, ...]
     """One face per non-gabled footprint edge, in the caller's edge order."""
@@ -212,7 +213,7 @@ class Roof:
     """Eaves, hips, valleys, ridges and verges, each with a 3D length."""
 
     ridge_height: float
-    """Highest node on the roof, metres above the eave plane."""
+    """Highest node on the roof, metres above datum."""
 
     total_sloped_area: float
     """Sum of every face's sloped area — the covering-cost driver."""
@@ -268,6 +269,7 @@ def roof(
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
     overhang: float = 0.0,
+    eave_height: float = 0.0,
     *,
     events: Literal[False] = False,
 ) -> Roof | Failure: ...
@@ -279,6 +281,7 @@ def roof(
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
     overhang: float = 0.0,
+    eave_height: float = 0.0,
     *,
     events: Literal[True],
 ) -> tuple[Roof, tuple[Event, ...]] | Failure: ...
@@ -289,6 +292,7 @@ def roof(
     pitch: Pitch | list[Pitch],
     holes: list[list[tuple[float, float]]] | None = None,
     overhang: float = 0.0,
+    eave_height: float = 0.0,
     *,
     events: bool = False,
 ) -> Roof | Failure | tuple[Roof, tuple[Event, ...]]:
@@ -323,6 +327,10 @@ def roof(
         inward) and the roof of that larger footprint is generated. Zero
         is the same as omitting the argument. A value that closes a hole
         or folds the footprint is a named ``Failure``.
+    eave_height
+        Plate height in metres above datum, added to every node after the
+        roof is built and assessed at the eave plane. Zero is the same as
+        omitting the argument.
     events
         If true, return ``(Roof, events)`` so the processed wavefront
         events can be inspected in order. The roof itself is unchanged;
@@ -370,6 +378,16 @@ def roof(
             kind="degenerate",
             reason="overhang must be a finite number of metres, zero or positive",
         )
+    if isinstance(eave_height, bool) or not isinstance(eave_height, (int, float)):
+        return Failure(
+            kind="degenerate",
+            reason="eave height must be a finite number of metres above datum",
+        )
+    if not math.isfinite(eave_height):
+        return Failure(
+            kind="degenerate",
+            reason="eave height must be a finite number of metres above datum",
+        )
     n_edges = len(cleaned) + sum(len(h) for h in cleaned_holes)
     parsed = resolve_pitches(pitch, n_edges)
     if isinstance(parsed, Failure):
@@ -405,7 +423,14 @@ def roof(
             reason="the wavefront did not finish; the roof could not be produced",
         )
     built = _roof_from_skeleton(
-        rings, ring_pitches, raw.nodes, raw.arcs, edge_map, cleaned, cleaned_holes
+        rings,
+        ring_pitches,
+        raw.nodes,
+        raw.arcs,
+        edge_map,
+        cleaned,
+        cleaned_holes,
+        float(eave_height),
     )
     if not events:
         return built
@@ -502,6 +527,7 @@ def _roof_from_skeleton(
     edge_map: list[int],
     footprint: list[tuple[float, float]],
     holes: list[list[tuple[float, float]]],
+    eave_height: float,
 ) -> Roof:
     """Assemble a :class:`Roof` from the raw skeleton graph."""
     nodes = tuple(Node(x, y, h) for x, y, h in raw_nodes)
@@ -565,13 +591,18 @@ def _roof_from_skeleton(
 
     built_faces = tuple(faces)
     built_arcs = tuple(arcs)
+    validity = Validity.assess(nodes, built_faces, built_arcs, footprint, holes)
+    if eave_height != 0.0:
+        nodes = tuple(
+            Node(node.x, node.y, node.height + eave_height) for node in nodes
+        )
     return Roof(
         nodes=nodes,
         faces=built_faces,
         arcs=built_arcs,
         ridge_height=max(node.height for node in nodes),
         total_sloped_area=sum(face.sloped_area for face in faces),
-        validity=Validity.assess(nodes, built_faces, built_arcs, footprint, holes),
+        validity=validity,
     )
 
 

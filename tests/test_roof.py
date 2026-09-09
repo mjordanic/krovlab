@@ -62,6 +62,28 @@ def test_rectangle_has_one_ridge_of_hand_computed_length_and_position() -> None:
     assert result.ridge_height == pytest.approx(3.0)
 
 
+def test_rectangle_at_default_eave_height_matches_omitting_the_argument() -> None:
+    omitted = roof(RECTANGLE, 45.0)
+    explicit = roof(RECTANGLE, 45.0, eave_height=0.0)
+    assert isinstance(omitted, Roof)
+    assert isinstance(explicit, Roof)
+    assert omitted.validity.is_terrain is True
+    assert omitted.ridge_height == pytest.approx(3.0)
+    assert omitted == explicit
+
+
+def test_rectangle_lifted_seven_metres_has_ridge_height_ten() -> None:
+    at_datum = roof(RECTANGLE, 45.0)
+    lifted = roof(RECTANGLE, 45.0, eave_height=7.0)
+    assert isinstance(at_datum, Roof)
+    assert isinstance(lifted, Roof)
+    assert lifted.validity.is_terrain is True
+    assert lifted.ridge_height == pytest.approx(10.0)
+    assert [face.plan_area for face in lifted.faces] == pytest.approx(
+        [face.plan_area for face in at_datum.faces]
+    )
+
+
 def test_each_arc_is_ridge_hip_or_eave_and_reports_its_length() -> None:
     result = roof(RECTANGLE, 45.0)
     assert isinstance(result, Roof)
@@ -163,6 +185,14 @@ def test_returned_roof_carries_no_weight() -> None:
     mixed = roof(SQUARE, mixed_pitches)
     assert isinstance(mixed, Roof)
     assert "weight" not in str(mixed)
+
+
+def test_one_footprint_faces_have_no_cell_index() -> None:
+    assert "cell_index" not in Face.__dataclass_fields__
+    result = roof(RECTANGLE, 45.0)
+    assert isinstance(result, Roof)
+    for face in result.faces:
+        assert not hasattr(face, "cell_index")
 
 
 def test_uniform_pitch_list_matches_the_same_pitch_as_a_scalar() -> None:
@@ -465,6 +495,16 @@ def test_symmetric_u_is_deterministic_under_simultaneous_events() -> None:
 def test_colliding_split_footprint_does_not_raise() -> None:
     result = roof(PLUS, 45.0)
     assert isinstance(result, (Roof, Failure))
+
+
+def test_plus_shape_stays_non_terrain_after_eave_height() -> None:
+    at_datum = roof(PLUS, 45.0)
+    lifted = roof(PLUS, 45.0, eave_height=7.0)
+    assert isinstance(at_datum, Roof)
+    assert isinstance(lifted, Roof)
+    assert at_datum.validity.is_terrain is False
+    assert lifted.validity.is_terrain is False
+    assert lifted.validity.reasons == at_datum.validity.reasons
 
 
 def test_notched_rectangle_event_log_records_a_split() -> None:

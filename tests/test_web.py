@@ -273,6 +273,40 @@ def test_posting_overhang_returns_the_enlarged_footprint_roof() -> None:
     assert 'name="overhang" value="0.5"' in page
 
 
+def test_posting_eave_height_seven_reports_ridge_height_ten() -> None:
+    built = roof(RECTANGLE, 45.0, eave_height=7.0)
+    assert isinstance(built, Roof)
+    assert built.validity.is_terrain is True
+    assert built.ridge_height == 10.0
+
+    response = _client().post(
+        "/",
+        data={
+            "fixture": "rectangle-10x6",
+            "pitch-0": "45",
+            "pitch-1": "45",
+            "pitch-2": "45",
+            "pitch-3": "45",
+            "overhang": "0",
+            "eave_height": "7",
+        },
+    )
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "ridge height: 10.000 m" in page
+    assert "<h2>Plan</h2>" in page
+    assert "3D solid" in page
+    assert 'name="eave_height" value="7.0"' in page
+
+
+def test_get_without_eave_height_still_shows_ridge_height_three() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert "ridge height: 3.000 m" in page
+    assert 'name="eave_height"' in page
+    assert "3D solid" in page
+
+
 def test_get_shows_apply_to_all_and_a_pitch_row_per_edge() -> None:
     page = _client().get("/").get_data(as_text=True)
     assert 'name="apply_to_all"' in page
