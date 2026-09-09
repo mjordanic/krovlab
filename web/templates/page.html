@@ -3,6 +3,27 @@
 <head>
   <meta charset="utf-8">
   <title>krovlab</title>
+  <style>
+    #plan-editor {
+      width: 28rem;
+      max-width: 100%;
+      height: 16rem;
+      border: 1px solid #444;
+      background: #fafafa;
+    }
+    #plan-editor polygon {
+      fill: rgba(124, 45, 18, 0.12);
+      stroke: #7c2d12;
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+    #plan-editor polyline {
+      fill: none;
+      stroke: #7c2d12;
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+  </style>
 </head>
 <body>
   <h1>krovlab</h1>
@@ -15,8 +36,10 @@
   <form method="post">
     <input type="hidden" name="loaded_fixture" value="{{ selected }}">
     <p>
-      Choose a named footprint from the list, or tick Edit vertices to type
-      the outer ring (and an optional hole) in metres.
+      Choose a named footprint from the list, or draw cells on the plan.
+      Click vertices of the active cell, close the ring, then add another
+      cell the same way. Tick Edit vertices to type millimetres when a
+      click is too coarse.
     </p>
     <label>
       Footprint
@@ -67,6 +90,36 @@
         m
       </label>
       metres above datum of the plate.
+    </p>
+    <p>
+      Click vertices on the plan to draw a cell. Close the ring, then add
+      another cell. Click a cell to select it and set its eave height;
+      click an edge to set pitch or mark a gable.
+    </p>
+    <svg id="plan-editor" viewBox="-1 -1 12 8" role="img" aria-label="Plan editor">
+      <polygon data-cell="0" data-ring="{% for x, y in footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
+      {% for cell in extra_cells %}
+      <polygon data-cell="{{ cell.index }}" data-ring="{% for x, y in cell.footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
+      {% endfor %}
+    </svg>
+    <p>
+      <button type="button" id="close-ring">Close ring</button>
+      <button type="button" id="delete-cell">Delete cell</button>
+    </p>
+    <p>
+      <label>
+        Selected cell eave height
+        <input id="selected-eave-height" value="{{ eave_height }}">
+        m
+      </label>
+      <label>
+        Selected edge pitch
+        <input id="selected-pitch">
+      </label>
+      <label>
+        <input type="checkbox" id="selected-gable">
+        Gable
+      </label>
     </p>
     <p>
       <label>
@@ -335,47 +388,13 @@
         input.disabled = false;
       });
     });
-
-    function nextCellIndex() {
-      var max = 0;
-      document.querySelectorAll("#extra-cells .cell-block").forEach(function (block) {
-        var n = parseInt(block.getAttribute("data-cell"), 10);
-        if (n > max) {
-          max = n;
-        }
-      });
-      return max + 1;
-    }
-
-    function emptyCellHtml(index) {
-      var prefix = "cell-" + index + "-";
-      var fill = document.querySelector("[name=apply_to_all]").value;
-      var html = '<div class="cell-block" data-cell="' + index + '">';
-      html += "<p>Cell " + index + "</p>";
-      html += "<p>Outer vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>";
-      html += '<tbody id="' + prefix + 'outer-vertices">';
-      var i;
-      for (i = 0; i < 4; i++) {
-        html += '<tr><td><input name="' + prefix + "outer-x-" + i + '"></td>';
-        html += '<td><input name="' + prefix + "outer-y-" + i + '"></td></tr>';
-      }
-      html += "</tbody></table>";
-      html += "<p>Hole vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>";
-      html += '<tbody id="' + prefix + 'hole-vertices"></tbody></table><div>';
-      for (i = 0; i < 4; i++) {
-        html += "<p><label>" + i + ': <input name="' + prefix + "pitch-" + i + '" value="' + esc(fill) + '"></label> ';
-        html += '<label><input type="checkbox" name="' + prefix + "gable-" + i + '"> Gable</label></p>';
-      }
-      html += "</div><p><label>Overhang <input name=\"" + prefix + 'overhang" value="0"> m</label> ';
-      html += '<label>Eave height <input name="' + prefix + 'eave_height" value="0"> m</label></p></div>';
-      return html;
-    }
-
-    document.getElementById("add-cell").addEventListener("click", function () {
-      document.getElementById("edit-vertices").checked = true;
-      document.getElementById("vertex-editor").hidden = false;
-      document.getElementById("extra-cells").insertAdjacentHTML("beforeend", emptyCellHtml(nextCellIndex()));
-    });
+  </script>
+  <script src="{{ url_for('static', filename='plan-editor.js') }}"></script>
+  <script>
+    KrovlabPlanEditor.mount(
+      document.getElementById("plan-editor"),
+      document.querySelector("form")
+    );
   </script>
 </body>
 </html>

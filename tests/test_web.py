@@ -853,6 +853,114 @@ def test_posting_concatenated_gables_preset() -> None:
     assert 'name="cell-1-gable-3" checked' in page
 
 
+def test_get_shows_a_plan_editor_with_the_default_rectangle() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert 'id="plan-editor"' in page
+    assert "Close ring" in page
+    assert "Delete cell" in page
+    assert 'data-cell="0"' in page
+    assert 'data-ring="0.0,0.0 10.0,0.0 10.0,6.0 0.0,6.0"' in page
+    assert "ridge height: 3.000 m" in page
+    assert "Click" in page and "plan" in page.lower()
+
+
+def test_get_serves_the_plan_editor_script() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert "plan-editor.js" in page
+    response = _client().get("/static/plan-editor.js")
+    assert response.status_code == 200
+    assert b"createEditor" in response.data
+
+
+def test_app_has_no_json_api() -> None:
+    app = create_app()
+    rules = sorted(
+        rule.rule
+        for rule in app.url_map.iter_rules()
+        if rule.endpoint != "static"
+    )
+    assert rules == ["/"]
+    response = _client().get("/api/roofs")
+    assert response.status_code == 404
+
+
+def test_posting_two_cells_draws_both_rings_on_the_plan_editor() -> None:
+    data: dict[str, str] = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        "edit_vertices": "on",
+    }
+    data.update(_cell_fields(CELL_A, eave_height="5"))
+    data.update(_cell_fields(CELL_B, prefix="cell-1-", eave_height="7"))
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert 'data-cell="0"' in page
+    assert 'data-ring="0.0,0.0 5.0,0.0 5.0,6.0 0.0,6.0"' in page
+    assert 'data-cell="1"' in page
+    assert 'data-ring="8.0,0.0 13.0,0.0 13.0,6.0 8.0,6.0"' in page
+
+
+def test_posting_edited_vertices_moves_the_plan_editor_ring() -> None:
+    page = (
+        _client()
+        .post(
+            "/",
+            data={
+                "fixture": "rectangle-10x6",
+                "loaded_fixture": "rectangle-10x6",
+                "edit_vertices": "on",
+                "outer-x-0": "0",
+                "outer-y-0": "0",
+                "outer-x-1": "10",
+                "outer-y-1": "0",
+                "outer-x-2": "10",
+                "outer-y-2": "4",
+                "outer-x-3": "0",
+                "outer-y-3": "4",
+                "pitch-0": "45",
+                "pitch-1": "45",
+                "pitch-2": "45",
+                "pitch-3": "45",
+                "overhang": "0",
+            },
+        )
+        .get_data(as_text=True)
+    )
+    assert 'data-ring="0.0,0.0 10.0,0.0 10.0,4.0 0.0,4.0"' in page
+    assert 'data-ring="0.0,0.0 10.0,0.0 10.0,6.0 0.0,6.0"' not in page
+
+
+def test_posting_the_5m_7m_pair_shows_both_rings_and_project_numbers() -> None:
+    neighbour = [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)]
+    built = project(
+        [
+            Cell(CELL_A, [45.0, 90.0, 45.0, 90.0], eave_height=5.0),
+            Cell(neighbour, [45.0, 90.0, 45.0, 90.0], eave_height=7.0),
+        ]
+    )
+    assert isinstance(built, Project)
+    data: dict[str, str] = {
+        "fixture": "rectangle-10x6",
+        "loaded_fixture": "rectangle-10x6",
+        "edit_vertices": "on",
+        "gable-1": "on",
+        "gable-3": "on",
+        "cell-1-gable-1": "on",
+        "cell-1-gable-3": "on",
+    }
+    data.update(_cell_fields(CELL_A, eave_height="5"))
+    data.update(_cell_fields(neighbour, prefix="cell-1-", eave_height="7"))
+    data["pitch-1"] = "90"
+    data["pitch-3"] = "90"
+    data["cell-1-pitch-1"] = "90"
+    data["cell-1-pitch-3"] = "90"
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert 'data-ring="0.0,0.0 5.0,0.0 5.0,6.0 0.0,6.0"' in page
+    assert 'data-ring="5.0,0.0 10.0,0.0 10.0,6.0 5.0,6.0"' in page
+
+
 def test_posting_overlapping_cells_is_a_failure_not_500() -> None:
     overlap = [(2.0, 0.0), (7.0, 0.0), (7.0, 6.0), (2.0, 6.0)]
     data: dict[str, str] = {

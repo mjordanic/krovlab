@@ -15,7 +15,7 @@ area as `project` in Python. Default GET is still the 10 × 6 m rectangle at 45�
 
 **Blocked by:** 02 project of cells
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Complexity:** high
 
@@ -27,17 +27,25 @@ ticket 02's multi-cell fields are what the canvas must write. Flask test client
 asserts posted fields and describe numbers, not CSS or pixels. Usability test in
 the PRD: the second cell must exist without typing twelve numbers first.
 
-- [ ] Clicking vertices and closing a ring creates a cell whose tables match
+- [x] Clicking vertices and closing a ring creates a cell whose tables match
       those coordinates
-- [ ] A second cell can be drawn as a second polygon without inserting rows
+- [x] A second cell can be drawn as a second polygon without inserting rows
       into the first
-- [ ] Selecting a cell and setting eave height posts that height on that cell
-- [ ] Clicking an edge sets its pitch or marks a gable
-- [ ] Editing a table vertex moves the vertex on the plan, and drawing updates
+- [x] Selecting a cell and setting eave height posts that height on that cell
+- [x] Clicking an edge sets its pitch or marks a gable
+- [x] Editing a table vertex moves the vertex on the plan, and drawing updates
       the table
-- [ ] A cell can be deleted
-- [ ] Submit is still POST of the page; no JSON API
-- [ ] Drawing and posting the 5 m / 7 m pair reports the same ridge height and
+- [x] A cell can be deleted
+- [x] Submit is still POST of the page; no JSON API
+- [x] Drawing and posting the 5 m / 7 m pair reports the same ridge height and
       sloped area as `project` in Python
-- [ ] Default GET is still the 10 × 6 m rectangle at 45° with ridge height 3 m
-- [ ] HTTP tests do not assert on CSS or pixels
+- [x] Default GET is still the 10 × 6 m rectangle at 45° with ridge height 3 m
+- [x] HTTP tests do not assert on CSS or pixels
+
+## Comments
+
+The plan editor is an SVG in metre space (`data-ring` is y-up metres). Page
+script (`web/static/plan-editor.js`) writes the same form fields ticket 02
+already POSTs. `createEditor` is DOM-free so tests drive clicks in metres via
+Node; Flask tests still assert describe numbers and posted fields, not pixels.
+No JSON route. Default GET remains the 10 × 6 m rectangle at 45° (ridge 3 m).

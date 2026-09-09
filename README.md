@@ -278,8 +278,9 @@ uv run --extra web python -m web
 Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
 Pick a named footprint from the project's corpus and submit to see the
 matching roof, or a Failure with the input drawn. `concatenated-gables`
-is two cells at plate heights 5 m and 7 m. Edit vertices and Add
-cell to type a second footprint; submit is still one form POST.
+is two cells at plate heights 5 m and 7 m. Click vertices on the plan to
+draw a cell, close the ring, and add another; millimetre tables stay in
+sync. Submit is still one form POST.
 
 The same process is what a container runs. `Dockerfile` at the repo root
 starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
@@ -322,7 +323,8 @@ Step-through examples after `uv sync --extra notebooks`:
 
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
   call `roof`, read quantities, gables, holes, overhang, eave height,
-  a project of two cells, concatenated gables and a valley, and the views.
+  a project of two cells, concatenated gables and a valley, drawing
+  those cells on the form page, and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, inherent method limits, and how to read
   `validity`.
