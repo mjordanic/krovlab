@@ -1,22 +1,94 @@
-"""HTTP round-trip for the roof form server.
+"""HTTP round-trip for the roof demo.
 
 The seam is GET/POST of the form page, through Flask's test client.
-Assert what the power user reads: status, describe lines, which drawing
-branch rendered, and the worked-example numbers. Not CSS, not pixels.
+Assert what a visitor reads: example catalog, describe lines, which
+drawing branch rendered, and the worked-example numbers. Not CSS.
 """
+
+from __future__ import annotations
 
 import pytest
 from flask.testing import FlaskClient
 from web.app import create_app
+from web.examples import (
+    BOWTIE,
+    COURTYARD_HOLE,
+    DORMER_RING,
+    GABLE_DORMER,
+    GABLES,
+    GAMBREL_BREAK,
+    GARAGE,
+    HOUSE,
+    L_SHAPE,
+    NEIGHBOUR,
+    RECTANGLE,
+    SQUARE,
+    load_examples,
+)
 
-from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
+from krovlab import Cell, Dormer, Failure, Project, Roof, project, roof
 
-RECTANGLE = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
-BOWTIE = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
+PLUS = [
+    (2.0, 0.0),
+    (4.0, 0.0),
+    (4.0, 2.0),
+    (6.0, 2.0),
+    (6.0, 4.0),
+    (4.0, 4.0),
+    (4.0, 6.0),
+    (2.0, 6.0),
+    (2.0, 4.0),
+    (0.0, 4.0),
+    (0.0, 2.0),
+    (2.0, 2.0),
+]
+COLLINEAR = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+PENTAGON = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (4.0, 8.0), (0.0, 6.0)]
 
 
 def _client() -> FlaskClient:
     return create_app().test_client()
+
+
+def _rect_post(**overrides: str) -> dict[str, str]:
+    data: dict[str, str] = {
+        "example": "hip-rectangle",
+        "set_pitch": "45",
+        "outer-x-0": "0",
+        "outer-y-0": "0",
+        "outer-x-1": "10",
+        "outer-y-1": "0",
+        "outer-x-2": "10",
+        "outer-y-2": "6",
+        "outer-x-3": "0",
+        "outer-y-3": "6",
+        "type-0": "hip",
+        "pitch-0": "45",
+        "type-1": "hip",
+        "pitch-1": "45",
+        "type-2": "hip",
+        "pitch-2": "45",
+        "type-3": "hip",
+        "pitch-3": "45",
+    }
+    data.update(overrides)
+    return data
+
+
+def _ring_fields(
+    ring: list[tuple[float, float]],
+    *,
+    prefix: str = "",
+    pitch: str = "45",
+    kind: str = "hip",
+) -> dict[str, str]:
+    data: dict[str, str] = {}
+    for i, (x, y) in enumerate(ring):
+        data[f"{prefix}outer-x-{i}"] = str(x)
+        data[f"{prefix}outer-y-{i}"] = str(y)
+        data[f"{prefix}type-{i}"] = kind
+        data[f"{prefix}pitch-{i}"] = pitch
+    return data
 
 
 def test_get_returns_the_default_rectangle_already_run() -> None:
@@ -26,12 +98,11 @@ def test_get_returns_the_default_rectangle_already_run() -> None:
     response = _client().get("/")
     assert response.status_code == 200
     page = response.get_data(as_text=True)
-    assert "terrain" in page.lower()
-    assert "true" in page.lower() or "yes" in page.lower()
+    assert "terrain: True" in page
     assert "ridge height: 3.000 m" in page
     assert "ridge: 4.000 m" in page
     assert f"{built.total_sloped_area:.3f}" in page
-    assert "m²" in page or "m2" in page
+    assert "m²" in page
     by_kind: dict[str, float] = {}
     for arc in built.arcs:
         by_kind[arc.kind] = by_kind.get(arc.kind, 0.0) + arc.length
@@ -39,60 +110,26 @@ def test_get_returns_the_default_rectangle_already_run() -> None:
     assert f"hip: {by_kind['hip']:.3f} m" in page
     assert "metres" in page.lower()
     assert "degrees" in page.lower()
-    assert "Plan" in page
-    assert "3D" in page
+    assert "Roof plan" in page
+    assert "3D solid" in page
+    assert "Building (edit)" in page
 
 
 def test_get_shows_a_title_description_and_github_link() -> None:
     page = _client().get("/").get_data(as_text=True)
     assert "<h1>krovlab</h1>" in page
     assert "https://github.com/mjordanic/krovlab" in page
-    assert "named footprint" in page
-    assert "Edit vertices" in page
-    assert "one wall" in page
+    assert "Hip rectangle 10x6" in page
+    assert "every wall a hip" in page
+    assert "Update roof" in page
 
 
-def test_get_hides_vertex_tables_until_edit_is_checked() -> None:
+def test_get_hides_coordinate_tables_until_edit_is_checked() -> None:
     page = _client().get("/").get_data(as_text=True)
-    assert 'name="edit_vertices"' in page
+    assert 'name="edit_coordinates"' in page
+    assert "Edit coordinates" in page
     assert 'id="vertex-editor" hidden' in page
     assert 'name="outer-x-0"' in page
-
-
-def test_posting_vertices_without_edit_checked_uses_the_named_footprint() -> None:
-    short = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)]
-    edited = roof(short, 45.0)
-    named = roof(RECTANGLE, 45.0)
-    assert isinstance(edited, Roof)
-    assert isinstance(named, Roof)
-    assert f"{edited.ridge_height:.3f}" != f"{named.ridge_height:.3f}"
-
-    page = (
-        _client()
-        .post(
-            "/",
-            data={
-                "fixture": "rectangle-10x6",
-                "loaded_fixture": "rectangle-10x6",
-                "outer-x-0": "0",
-                "outer-y-0": "0",
-                "outer-x-1": "10",
-                "outer-y-1": "0",
-                "outer-x-2": "10",
-                "outer-y-2": "4",
-                "outer-x-3": "0",
-                "outer-y-3": "4",
-                "pitch-0": "45",
-                "pitch-1": "45",
-                "pitch-2": "45",
-                "pitch-3": "45",
-                "overhang": "0",
-            },
-        )
-        .get_data(as_text=True)
-    )
-    assert f"ridge height: {named.ridge_height:.3f} m" in page
-    assert f"ridge height: {edited.ridge_height:.3f} m" not in page
 
 
 def test_plotly_js_is_loaded_from_a_cdn_not_inlined() -> None:
@@ -101,79 +138,219 @@ def test_plotly_js_is_loaded_from_a_cdn_not_inlined() -> None:
     assert "plotly.js v" not in page.lower()
 
 
-REQUIRED_PRESETS = (
-    "rectangle-10x6",
-    "l-shape",
-    "u-shape",
-    "courtyard",
-    "rectangle-gabled",
-    "bowtie",
-    "concatenated-gables",
-)
-
-
-def test_dropdown_lists_the_corpus_by_name() -> None:
+def test_dropdown_lists_curated_examples_not_corpus_stems() -> None:
     page = _client().get("/").get_data(as_text=True)
-    assert "<form" in page
-    assert 'name="fixture"' in page
-    for name in REQUIRED_PRESETS:
-        assert name in page
+    assert 'name="example"' in page
+    assert '<optgroup label="Walls">' in page
+    assert '<optgroup label="Plan">' in page
+    assert '<optgroup label="Several cells">' in page
+    for slug, example in load_examples().items():
+        assert f'value="{slug}"' in page
+        assert example.label in page
+    assert "rectangle-10x6" not in page
+    assert "concatenated-gables" not in page
+    assert "U-shape" not in page
+    assert "u-shape" not in page
 
 
-def test_posting_the_bowtie_returns_self_intersection_without_a_roof() -> None:
+def test_get_example_query_runs_that_example() -> None:
+    built = roof(RECTANGLE, GABLES)
+    assert isinstance(built, Roof)
+    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
+
+    response = _client().get("/?example=gable-ends")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert 'value="gable-ends" selected' in page
+    assert "terrain: True" in page
+    assert f"verge: {verge_m:.3f} m" in page
+    assert "Roof plan" in page
+    assert "3D solid" in page
+    assert "short walls are gables" in page
+
+
+def test_unknown_example_falls_back_to_the_hip_rectangle() -> None:
+    page = _client().get("/?example=not-a-roof").get_data(as_text=True)
+    assert "ridge height: 3.000 m" in page
+    assert 'value="hip-rectangle" selected' in page
+
+
+@pytest.mark.parametrize("slug", list(load_examples()))
+def test_every_example_returns_200(slug: str) -> None:
+    response = _client().get(f"/?example={slug}")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert "Failure" in page or "terrain:" in page
+
+
+def test_get_self_intersecting_is_a_failure_without_a_roof() -> None:
     refused = roof(BOWTIE, 45.0)
     assert isinstance(refused, Failure)
 
-    response = _client().post("/", data={"fixture": "bowtie"})
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
+    page = _client().get("/?example=self-intersecting").get_data(as_text=True)
     assert refused.kind == "self_intersection"
     assert "self_intersection" in page
     assert refused.reason in page
     assert "Failure" in page
     assert "Input footprint" in page
     assert "3D solid" not in page
-    assert "<h2>Plan</h2>" not in page
+    assert "<h2>Roof plan</h2>" not in page
 
 
-def test_posting_the_courtyard_returns_a_terrain_roof_with_plan_and_3d() -> None:
-    response = _client().post("/", data={"fixture": "courtyard"})
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert "<h2>Plan</h2>" in page
-    assert "3D solid" in page
-    assert "Input footprint" not in page
-    assert "(3.0, 3.0)" in page
-
-
-def test_posting_the_gabled_rectangle_shows_a_verge_and_3d() -> None:
-    built = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0])
+def test_get_courtyard_is_a_terrain_with_plan_and_3d() -> None:
+    built = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE])
     assert isinstance(built, Roof)
-    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
-
-    response = _client().post("/", data={"fixture": "rectangle-gabled"})
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
+    page = _client().get("/?example=courtyard").get_data(as_text=True)
     assert "terrain: True" in page
-    assert f"verge: {verge_m:.3f} m" in page
-    assert "<h2>Plan</h2>" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert "Roof plan" in page
+    assert "3D solid" in page
+    assert 'name="use_hole" checked' in page
+    assert 'name="hole-x-0" value="3.0"' in page
+
+
+def test_get_knee_shows_knee_type_and_matches_project() -> None:
+    built = project([Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])])
+    assert isinstance(built, Project)
+    page = _client().get("/?example=knee").get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert 'value="knee" checked' in page
+    assert 'name="knee-1"' in page
+    assert "gablet, not a gable" in page
+
+
+def test_get_gambrel_matches_project() -> None:
+    built = project(
+        [
+            Cell(
+                RECTANGLE,
+                45.0,
+                gambrel=[
+                    (60.0, 30.0, GAMBREL_BREAK),
+                    None,
+                    (60.0, 30.0, GAMBREL_BREAK),
+                    None,
+                ],
+            )
+        ]
+    )
+    assert isinstance(built, Project)
+    page = _client().get("/?example=gambrel").get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"total sloped area: {built.total_sloped_area:.3f} m²" in page
+    assert 'value="gambrel" checked' in page
+    assert 'name="gambrel-shallow-0"' in page
     assert "3D solid" in page
 
 
-def test_posting_a_fixture_fills_the_form_from_the_corpus() -> None:
-    page = (
-        _client().post("/", data={"fixture": "rectangle-gabled"}).get_data(as_text=True)
+def test_get_house_and_garage_is_two_detached_cells() -> None:
+    built = project(
+        [
+            Cell(HOUSE, 45.0, eave_height=5.0),
+            Cell(GARAGE, 45.0, eave_height=7.0),
+        ]
     )
-    assert 'value="rectangle-gabled" selected' in page
-    assert "(0.0, 0.0)" in page
-    assert "(10.0, 6.0)" in page
-    assert 'name="pitch-0" value="45.0"' in page
-    assert 'name="pitch-1" value="90" disabled' in page
-    assert 'name="pitch-2" value="45.0"' in page
-    assert 'name="pitch-3" value="45.0"' in page
-    assert 'name="gable-1" checked' in page
-    assert 'name="overhang" value="0.0"' in page
+    assert isinstance(built, Project)
+    page = _client().get("/?example=house-and-garage").get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert 'name="cell-1-outer-x-0"' in page
+    assert 'name="use_eave_height" checked' in page
+    assert 'name="cell-1-use_eave_height" checked' in page
+    assert 'name="eave_height" value="5' in page
+    assert 'name="cell-1-eave_height" value="7' in page
+    assert "Cell 1" in page
+    assert "Cell 2" in page
+
+
+def test_get_party_wall_gables_matches_project() -> None:
+    built = project(
+        [
+            Cell(HOUSE, GABLES, eave_height=5.0),
+            Cell(NEIGHBOUR, GABLES, eave_height=7.0),
+        ]
+    )
+    assert isinstance(built, Project)
+    assert built.ridge_height == pytest.approx(10.0)
+    page = _client().get("/?example=party-wall-gables").get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert 'value="gable" checked' in page
+    assert 'name="cell-1-outer-x-0"' in page
+    assert "Roof plan" in page
+    assert "3D solid" in page
+
+
+def test_get_dormer_matches_project_and_still_draws_3d() -> None:
+    built = project([Cell(RECTANGLE, 45.0)], [Dormer(0, DORMER_RING, GABLE_DORMER)])
+    assert isinstance(built, Project)
+    page = _client().get("/?example=dormer").get_data(as_text=True)
+    assert "terrain: False" in page
+    for reason in built.validity.reasons:
+        assert reason in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+    assert "3D solid" in page
+    assert "Roof plan" in page
+    assert 'name="dormer-0-x-0"' in page
+
+
+def test_get_overhang_reports_the_enlarged_roof() -> None:
+    built = roof(RECTANGLE, 45.0, overhang=0.5)
+    assert isinstance(built, Roof)
+    page = _client().get("/?example=eaves-overhang").get_data(as_text=True)
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert 'name="use_overhang" checked' in page
+    assert 'name="overhang" value="0.5"' in page
+
+
+def test_get_l_shape_and_shed_and_mixed_run() -> None:
+    l_built = roof(L_SHAPE, 45.0)
+    shed = roof(RECTANGLE, [45.0, 90.0, 90.0, 90.0])
+    mixed = roof(SQUARE, [60.0, 45.0, 60.0, 45.0])
+    assert isinstance(l_built, Roof)
+    assert isinstance(shed, Roof)
+    assert isinstance(mixed, Roof)
+    l_page = _client().get("/?example=l-shape").get_data(as_text=True)
+    assert f"ridge height: {l_built.ridge_height:.3f} m" in l_page
+    shed_page = _client().get("/?example=shed").get_data(as_text=True)
+    assert f"ridge height: {shed.ridge_height:.3f} m" in shed_page
+    mixed_page = _client().get("/?example=mixed-pitches").get_data(as_text=True)
+    assert f"ridge height: {mixed.ridge_height:.3f} m" in mixed_page
+
+
+def test_get_shows_exclusive_wall_types_and_hints() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert 'name="type-0"' in page
+    assert 'value="hip"' in page
+    assert 'value="gable"' in page
+    assert 'value="knee"' in page
+    assert 'value="gambrel"' in page
+    assert "Hips meet at the corners" in page
+    assert "Set pitch on all sloping walls" in page
+    assert 'name="set_pitch"' in page
+    assert "Wall 1" in page
+    assert "Close ring" not in page
+    assert "Add detached cell" in page
+    assert "Add cell on selected wall" in page
+    assert "Add vertex on selected wall" in page
+    assert "Delete cell" in page
+
+
+def test_unusual_options_are_unchecked_on_the_hip_example() -> None:
+    page = _client().get("/").get_data(as_text=True)
+    assert 'name="use_overhang"' in page
+    assert 'name="use_eave_height"' in page
+    assert 'name="use_hole"' in page
+    assert 'name="use_overhang" checked' not in page
+    assert 'name="use_eave_height" checked' not in page
+    assert 'name="use_hole" checked' not in page
+    assert "Overhang" in page
+    assert "Eave height" in page
+    assert "Courtyard" in page
 
 
 def test_core_does_not_import_flask_or_the_web_app() -> None:
@@ -203,280 +380,150 @@ def test_readme_documents_one_local_command() -> None:
     assert "python -m web" in text
 
 
-def test_posting_apply_to_all_builds_the_roof_at_that_pitch() -> None:
-    built = roof(RECTANGLE, "4:12")
-    assert isinstance(built, Roof)
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "apply_to_all": "4:12",
-            "pitch-0": "4:12",
-            "pitch-1": "4:12",
-            "pitch-2": "4:12",
-            "pitch-3": "4:12",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert "ridge height: 1.000 m" in page
-    assert "ridge: 4.000 m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert 'name="pitch-0" value="4:12"' in page
-    assert 'name="pitch-1" value="4:12"' in page
-    assert 'name="pitch-2" value="4:12"' in page
-    assert 'name="pitch-3" value="4:12"' in page
-
-
-def test_posting_a_gable_on_one_rectangle_edge_writes_90() -> None:
-    built = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0])
-    assert isinstance(built, Roof)
-    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "pitch-0": "45",
-            "gable-1": "on",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert f"verge: {verge_m:.3f} m" in page
-    assert 'name="pitch-1" value="90" disabled' in page
-    assert 'name="gable-1" checked' in page
-
-
-def test_posting_overhang_returns_the_enlarged_footprint_roof() -> None:
-    built = roof(RECTANGLE, 45.0, overhang=0.5)
-    assert isinstance(built, Roof)
-    assert built.validity.is_terrain is True
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0.5",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert "ridge height: 3.500 m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert 'name="overhang" value="0.5"' in page
-
-
-def test_posting_eave_height_seven_reports_ridge_height_ten() -> None:
-    built = roof(RECTANGLE, 45.0, eave_height=7.0)
-    assert isinstance(built, Roof)
-    assert built.validity.is_terrain is True
-    assert built.ridge_height == 10.0
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-            "eave_height": "7",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert "ridge height: 10.000 m" in page
-    assert "<h2>Plan</h2>" in page
-    assert "3D solid" in page
-    assert 'name="eave_height" value="7.0"' in page
-
-
-def test_posting_knee_height_on_an_edge_matches_project() -> None:
-    built = project([Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])])
-    assert isinstance(built, Project)
-    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "knee-1": "3",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"verge: {verge_m:.3f} m" in page
-    assert "<h2>Plan</h2>" in page
-    assert "3D solid" in page
-    assert 'name="knee-1" value="3.0"' in page or 'name="knee-1" value="3"' in page
-
-
-def test_posting_gambrel_on_an_edge_matches_project() -> None:
-    import math
-
-    break_height = math.sqrt(3.0)
-    gambrel: list[tuple[float, float, float] | None] = [
-        (60.0, 30.0, break_height),
-        None,
-        (60.0, 30.0, break_height),
-        None,
-    ]
-    built = project([Cell(RECTANGLE, 45.0, gambrel=gambrel)])
-    assert isinstance(built, Project)
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "pitch-0": "60",
-            "pitch-1": "45",
-            "pitch-2": "60",
-            "pitch-3": "45",
-            "gambrel-shallow-0": "30",
-            "gambrel-break-0": str(break_height),
-            "gambrel-shallow-2": "30",
-            "gambrel-break-2": str(break_height),
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"total sloped area: {built.total_sloped_area:.3f} m²" in page
-    assert "edge 0: pitch 60" in page
-    assert "edge 0: pitch 30" in page
-    assert "3D solid" in page
-    assert 'name="gambrel-shallow-0"' in page
-    assert 'name="gambrel-break-0"' in page
-
-
-def test_get_without_eave_height_still_shows_ridge_height_three() -> None:
-    page = _client().get("/").get_data(as_text=True)
-    assert "ridge height: 3.000 m" in page
-    assert 'name="eave_height"' in page
-    assert "3D solid" in page
-
-
-def test_get_shows_apply_to_all_and_a_pitch_row_per_edge() -> None:
-    page = _client().get("/").get_data(as_text=True)
-    assert 'name="apply_to_all"' in page
-    assert "Apply to all" in page
-    assert 'name="overhang"' in page
-    assert "0: (0.0, 0.0) → (10.0, 0.0)" in page
-    assert "1: (10.0, 0.0) → (10.0, 6.0)" in page
-    assert "2: (10.0, 6.0) → (0.0, 6.0)" in page
-    assert "3: (0.0, 6.0) → (0.0, 0.0)" in page
-    assert 'name="pitch-0"' in page
-    assert 'name="pitch-3"' in page
-    assert 'name="gable-0"' in page
-    assert "Gable" in page
-
-
-def test_get_shows_an_editable_outer_vertex_table() -> None:
-    page = _client().get("/").get_data(as_text=True)
-    assert 'name="outer-x-0" value="0.0"' in page
-    assert 'name="outer-y-0" value="0.0"' in page
-    assert 'name="outer-x-1" value="10.0"' in page
-    assert 'name="outer-y-1" value="0.0"' in page
-    assert 'name="outer-x-2" value="10.0"' in page
-    assert 'name="outer-y-2" value="6.0"' in page
-    assert 'name="outer-x-3" value="0.0"' in page
-    assert 'name="outer-y-3" value="6.0"' in page
-
-
-def test_posting_edited_outer_vertices_builds_that_footprint() -> None:
+def test_posting_edited_vertices_builds_that_footprint() -> None:
     short = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)]
     built = roof(short, 45.0)
     assert isinstance(built, Roof)
-    default = roof(RECTANGLE, 45.0)
-    assert isinstance(default, Roof)
-    assert f"{built.ridge_height:.3f}" != f"{default.ridge_height:.3f}"
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "4",
-            "outer-x-3": "0",
-            "outer-y-3": "4",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
+    page = (
+        _client()
+        .post("/", data=_rect_post(**{"outer-y-2": "4", "outer-y-3": "4"}))
+        .get_data(as_text=True)
     )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
     assert f"ridge height: {built.ridge_height:.3f} m" in page
     assert 'name="outer-y-2" value="4.0"' in page
     assert "3D solid" in page
+    assert 'data-ring="0.0,0.0 10.0,0.0 10.0,4.0 0.0,4.0"' in page
 
 
-def test_posting_a_courtyard_fixture_fills_the_hole_table() -> None:
-    page = _client().post("/", data={"fixture": "courtyard"}).get_data(as_text=True)
-    assert 'name="outer-x-0" value="0.0"' in page
-    assert 'name="outer-x-2" value="10.0"' in page
-    assert 'name="hole-x-0" value="3.0"' in page
-    assert 'name="hole-y-0" value="3.0"' in page
-    assert 'name="hole-x-1" value="7.0"' in page
-    assert 'name="hole-y-1" value="3.0"' in page
-    assert 'name="hole-x-2" value="7.0"' in page
-    assert 'name="hole-y-2" value="7.0"' in page
-    assert 'name="hole-x-3" value="3.0"' in page
-    assert 'name="hole-y-3" value="7.0"' in page
-    assert "4: (3.0, 3.0) → (7.0, 3.0)" in page
-
-
-def test_posting_one_hole_with_outer_vertices_roofs_that_plan() -> None:
-    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
-    well = [(3.0, 3.0), (7.0, 3.0), (7.0, 7.0), (3.0, 7.0)]
-    built = roof(square, 45.0, holes=[well])
+def test_posting_a_gable_writes_90_and_shows_a_verge() -> None:
+    built = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0])
     assert isinstance(built, Roof)
-    without_hole = roof(square, 45.0)
-    assert isinstance(without_hole, Roof)
-    assert f"{built.ridge_height:.3f}" != f"{without_hole.ridge_height:.3f}"
+    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
+    page = (
+        _client()
+        .post("/", data=_rect_post(**{"type-1": "gable"}))
+        .get_data(as_text=True)
+    )
+    assert "terrain: True" in page
+    assert f"verge: {verge_m:.3f} m" in page
+    assert 'value="gable" checked' in page
 
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
+
+def test_posting_set_pitch_on_sloping_walls() -> None:
+    built = roof(RECTANGLE, "4:12")
+    assert isinstance(built, Roof)
+    page = (
+        _client()
+        .post(
+            "/",
+            data=_rect_post(
+                set_pitch="4:12",
+                **{
+                    "pitch-0": "4:12",
+                    "pitch-1": "4:12",
+                    "pitch-2": "4:12",
+                    "pitch-3": "4:12",
+                },
+            ),
+        )
+        .get_data(as_text=True)
+    )
+    assert "ridge height: 1.000 m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+
+
+def test_posting_overhang_requires_the_checkbox() -> None:
+    built = roof(RECTANGLE, 45.0, overhang=0.5)
+    assert isinstance(built, Roof)
+    ignored = (
+        _client().post("/", data=_rect_post(overhang="0.5")).get_data(as_text=True)
+    )
+    assert "ridge height: 3.000 m" in ignored
+    page = (
+        _client()
+        .post("/", data=_rect_post(use_overhang="on", overhang="0.5"))
+        .get_data(as_text=True)
+    )
+    assert "ridge height: 3.500 m" in page
+    assert f"{built.total_sloped_area:.3f}" in page
+
+
+def test_posting_eave_height_requires_the_checkbox() -> None:
+    ignored = (
+        _client().post("/", data=_rect_post(eave_height="7")).get_data(as_text=True)
+    )
+    assert "ridge height: 3.000 m" in ignored
+    page = (
+        _client()
+        .post("/", data=_rect_post(use_eave_height="on", eave_height="7"))
+        .get_data(as_text=True)
+    )
+    assert "ridge height: 10.000 m" in page
+
+
+def test_posting_knee_type_matches_project() -> None:
+    built = project([Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])])
+    assert isinstance(built, Project)
+    verge_m = sum(arc.length for arc in built.arcs if arc.kind == "verge")
+    page = (
+        _client()
+        .post("/", data=_rect_post(**{"type-1": "knee", "knee-1": "3"}))
+        .get_data(as_text=True)
+    )
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert f"verge: {verge_m:.3f} m" in page
+    assert 'value="knee" checked' in page
+
+
+def test_posting_gambrel_type_matches_project() -> None:
+    built = project(
+        [
+            Cell(
+                RECTANGLE,
+                [60.0, 45.0, 60.0, 45.0],
+                gambrel=[
+                    (60.0, 30.0, GAMBREL_BREAK),
+                    None,
+                    (60.0, 30.0, GAMBREL_BREAK),
+                    None,
+                ],
+            )
+        ]
+    )
+    assert isinstance(built, Project)
+    page = (
+        _client()
+        .post(
+            "/",
+            data=_rect_post(
+                **{
+                    "type-0": "gambrel",
+                    "pitch-0": "60",
+                    "gambrel-shallow-0": "30",
+                    "gambrel-break-0": str(GAMBREL_BREAK),
+                    "type-2": "gambrel",
+                    "pitch-2": "60",
+                    "gambrel-shallow-2": "30",
+                    "gambrel-break-2": str(GAMBREL_BREAK),
+                }
+            ),
+        )
+        .get_data(as_text=True)
+    )
+    assert "terrain: True" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert "edge 0: pitch 60" in page
+    assert "edge 0: pitch 30" in page
+
+
+def test_posting_a_hole_requires_the_checkbox() -> None:
+    built = roof(SQUARE, 45.0, holes=[COURTYARD_HOLE])
+    assert isinstance(built, Roof)
+    without = roof(SQUARE, 45.0)
+    assert isinstance(without, Roof)
+    data = _rect_post(
+        **{
             "outer-x-2": "10",
             "outer-y-2": "10",
             "outer-x-3": "0",
@@ -489,458 +536,176 @@ def test_posting_one_hole_with_outer_vertices_roofs_that_plan() -> None:
             "hole-y-2": "7",
             "hole-x-3": "3",
             "hole-y-3": "7",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
+            "type-4": "hip",
             "pitch-4": "45",
+            "type-5": "hip",
             "pitch-5": "45",
+            "type-6": "hip",
             "pitch-6": "45",
+            "type-7": "hip",
             "pitch-7": "45",
-            "overhang": "0",
-        },
+        }
     )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
+    ignored = _client().post("/", data=data).get_data(as_text=True)
+    assert f"ridge height: {without.ridge_height:.3f} m" in ignored
+    data["use_hole"] = "on"
+    page = _client().post("/", data=data).get_data(as_text=True)
     assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert "3D solid" in page
-    assert 'name="hole-x-0" value="3.0"' in page
-
-
-PENTAGON = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (4.0, 8.0), (0.0, 6.0)]
-
-
-def test_posting_an_extra_vertex_relabels_pitch_rows_from_the_new_edges() -> None:
-    built = roof(PENTAGON, 45.0)
-    assert isinstance(built, Roof)
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "6",
-            "outer-x-3": "4",
-            "outer-y-3": "8",
-            "outer-x-4": "0",
-            "outer-y-4": "6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "pitch-4": "45",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "0: (0.0, 0.0) → (10.0, 0.0)" in page
-    assert "2: (10.0, 6.0) → (4.0, 8.0)" in page
-    assert "3: (4.0, 8.0) → (0.0, 6.0)" in page
-    assert "4: (0.0, 6.0) → (0.0, 0.0)" in page
-    assert 'name="pitch-4"' in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert "pitch_count" not in page
-
-
-def test_extra_vertex_without_a_new_pitch_does_not_return_pitch_count() -> None:
-    built = roof(PENTAGON, 45.0)
-    assert isinstance(built, Roof)
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-gabled",
-            "loaded_fixture": "rectangle-gabled",
-            "edit_vertices": "on",
-            "apply_to_all": "45",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "6",
-            "outer-x-3": "4",
-            "outer-y-3": "8",
-            "outer-x-4": "0",
-            "outer-y-4": "6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "pitch_count" not in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert 'name="pitch-4" value="45"' in page
-
-
-def test_posting_a_new_fixture_ignores_stale_vertex_fields() -> None:
-    refused = roof(BOWTIE, 45.0)
-    assert isinstance(refused, Failure)
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "bowtie",
-            "loaded_fixture": "rectangle-10x6",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "6",
-            "outer-x-3": "0",
-            "outer-y-3": "6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "self_intersection" in page
-    assert refused.reason in page
-    assert "3D solid" not in page
-
-
-def test_get_offers_add_and_remove_vertex_rows() -> None:
-    page = _client().get("/").get_data(as_text=True)
-    assert "Add outer vertex" in page
-    assert "Remove outer vertex" in page
-    assert "Add hole vertex" in page
-    assert "Remove hole vertex" in page
-
-
-COLLINEAR = [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
-PLUS = [
-    (2.0, 0.0),
-    (4.0, 0.0),
-    (4.0, 2.0),
-    (6.0, 2.0),
-    (6.0, 4.0),
-    (4.0, 4.0),
-    (4.0, 6.0),
-    (2.0, 6.0),
-    (2.0, 4.0),
-    (0.0, 4.0),
-    (0.0, 2.0),
-    (2.0, 2.0),
-]
 
 
 def test_posting_an_unreadable_pitch_returns_invalid_pitch_not_500() -> None:
     refused = roof(RECTANGLE, "not-a-pitch")
     assert isinstance(refused, Failure)
     assert refused.kind == "invalid_pitch"
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "6",
-            "outer-x-3": "0",
-            "outer-y-3": "6",
-            "pitch-0": "not-a-pitch",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
+    page = (
+        _client()
+        .post("/", data=_rect_post(**{"pitch-0": "not-a-pitch"}))
+        .get_data(as_text=True)
     )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
     assert "invalid_pitch" in page
-    assert "not-a-pitch" in page
     assert "3D solid" not in page
-    assert "<h2>Plan</h2>" not in page
+    assert "<h2>Roof plan</h2>" not in page
 
 
-def test_posting_a_collinear_extra_vertex_is_a_terrain() -> None:
-    built = roof(COLLINEAR, 45.0)
-    assert isinstance(built, Roof)
-    assert built.validity.is_terrain is True
-
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "5",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "0",
-            "outer-x-3": "10",
-            "outer-y-3": "6",
-            "outer-x-4": "0",
-            "outer-y-4": "6",
-            "apply_to_all": "45",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "pitch-4": "45",
-            "overhang": "0",
-        },
+def test_posting_unreadable_coordinates_returns_a_failure_not_500() -> None:
+    page = (
+        _client()
+        .post("/", data=_rect_post(**{"outer-x-0": "abc"}))
+        .get_data(as_text=True)
     )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "terrain: True" in page
-    assert "<h2>Plan</h2>" in page
-    assert "3D solid" in page
-    assert "Input footprint" not in page
+    assert "Failure" in page
+    assert "degenerate" in page
+    assert 'name="outer-x-0" value="abc"' in page
+    assert "3D solid" not in page
+
+
+def test_posting_unreadable_overhang_returns_a_failure_not_500() -> None:
+    page = (
+        _client()
+        .post("/", data=_rect_post(use_overhang="on", overhang="nope"))
+        .get_data(as_text=True)
+    )
+    assert "Failure" in page
+    assert "degenerate" in page
+    assert 'name="overhang" value="nope"' in page
 
 
 def test_posting_a_plus_shape_shows_plan_and_validity_reasons() -> None:
     built = roof(PLUS, 45.0)
     assert isinstance(built, Roof)
     assert built.validity.is_terrain is False
-    assert built.validity.reasons
-
-    data: dict[str, str] = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        "edit_vertices": "on",
-        "apply_to_all": "45",
-        "overhang": "0",
-    }
+    data: dict[str, str] = {"example": "hip-rectangle", "set_pitch": "45"}
     for i, (x, y) in enumerate(PLUS):
         data[f"outer-x-{i}"] = str(x)
         data[f"outer-y-{i}"] = str(y)
+        data[f"type-{i}"] = "hip"
         data[f"pitch-{i}"] = "45"
-    response = _client().post("/", data=data)
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
+    page = _client().post("/", data=data).get_data(as_text=True)
     assert "terrain: False" in page
     for reason in built.validity.reasons:
         assert reason in page
-    assert "<h2>Plan</h2>" in page
-    assert "3D solid" not in page
-    assert "Input footprint" not in page
-
-
-def test_posting_unreadable_coordinates_returns_a_failure_not_500() -> None:
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "abc",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "6",
-            "outer-x-3": "0",
-            "outer-y-3": "6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "0",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "Failure" in page
-    assert "degenerate" in page
-    assert "not an (x, y) metre pair" in page
-    assert 'name="outer-x-0" value="abc"' in page
-    assert "3D solid" not in page
-    assert "<h2>Plan</h2>" not in page
-
-
-def test_posting_unreadable_overhang_returns_a_failure_not_500() -> None:
-    response = _client().post(
-        "/",
-        data={
-            "fixture": "rectangle-10x6",
-            "loaded_fixture": "rectangle-10x6",
-            "edit_vertices": "on",
-            "outer-x-0": "0",
-            "outer-y-0": "0",
-            "outer-x-1": "10",
-            "outer-y-1": "0",
-            "outer-x-2": "10",
-            "outer-y-2": "6",
-            "outer-x-3": "0",
-            "outer-y-3": "6",
-            "pitch-0": "45",
-            "pitch-1": "45",
-            "pitch-2": "45",
-            "pitch-3": "45",
-            "overhang": "nope",
-        },
-    )
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "Failure" in page
-    assert "degenerate" in page
-    assert "overhang must be a finite number of metres" in page
-    assert 'name="overhang" value="nope"' in page
+    assert "<h2>Roof plan</h2>" in page
     assert "3D solid" not in page
 
 
-CELL_A = [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
-CELL_B = [(8.0, 0.0), (13.0, 0.0), (13.0, 6.0), (8.0, 6.0)]
+def test_posting_a_collinear_extra_vertex_is_a_terrain() -> None:
+    built = roof(COLLINEAR, 45.0)
+    assert isinstance(built, Roof)
+    data = {"example": "hip-rectangle", "set_pitch": "45"}
+    data.update(_ring_fields(COLLINEAR))
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "Roof plan" in page
+    assert "3D solid" in page
 
 
-def _cell_fields(
-    ring: list[tuple[float, float]],
-    *,
-    prefix: str = "",
-    pitch: str = "45",
-    overhang: str = "0",
-    eave_height: str = "0",
-) -> dict[str, str]:
-    data: dict[str, str] = {
-        f"{prefix}overhang": overhang,
-        f"{prefix}eave_height": eave_height,
-    }
-    for i, (x, y) in enumerate(ring):
-        data[f"{prefix}outer-x-{i}"] = str(x)
-        data[f"{prefix}outer-y-{i}"] = str(y)
-        data[f"{prefix}pitch-{i}"] = pitch
-    return data
+def test_posting_an_extra_vertex_relabels_walls() -> None:
+    built = roof(PENTAGON, 45.0)
+    assert isinstance(built, Roof)
+    data = {"example": "hip-rectangle", "set_pitch": "45"}
+    data.update(_ring_fields(PENTAGON))
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "Wall 5" in page
+    assert f"ridge height: {built.ridge_height:.3f} m" in page
+    assert "pitch_count" not in page
 
 
 def test_posting_two_detached_cells_shows_combined_plan_and_3d() -> None:
     built = project(
         [
-            Cell(CELL_A, 45.0, eave_height=5.0),
-            Cell(CELL_B, 45.0, eave_height=7.0),
+            Cell(HOUSE, 45.0, eave_height=5.0),
+            Cell(GARAGE, 45.0, eave_height=7.0),
         ]
     )
     assert isinstance(built, Project)
-    assert built.validity.is_terrain is True
-
     data: dict[str, str] = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        "edit_vertices": "on",
+        "example": "hip-rectangle",
+        "set_pitch": "45",
+        "use_eave_height": "on",
+        "eave_height": "5",
+        "cell-1-use_eave_height": "on",
+        "cell-1-eave_height": "7",
     }
-    data.update(_cell_fields(CELL_A, eave_height="5"))
-    data.update(_cell_fields(CELL_B, prefix="cell-1-", eave_height="7"))
-    response = _client().post("/", data=data)
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
+    data.update(_ring_fields(HOUSE))
+    data.update(_ring_fields(GARAGE, prefix="cell-1-"))
+    page = _client().post("/", data=data).get_data(as_text=True)
     assert "terrain: True" in page
     assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert "<h2>Plan</h2>" in page
+    assert "<h2>Roof plan</h2>" in page
     assert "3D solid" in page
-    assert "Input footprint" not in page
-    assert 'name="cell-1-outer-x-0"' in page
+    assert 'data-cell="0"' in page
+    assert 'data-cell="1"' in page
+    assert 'data-ring="0.0,0.0 5.0,0.0 5.0,6.0 0.0,6.0"' in page
+    assert 'data-ring="8.0,0.0 13.0,0.0 13.0,6.0 8.0,6.0"' in page
 
 
-def test_posting_a_one_ring_preset_is_still_one_cell() -> None:
-    built = roof(RECTANGLE, 45.0)
-    assert isinstance(built, Roof)
-    page = (
-        _client()
-        .post(
-            "/",
-            data={
-                "fixture": "rectangle-10x6",
-                "cell-1-outer-x-0": "8",
-                "cell-1-outer-y-0": "0",
-                "cell-1-outer-x-1": "13",
-                "cell-1-outer-y-1": "0",
-                "cell-1-outer-x-2": "13",
-                "cell-1-outer-y-2": "6",
-                "cell-1-outer-x-3": "8",
-                "cell-1-outer-y-3": "6",
-                "cell-1-pitch-0": "45",
-                "cell-1-eave_height": "7",
-            },
-        )
-        .get_data(as_text=True)
-    )
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert "ridge height: 9.500 m" not in page
-    assert "<h2>Plan</h2>" in page
-    assert "3D solid" in page
+def test_posting_overlapping_cells_is_a_failure_not_500() -> None:
+    overlap = [(2.0, 0.0), (7.0, 0.0), (7.0, 6.0), (2.0, 6.0)]
+    data: dict[str, str] = {"example": "hip-rectangle", "set_pitch": "45"}
+    data.update(_ring_fields(HOUSE))
+    data.update(_ring_fields(overlap, prefix="cell-1-"))
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "Failure" in page
+    assert "overlap" in page
+    assert "Input footprint" in page
+    assert "3D solid" not in page
+    assert "<h2>Roof plan</h2>" not in page
 
 
-def test_get_offers_a_second_cell_table() -> None:
-    page = _client().get("/").get_data(as_text=True)
-    assert "Add cell" in page
-    assert "ridge height: 3.000 m" in page
-
-
-def test_posting_concatenated_gables_preset() -> None:
-    built = project(
-        [
-            Cell(CELL_A, [45.0, 90.0, 45.0, 90.0], eave_height=5.0),
-            Cell(
-                [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)],
-                [45.0, 90.0, 45.0, 90.0],
-                eave_height=7.0,
-            ),
-        ]
-    )
+def test_posting_a_dormer_rectangle_matches_project() -> None:
+    built = project([Cell(RECTANGLE, 45.0)], [Dormer(0, DORMER_RING, GABLE_DORMER)])
     assert isinstance(built, Project)
-    assert built.ridge_height == pytest.approx(10.0)
-    assert built.validity.is_terrain is True
-
-    response = _client().post("/", data={"fixture": "concatenated-gables"})
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert 'value="concatenated-gables" selected' in page
-    assert "terrain: True" in page
+    data = _rect_post()
+    data["dormer-0-cell"] = "0"
+    for i, (x, y) in enumerate(DORMER_RING):
+        data[f"dormer-0-x-{i}"] = str(x)
+        data[f"dormer-0-y-{i}"] = str(y)
+    for i, pitch in enumerate(GABLE_DORMER):
+        if pitch == 90.0:
+            data[f"dormer-0-type-{i}"] = "gable"
+            data[f"dormer-0-pitch-{i}"] = "90"
+        else:
+            data[f"dormer-0-type-{i}"] = "hip"
+            data[f"dormer-0-pitch-{i}"] = str(pitch)
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "terrain: False" in page
+    for reason in built.validity.reasons:
+        assert reason in page
     assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert "<h2>Plan</h2>" in page
     assert "3D solid" in page
-    assert "Input footprint" not in page
-    assert "(0.0, 0.0)" in page
-    assert "(10.0, 6.0)" in page
-    assert 'name="cell-1-outer-x-0"' in page
-    assert 'name="eave_height" value="5' in page
-    assert 'name="cell-1-eave_height" value="7' in page
-    assert 'name="gable-1" checked' in page
-    assert 'name="cell-1-gable-3" checked' in page
+    assert 'name="dormer-0-x-0"' in page
 
 
 def test_get_shows_a_plan_editor_with_the_default_rectangle() -> None:
     page = _client().get("/").get_data(as_text=True)
     assert 'id="plan-editor"' in page
-    assert "Close ring" in page
-    assert "Delete cell" in page
     assert 'data-cell="0"' in page
     assert 'data-ring="0.0,0.0 10.0,0.0 10.0,6.0 0.0,6.0"' in page
-    assert "ridge height: 3.000 m" in page
-    assert "Click" in page and "plan" in page.lower()
-
-
-def test_get_serves_the_plan_editor_script() -> None:
-    page = _client().get("/").get_data(as_text=True)
     assert "plan-editor.js" in page
     response = _client().get("/static/plan-editor.js")
     assert response.status_code == 200
     assert b"createEditor" in response.data
+    assert "Close ring" not in page
 
 
 def test_app_has_no_json_api() -> None:
@@ -951,148 +716,3 @@ def test_app_has_no_json_api() -> None:
     assert rules == ["/"]
     response = _client().get("/api/roofs")
     assert response.status_code == 404
-
-
-def test_posting_two_cells_draws_both_rings_on_the_plan_editor() -> None:
-    data: dict[str, str] = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        "edit_vertices": "on",
-    }
-    data.update(_cell_fields(CELL_A, eave_height="5"))
-    data.update(_cell_fields(CELL_B, prefix="cell-1-", eave_height="7"))
-    page = _client().post("/", data=data).get_data(as_text=True)
-    assert 'data-cell="0"' in page
-    assert 'data-ring="0.0,0.0 5.0,0.0 5.0,6.0 0.0,6.0"' in page
-    assert 'data-cell="1"' in page
-    assert 'data-ring="8.0,0.0 13.0,0.0 13.0,6.0 8.0,6.0"' in page
-
-
-def test_posting_edited_vertices_moves_the_plan_editor_ring() -> None:
-    page = (
-        _client()
-        .post(
-            "/",
-            data={
-                "fixture": "rectangle-10x6",
-                "loaded_fixture": "rectangle-10x6",
-                "edit_vertices": "on",
-                "outer-x-0": "0",
-                "outer-y-0": "0",
-                "outer-x-1": "10",
-                "outer-y-1": "0",
-                "outer-x-2": "10",
-                "outer-y-2": "4",
-                "outer-x-3": "0",
-                "outer-y-3": "4",
-                "pitch-0": "45",
-                "pitch-1": "45",
-                "pitch-2": "45",
-                "pitch-3": "45",
-                "overhang": "0",
-            },
-        )
-        .get_data(as_text=True)
-    )
-    assert 'data-ring="0.0,0.0 10.0,0.0 10.0,4.0 0.0,4.0"' in page
-    assert 'data-ring="0.0,0.0 10.0,0.0 10.0,6.0 0.0,6.0"' not in page
-
-
-def test_posting_the_5m_7m_pair_shows_both_rings_and_project_numbers() -> None:
-    neighbour = [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)]
-    built = project(
-        [
-            Cell(CELL_A, [45.0, 90.0, 45.0, 90.0], eave_height=5.0),
-            Cell(neighbour, [45.0, 90.0, 45.0, 90.0], eave_height=7.0),
-        ]
-    )
-    assert isinstance(built, Project)
-    data: dict[str, str] = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        "edit_vertices": "on",
-        "gable-1": "on",
-        "gable-3": "on",
-        "cell-1-gable-1": "on",
-        "cell-1-gable-3": "on",
-    }
-    data.update(_cell_fields(CELL_A, eave_height="5"))
-    data.update(_cell_fields(neighbour, prefix="cell-1-", eave_height="7"))
-    data["pitch-1"] = "90"
-    data["pitch-3"] = "90"
-    data["cell-1-pitch-1"] = "90"
-    data["cell-1-pitch-3"] = "90"
-    page = _client().post("/", data=data).get_data(as_text=True)
-    assert "terrain: True" in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert 'data-ring="0.0,0.0 5.0,0.0 5.0,6.0 0.0,6.0"' in page
-    assert 'data-ring="5.0,0.0 10.0,0.0 10.0,6.0 5.0,6.0"' in page
-
-
-def test_posting_overlapping_cells_is_a_failure_not_500() -> None:
-    overlap = [(2.0, 0.0), (7.0, 0.0), (7.0, 6.0), (2.0, 6.0)]
-    data: dict[str, str] = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        "edit_vertices": "on",
-    }
-    data.update(_cell_fields(CELL_A))
-    data.update(_cell_fields(overlap, prefix="cell-1-"))
-    response = _client().post("/", data=data)
-    assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "Failure" in page
-    assert "overlap" in page
-    assert "Input footprint" in page
-    assert "3D solid" not in page
-    assert "<h2>Plan</h2>" not in page
-
-
-DORMER_2X15 = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
-GABLE_DORMER: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
-
-
-def _dormer_fields(
-    ring: list[tuple[float, float]],
-    pitches: list[Pitch],
-    *,
-    index: int = 0,
-    cell: int = 0,
-) -> dict[str, str]:
-    prefix = f"dormer-{index}-"
-    data = {f"{prefix}cell": str(cell)}
-    for i, (x, y) in enumerate(ring):
-        data[f"{prefix}x-{i}"] = str(x)
-        data[f"{prefix}y-{i}"] = str(y)
-    for i, pitch in enumerate(pitches):
-        if pitch == 90.0:
-            data[f"{prefix}gable-{i}"] = "on"
-            data[f"{prefix}pitch-{i}"] = "90"
-        else:
-            data[f"{prefix}pitch-{i}"] = str(pitch)
-    return data
-
-
-def test_posting_a_dormer_rectangle_matches_project() -> None:
-    built = project([Cell(RECTANGLE, 45.0)], [Dormer(0, DORMER_2X15, GABLE_DORMER)])
-    assert isinstance(built, Project)
-    data: dict[str, str] = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        "pitch-0": "45",
-        "pitch-1": "45",
-        "pitch-2": "45",
-        "pitch-3": "45",
-        "overhang": "0",
-    }
-    data.update(_dormer_fields(DORMER_2X15, GABLE_DORMER))
-    page = _client().post("/", data=data).get_data(as_text=True)
-    assert "terrain: False" in page
-    for reason in built.validity.reasons:
-        assert reason in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert "3D solid" in page
-    assert "<h2>Plan</h2>" in page
-    assert 'name="dormer-0-x-0"' in page

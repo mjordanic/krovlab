@@ -7,6 +7,13 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
+  var HINTS = {
+    hip: "Sloping face from this wall. Hips meet at the corners.",
+    gable: "No roof face here. The wall is vertical; neighbours meet it at verges.",
+    knee: "Wall rises vertically by this height, then the roof starts (a gablet, not a gable).",
+    gambrel: "Two pitches on this wall: steep below, shallower above, split at the break."
+  };
+
   function esc(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -15,68 +22,203 @@
       .replace(/>/g, "&gt;");
   }
 
+  function snap(n) {
+    return Math.round(n * 10) / 10;
+  }
+
+  function prefixOf(index) {
+    return index === 0 ? "" : "cell-" + index + "-";
+  }
+
+  function signedArea(verts) {
+    var a = 0;
+    var i;
+    var j;
+    for (i = 0; i < verts.length; i += 1) {
+      j = (i + 1) % verts.length;
+      a += verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+    }
+    return a / 2;
+  }
+
+  function isCcw(verts) {
+    return signedArea(verts) > 0;
+  }
+
+  function outward(a, b, ccw) {
+    var dx = b.x - a.x;
+    var dy = b.y - a.y;
+    var len = Math.hypot(dx, dy) || 1;
+    var ox = dy / len;
+    var oy = -dx / len;
+    if (!ccw) {
+      ox = -ox;
+      oy = -oy;
+    }
+    return { x: ox, y: oy };
+  }
+
+  function bbox(cells) {
+    var minX = 0;
+    var minY = 0;
+    var maxX = 0;
+    var maxY = 0;
+    var started = false;
+    cells.forEach(function (cell) {
+      cell.vertices.forEach(function (pt) {
+        if (!started) {
+          minX = maxX = pt.x;
+          minY = maxY = pt.y;
+          started = true;
+        }
+        if (pt.x < minX) { minX = pt.x; }
+        if (pt.y < minY) { minY = pt.y; }
+        if (pt.x > maxX) { maxX = pt.x; }
+        if (pt.y > maxY) { maxY = pt.y; }
+      });
+    });
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, started: started };
+  }
+
+  function defaultHole(verts) {
+    var box = bbox([{ vertices: verts }]);
+    var hx = Math.max(0.5, (box.maxX - box.minX) * 0.2);
+    var hy = Math.max(0.5, (box.maxY - box.minY) * 0.2);
+    return [
+      { x: snap(box.minX + hx), y: snap(box.minY + hy) },
+      { x: snap(box.maxX - hx), y: snap(box.minY + hy) },
+      { x: snap(box.maxX - hx), y: snap(box.maxY - hy) },
+      { x: snap(box.minX + hx), y: snap(box.maxY - hy) }
+    ];
+  }
+
+  function blankCell(verts, pitch) {
+    pitch = pitch || "45";
+    return {
+      vertices: verts,
+      types: verts.map(function () { return "hip"; }),
+      pitches: verts.map(function () { return pitch; }),
+      knees: verts.map(function () { return "0"; }),
+      shallows: verts.map(function () { return ""; }),
+      breaks: verts.map(function () { return "0"; }),
+      overhang: "0",
+      useOverhang: false,
+      eaveHeight: "0",
+      useEave: false,
+      hole: [],
+      useHole: false
+    };
+  }
+
+  function distToSegment(x, y, a, b) {
+    var dx = b.x - a.x;
+    var dy = b.y - a.y;
+    var len2 = dx * dx + dy * dy;
+    if (len2 === 0) {
+      return Math.hypot(x - a.x, y - a.y);
+    }
+    var t = ((x - a.x) * dx + (y - a.y) * dy) / len2;
+    if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+    return Math.hypot(x - (a.x + t * dx), y - (a.y + t * dy));
+  }
+
+  function pointInRing(x, y, vertices) {
+    var inside = false;
+    var n = vertices.length;
+    var j = n - 1;
+    var i;
+    for (i = 0; i < n; i += 1) {
+      var a = vertices[i];
+      var b = vertices[j];
+      if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
+        inside = !inside;
+      }
+      j = i;
+    }
+    return inside;
+  }
+
   function createEditor(options) {
     options = options || {};
     var applyToAll = options.applyToAll || "45";
     var cells = [];
-    var draft = [];
-    var drawing = false;
+    var dormers = [];
     var selectedCell = -1;
     var selectedEdge = null;
-    var dormers = [];
-    var dormerMode = false;
+    var selectedVertex = null;
+    var selectedDormer = -1;
+    var selectedDormerVertex = null;
 
-    function pointInRing(x, y, vertices) {
-      var inside = false;
-      var n = vertices.length;
-      var j = n - 1;
-      var i;
-      for (i = 0; i < n; i += 1) {
-        var a = vertices[i];
-        var b = vertices[j];
-        if (a.y > y !== b.y > y &&
-            x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
-          inside = !inside;
-        }
-        j = i;
+    function allRings(cell) {
+      var rings = [cell.vertices];
+      if (cell.useHole && cell.hole && cell.hole.length) {
+        rings.push(cell.hole);
       }
-      return inside;
+      return rings;
     }
 
-    function distToSegment(x, y, a, b) {
-      var dx = b.x - a.x;
-      var dy = b.y - a.y;
-      var len2 = dx * dx + dy * dy;
-      if (len2 === 0) {
-        dx = x - a.x;
-        dy = y - a.y;
-        return Math.sqrt(dx * dx + dy * dy);
+    function hitVertex(x, y) {
+      var best = null;
+      var bestDist = 0.25;
+      var c;
+      var r;
+      var i;
+      var offset;
+      for (c = 0; c < cells.length; c += 1) {
+        offset = 0;
+        var rings = allRings(cells[c]);
+        for (r = 0; r < rings.length; r += 1) {
+          for (i = 0; i < rings[r].length; i += 1) {
+            var pt = rings[r][i];
+            var d = Math.hypot(x - pt.x, y - pt.y);
+            if (d <= bestDist) {
+              bestDist = d;
+              best = { cell: c, vertex: offset + i };
+            }
+          }
+          offset += rings[r].length;
+        }
       }
-      var t = ((x - a.x) * dx + (y - a.y) * dy) / len2;
-      if (t < 0) {
-        t = 0;
-      } else if (t > 1) {
-        t = 1;
-      }
-      var px = a.x + t * dx;
-      var py = a.y + t * dy;
-      dx = x - px;
-      dy = y - py;
-      return Math.sqrt(dx * dx + dy * dy);
+      return best;
     }
 
     function hitEdge(x, y) {
       var best = null;
       var bestDist = 0.35;
       var c;
+      var r;
       var i;
+      var offset;
       for (c = 0; c < cells.length; c += 1) {
-        var verts = cells[c].vertices;
-        for (i = 0; i < verts.length; i += 1) {
-          var d = distToSegment(x, y, verts[i], verts[(i + 1) % verts.length]);
-          if (d <= bestDist) {
-            bestDist = d;
-            best = { cell: c, edge: i };
+        offset = 0;
+        var rings = allRings(cells[c]);
+        for (r = 0; r < rings.length; r += 1) {
+          var verts = rings[r];
+          for (i = 0; i < verts.length; i += 1) {
+            var d = distToSegment(x, y, verts[i], verts[(i + 1) % verts.length]);
+            if (d <= bestDist) {
+              bestDist = d;
+              best = { cell: c, edge: offset + i };
+            }
+          }
+          offset += verts.length;
+        }
+      }
+      return best;
+    }
+
+    function hitDormerVertex(x, y) {
+      var best = null;
+      var bestDist = 0.25;
+      var d;
+      var i;
+      for (d = 0; d < dormers.length; d += 1) {
+        for (i = 0; i < dormers[d].vertices.length; i += 1) {
+          var pt = dormers[d].vertices[i];
+          var dist = Math.hypot(x - pt.x, y - pt.y);
+          if (dist <= bestDist) {
+            bestDist = dist;
+            best = { dormer: d, vertex: i };
           }
         }
       }
@@ -84,24 +226,31 @@
     }
 
     function clickPlan(x, y) {
-      if (drawing || draft.length > 0 || cells.length === 0) {
-        if (draft.length >= 3) {
-          var first = draft[0];
-          var dx = x - first.x;
-          var dy = y - first.y;
-          if (Math.sqrt(dx * dx + dy * dy) <= 0.35) {
-            closeRing();
-            return;
-          }
-        }
-        draft.push({ x: x, y: y });
-        drawing = true;
+      var dvert = hitDormerVertex(x, y);
+      if (dvert) {
+        selectedDormer = dvert.dormer;
+        selectedDormerVertex = dvert.vertex;
+        selectedCell = dormers[dvert.dormer].cell;
+        selectedVertex = null;
+        selectedEdge = null;
+        return;
+      }
+      var vert = hitVertex(x, y);
+      if (vert) {
+        selectedCell = vert.cell;
+        selectedVertex = vert.vertex;
+        selectedEdge = null;
+        selectedDormer = -1;
+        selectedDormerVertex = null;
         return;
       }
       var edge = hitEdge(x, y);
       if (edge) {
         selectedCell = edge.cell;
         selectedEdge = edge.edge;
+        selectedVertex = null;
+        selectedDormer = -1;
+        selectedDormerVertex = null;
         return;
       }
       var i;
@@ -109,34 +258,147 @@
         if (pointInRing(x, y, cells[i].vertices)) {
           selectedCell = i;
           selectedEdge = null;
+          selectedVertex = null;
+          selectedDormer = -1;
+          selectedDormerVertex = null;
           return;
         }
       }
     }
 
-    function startDormer() {
-      if (cells.length === 0) {
+    function addDetachedCell() {
+      var box = bbox(cells);
+      var originX = box.started ? box.maxX + 1 : 0;
+      var originY = box.started ? box.minY : 0;
+      var rect = [
+        { x: snap(originX), y: snap(originY) },
+        { x: snap(originX + 5), y: snap(originY) },
+        { x: snap(originX + 5), y: snap(originY + 6) },
+        { x: snap(originX), y: snap(originY + 6) }
+      ];
+      cells.push(blankCell(rect, applyToAll));
+      selectedCell = cells.length - 1;
+      selectedEdge = null;
+      selectedVertex = null;
+      selectedDormer = -1;
+      selectedDormerVertex = null;
+    }
+
+    function addCellOnSelectedWall() {
+      if (selectedCell < 0 || selectedEdge === null) {
         return;
       }
-      dormerMode = true;
-      drawing = true;
-      draft = [];
+      var cell = cells[selectedCell];
+      if (selectedEdge >= cell.vertices.length) {
+        return;
+      }
+      var a = cell.vertices[selectedEdge];
+      var b = cell.vertices[(selectedEdge + 1) % cell.vertices.length];
+      var n = outward(a, b, isCcw(cell.vertices));
+      var depth = 5;
+      var nx = n.x * depth;
+      var ny = n.y * depth;
+      var quad = [
+        { x: snap(a.x), y: snap(a.y) },
+        { x: snap(a.x + nx), y: snap(a.y + ny) },
+        { x: snap(b.x + nx), y: snap(b.y + ny) },
+        { x: snap(b.x), y: snap(b.y) }
+      ];
+      if (!isCcw(quad)) {
+        quad.reverse();
+      }
+      cells.push(blankCell(quad, applyToAll));
+      selectedCell = cells.length - 1;
       selectedEdge = null;
+      selectedVertex = null;
+      selectedDormer = -1;
+      selectedDormerVertex = null;
     }
 
-    function addCell() {
-      drawing = true;
-      draft = [];
-      dormerMode = false;
-      selectedCell = -1;
-      selectedEdge = null;
+    function addVertexOnSelectedWall() {
+      if (selectedCell < 0 || selectedEdge === null) {
+        return;
+      }
+      var cell = cells[selectedCell];
+      var i = selectedEdge;
+      var ring = cell.vertices;
+      var local = i;
+      if (i >= cell.vertices.length) {
+        ring = cell.hole;
+        local = i - cell.vertices.length;
+      }
+      if (!ring || !ring.length) {
+        return;
+      }
+      var a = ring[local];
+      var b = ring[(local + 1) % ring.length];
+      var mid = { x: snap((a.x + b.x) / 2), y: snap((a.y + b.y) / 2) };
+      ring.splice(local + 1, 0, mid);
+      cell.types.splice(i + 1, 0, cell.types[i]);
+      cell.pitches.splice(i + 1, 0, cell.pitches[i]);
+      cell.knees.splice(i + 1, 0, cell.knees[i]);
+      cell.shallows.splice(i + 1, 0, cell.shallows[i]);
+      cell.breaks.splice(i + 1, 0, cell.breaks[i]);
+      selectedEdge = i;
     }
 
-    function setEaveHeight(height) {
+    function deleteCell() {
+      if (cells.length <= 1) {
+        return;
+      }
       if (selectedCell < 0) {
+        selectedCell = cells.length - 1;
+      }
+      cells.splice(selectedCell, 1);
+      if (selectedCell >= cells.length) {
+        selectedCell = cells.length - 1;
+      }
+      selectedEdge = null;
+      selectedVertex = null;
+      selectedDormer = -1;
+      selectedDormerVertex = null;
+    }
+
+    function setWallType(kind) {
+      if (selectedCell < 0 || selectedEdge === null) {
         return;
       }
-      cells[selectedCell].eaveHeight = String(height);
+      var cell = cells[selectedCell];
+      var i = selectedEdge;
+      cell.types[i] = kind;
+      if (kind === "gable") {
+        cell.pitches[i] = "90";
+        cell.knees[i] = "0";
+        cell.shallows[i] = "";
+        cell.breaks[i] = "0";
+      } else if (kind === "knee") {
+        if (cell.pitches[i] === "90") {
+          cell.pitches[i] = applyToAll;
+        }
+        cell.shallows[i] = "";
+        cell.breaks[i] = "0";
+        if (!(parseFloat(cell.knees[i]) > 0)) {
+          cell.knees[i] = "3";
+        }
+      } else if (kind === "gambrel") {
+        if (cell.pitches[i] === "90") {
+          cell.pitches[i] = "60";
+        }
+        cell.knees[i] = "0";
+        if (!cell.shallows[i]) {
+          cell.shallows[i] = "30";
+        }
+        if (!(parseFloat(cell.breaks[i]) > 0)) {
+          cell.breaks[i] = "1";
+        }
+      } else {
+        if (cell.pitches[i] === "90") {
+          cell.pitches[i] = applyToAll;
+        }
+        cell.knees[i] = "0";
+        cell.shallows[i] = "";
+        cell.breaks[i] = "0";
+      }
     }
 
     function setPitch(pitch) {
@@ -145,20 +407,16 @@
       }
       var cell = cells[selectedCell];
       cell.pitches[selectedEdge] = String(pitch);
-      cell.gables[selectedEdge] = false;
+      if (cell.types[selectedEdge] === "gable") {
+        cell.types[selectedEdge] = "hip";
+      }
     }
 
     function setGable(on) {
-      if (selectedCell < 0 || selectedEdge === null) {
-        return;
-      }
-      var cell = cells[selectedCell];
-      cell.gables[selectedEdge] = !!on;
       if (on) {
-        cell.pitches[selectedEdge] = "90";
-        cell.knees[selectedEdge] = "0";
-        cell.shallows[selectedEdge] = "";
-        cell.breaks[selectedEdge] = "0";
+        setWallType("gable");
+      } else if (selectedCell >= 0 && selectedEdge !== null) {
+        setWallType("hip");
       }
     }
 
@@ -169,9 +427,8 @@
       var cell = cells[selectedCell];
       cell.knees[selectedEdge] = String(height);
       if (parseFloat(String(height)) > 0) {
-        cell.gables[selectedEdge] = false;
-        cell.shallows[selectedEdge] = "";
-        cell.breaks[selectedEdge] = "0";
+        setWallType("knee");
+        cell.knees[selectedEdge] = String(height);
       }
     }
 
@@ -180,174 +437,101 @@
         return;
       }
       var cell = cells[selectedCell];
+      cell.types[selectedEdge] = "gambrel";
       cell.pitches[selectedEdge] = String(steep);
-      cell.shallows = cell.shallows || [];
-      cell.breaks = cell.breaks || [];
       cell.shallows[selectedEdge] = String(shallow);
       cell.breaks[selectedEdge] = String(breakHeight);
-      cell.gables[selectedEdge] = false;
       cell.knees[selectedEdge] = "0";
+    }
+
+    function setEaveHeight(height) {
+      if (selectedCell < 0) {
+        return;
+      }
+      cells[selectedCell].eaveHeight = String(height);
+      cells[selectedCell].useEave = parseFloat(String(height)) !== 0;
+    }
+
+    function setPitchOnSloping(value) {
+      applyToAll = value;
+      cells.forEach(function (cell) {
+        cell.types.forEach(function (kind, i) {
+          if (kind === "hip" || kind === "gambrel") {
+            cell.pitches[i] = value;
+          }
+        });
+      });
+    }
+
+    function moveDormerVertex(dormerIndex, vertexIndex, x, y) {
+      var dormer = dormers[dormerIndex];
+      if (!dormer || vertexIndex < 0 || vertexIndex >= dormer.vertices.length) {
+        return;
+      }
+      dormer.vertices[vertexIndex] = { x: x, y: y };
+    }
+
+    function applySettings(map) {
+      if (map.set_pitch) {
+        applyToAll = map.set_pitch;
+      }
+      cells.forEach(function (cell, index) {
+        var p = prefixOf(index);
+        if (!Object.prototype.hasOwnProperty.call(map, p + "outer-x-0")) {
+          return;
+        }
+        var verts = readRingFromMap(map, p, "outer");
+        if (!verts.length) {
+          return;
+        }
+        cells[index] = cellFromMap(map, p, verts);
+      });
+      if (Object.prototype.hasOwnProperty.call(map, "dormer-0-x-0")) {
+        dormers = readDormers(map);
+      }
     }
 
     function moveVertex(cellIndex, vertexIndex, x, y) {
       var cell = cells[cellIndex];
-      if (!cell || vertexIndex < 0 || vertexIndex >= cell.vertices.length) {
+      if (!cell || vertexIndex < 0) {
         return;
       }
-      cell.vertices[vertexIndex] = { x: x, y: y };
-    }
-
-    function deleteCell() {
-      if (draft.length || drawing) {
-        draft = [];
-        drawing = false;
-        if (cells.length) {
-          selectedCell = 0;
-        }
-        selectedEdge = null;
+      var n = cell.vertices.length;
+      if (vertexIndex < n) {
+        cell.vertices[vertexIndex] = { x: x, y: y };
         return;
       }
-      if (selectedCell < 0) {
-        return;
+      var holeIndex = vertexIndex - n;
+      if (cell.hole && holeIndex < cell.hole.length) {
+        cell.hole[holeIndex] = { x: x, y: y };
       }
-      cells.splice(selectedCell, 1);
-      if (cells.length === 0) {
-        selectedCell = -1;
-      } else if (selectedCell >= cells.length) {
-        selectedCell = cells.length - 1;
-      }
-      selectedEdge = null;
-      drawing = false;
-      draft = [];
     }
 
-    function closeRing() {
-      if (draft.length < 3) {
-        return;
+    function kindFromMap(map, pfx, i) {
+      var t = map[pfx + "type-" + i];
+      if (t === "hip" || t === "gable" || t === "knee" || t === "gambrel") {
+        return t;
       }
-      if (dormerMode) {
-        var host = selectedCell < 0 ? 0 : selectedCell;
-        dormers.push({
-          cell: host,
-          vertices: draft.slice(),
-          pitches: draft.map(function () {
-            return applyToAll;
-          }),
-          gables: draft.map(function () {
-            return false;
-          }),
-        });
-        draft = [];
-        drawing = false;
-        dormerMode = false;
-        return;
+      if (map[pfx + "gable-" + i] === "on") {
+        return "gable";
       }
-      cells.push({
-        vertices: draft.slice(),
-        pitches: draft.map(function () {
-          return applyToAll;
-        }),
-        gables: draft.map(function () {
-          return false;
-        }),
-        knees: draft.map(function () {
-          return "0";
-        }),
-        shallows: draft.map(function () {
-          return "";
-        }),
-        breaks: draft.map(function () {
-          return "0";
-        }),
-        overhang: "0",
-        eaveHeight: "0",
-        hole: [],
-      });
-      selectedCell = cells.length - 1;
-      selectedEdge = null;
-      draft = [];
-      drawing = false;
-    }
-
-    function prefix(index) {
-      return index === 0 ? "" : "cell-" + index + "-";
-    }
-
-    function fields() {
-      var out = {};
-      if (cells.length) {
-        out.edit_vertices = "on";
+      var brk = parseFloat(map[pfx + "gambrel-break-" + i]);
+      if (map[pfx + "gambrel-shallow-" + i] && brk > 0) {
+        return "gambrel";
       }
-      cells.forEach(function (cell, index) {
-        var p = prefix(index);
-        cell.vertices.forEach(function (pt, i) {
-          out[p + "outer-x-" + i] = String(pt.x);
-          out[p + "outer-y-" + i] = String(pt.y);
-        });
-        cell.pitches.forEach(function (pitch, i) {
-          out[p + "pitch-" + i] = String(pitch);
-        });
-        cell.gables.forEach(function (gable, i) {
-          if (gable) {
-            out[p + "gable-" + i] = "on";
-          }
-        });
-        (cell.knees || []).forEach(function (knee, i) {
-          if (knee !== "" && knee != null) {
-            out[p + "knee-" + i] = String(knee);
-          }
-        });
-        (cell.shallows || []).forEach(function (shallow, i) {
-          if (shallow !== "" && shallow != null) {
-            out[p + "gambrel-shallow-" + i] = String(shallow);
-          }
-        });
-        (cell.breaks || []).forEach(function (brk, i) {
-          if (brk !== "" && brk != null && parseFloat(String(brk)) > 0) {
-            out[p + "gambrel-break-" + i] = String(brk);
-          }
-        });
-        out[p + "overhang"] = cell.overhang;
-        out[p + "eave_height"] = cell.eaveHeight;
-        (cell.hole || []).forEach(function (pt, i) {
-          out[p + "hole-x-" + i] = String(pt.x);
-          out[p + "hole-y-" + i] = String(pt.y);
-        });
-      });
-      dormers.forEach(function (dormer, index) {
-        var dp = "dormer-" + index + "-";
-        out[dp + "cell"] = String(dormer.cell);
-        dormer.vertices.forEach(function (pt, i) {
-          out[dp + "x-" + i] = String(pt.x);
-          out[dp + "y-" + i] = String(pt.y);
-        });
-        (dormer.pitches || []).forEach(function (pitch, i) {
-          out[dp + "pitch-" + i] = String(pitch);
-        });
-        (dormer.gables || []).forEach(function (gable, i) {
-          if (gable) {
-            out[dp + "gable-" + i] = "on";
-          }
-        });
-      });
-      return out;
-    }
-
-    function rings() {
-      return cells.map(function (cell) {
-        return cell.vertices.map(function (pt) {
-          return [pt.x, pt.y];
-        });
-      });
+      var knee = parseFloat(map[pfx + "knee-" + i]);
+      if (knee > 0) {
+        return "knee";
+      }
+      return "hip";
     }
 
     function readRingFromMap(map, pfx, kind) {
       var pts = [];
       var i = 0;
-      var key = prefixName(pfx, kind + "-x-");
-      while (Object.prototype.hasOwnProperty.call(map, key + i)) {
-        var xs = map[key + i];
-        var ys = map[prefixName(pfx, kind + "-y-" + i)];
+      while (Object.prototype.hasOwnProperty.call(map, pfx + kind + "-x-" + i)) {
+        var xs = map[pfx + kind + "-x-" + i];
+        var ys = map[pfx + kind + "-y-" + i];
         if (xs !== "" && ys !== "" && xs != null && ys != null &&
             !Number.isNaN(parseFloat(String(xs))) &&
             !Number.isNaN(parseFloat(String(ys)))) {
@@ -358,22 +542,20 @@
       return pts;
     }
 
-    function prefixName(pfx, rest) {
-      return pfx + rest;
-    }
-
     function cellFromMap(map, pfx, vertices) {
+      var types = [];
       var pitches = [];
-      var gables = [];
       var knees = [];
       var shallows = [];
       var breaks = [];
       var i;
-      for (i = 0; i < vertices.length; i += 1) {
-        var gable = map[pfx + "gable-" + i] === "on";
-        gables.push(gable);
+      var holePts = map[pfx + "use_hole"] === "on" ? readRingFromMap(map, pfx, "hole") : [];
+      var n = vertices.length + holePts.length;
+      for (i = 0; i < n; i += 1) {
+        var kind = kindFromMap(map, pfx, i);
+        types.push(kind);
         var pitch = map[pfx + "pitch-" + i];
-        pitches.push(gable ? "90" : (pitch ? String(pitch) : applyToAll));
+        pitches.push(kind === "gable" ? "90" : (pitch ? String(pitch) : applyToAll));
         var knee = map[pfx + "knee-" + i];
         knees.push(knee != null && knee !== "" ? String(knee) : "0");
         var shallow = map[pfx + "gambrel-shallow-" + i];
@@ -383,23 +565,24 @@
       }
       return {
         vertices: vertices,
+        types: types,
         pitches: pitches,
-        gables: gables,
         knees: knees,
         shallows: shallows,
         breaks: breaks,
         overhang: map[pfx + "overhang"] || "0",
+        useOverhang: map[pfx + "use_overhang"] === "on",
         eaveHeight: map[pfx + "eave_height"] || "0",
-        hole: readRingFromMap(map, pfx, "hole"),
+        useEave: map[pfx + "use_eave_height"] === "on",
+        hole: holePts,
+        useHole: map[pfx + "use_hole"] === "on"
       };
     }
 
     function loadFields(map) {
       cells = [];
-      draft = [];
-      drawing = false;
-      dormerMode = false;
       selectedEdge = null;
+      selectedVertex = null;
       var first = readRingFromMap(map, "", "outer");
       if (first.length) {
         cells.push(cellFromMap(map, "", first));
@@ -415,6 +598,10 @@
       }
       dormers = readDormers(map);
       selectedCell = cells.length ? 0 : -1;
+      selectedEdge = null;
+      selectedVertex = null;
+      selectedDormer = -1;
+      selectedDormerVertex = null;
     }
 
     function readDormers(map) {
@@ -434,209 +621,172 @@
           i += 1;
         }
         var pitches = [];
-        var gables = [];
+        var types = [];
         for (i = 0; i < vertices.length; i += 1) {
-          var gable = map["dormer-" + index + "-gable-" + i] === "on";
-          gables.push(gable);
+          var kind = map["dormer-" + index + "-type-" + i] ||
+            (map["dormer-" + index + "-gable-" + i] === "on" ? "gable" : "hip");
+          types.push(kind);
           var pitch = map["dormer-" + index + "-pitch-" + i];
-          pitches.push(gable ? "90" : (pitch ? String(pitch) : applyToAll));
+          pitches.push(kind === "gable" ? "90" : (pitch ? String(pitch) : applyToAll));
         }
         var cell = parseInt(String(map["dormer-" + index + "-cell"] || "0"), 10);
         items.push({
           cell: Number.isNaN(cell) ? 0 : cell,
           vertices: vertices,
           pitches: pitches,
-          gables: gables,
+          types: types
         });
         index += 1;
       }
       return items;
     }
 
-    function loadForm(form) {
+    function fields() {
+      var out = {};
+      cells.forEach(function (cell, index) {
+        var p = prefixOf(index);
+        cell.vertices.forEach(function (pt, i) {
+          out[p + "outer-x-" + i] = String(pt.x);
+          out[p + "outer-y-" + i] = String(pt.y);
+        });
+        cell.types.forEach(function (kind, i) {
+          out[p + "type-" + i] = kind;
+          out[p + "pitch-" + i] = kind === "gable" ? "90" : String(cell.pitches[i] || applyToAll);
+          if (kind === "knee") {
+            out[p + "knee-" + i] = String(cell.knees[i] || "0");
+          }
+          if (kind === "gambrel") {
+            out[p + "gambrel-shallow-" + i] = String(cell.shallows[i] || "");
+            if (parseFloat(String(cell.breaks[i])) > 0) {
+              out[p + "gambrel-break-" + i] = String(cell.breaks[i]);
+            }
+          }
+        });
+        out[p + "overhang"] = cell.overhang;
+        if (cell.useOverhang) {
+          out[p + "use_overhang"] = "on";
+        }
+        out[p + "eave_height"] = cell.eaveHeight;
+        if (cell.useEave) {
+          out[p + "use_eave_height"] = "on";
+        }
+        if (cell.useHole) {
+          out[p + "use_hole"] = "on";
+          (cell.hole || []).forEach(function (pt, i) {
+            out[p + "hole-x-" + i] = String(pt.x);
+            out[p + "hole-y-" + i] = String(pt.y);
+          });
+        }
+      });
+      dormers.forEach(function (dormer, index) {
+        var dp = "dormer-" + index + "-";
+        out[dp + "cell"] = String(dormer.cell);
+        dormer.vertices.forEach(function (pt, i) {
+          out[dp + "x-" + i] = String(pt.x);
+          out[dp + "y-" + i] = String(pt.y);
+        });
+        (dormer.types || []).forEach(function (kind, i) {
+          out[dp + "type-" + i] = kind;
+        });
+        (dormer.pitches || []).forEach(function (pitch, i) {
+          out[dp + "pitch-" + i] = String(pitch);
+        });
+      });
+      return out;
+    }
+
+    function rings() {
+      return cells.map(function (cell) {
+        return cell.vertices.map(function (pt) {
+          return [pt.x, pt.y];
+        });
+      });
+    }
+
+    function formMap(form) {
       var map = {};
       Array.prototype.forEach.call(form.querySelectorAll("[name]"), function (el) {
         if (el.type === "checkbox") {
           if (el.checked) {
             map[el.name] = "on";
           }
+        } else if (el.type === "radio") {
+          if (el.checked) {
+            map[el.name] = el.value;
+          }
         } else if (el.name) {
           map[el.name] = el.value;
         }
       });
-      var apply = form.querySelector("[name=apply_to_all]");
+      var apply = form.querySelector("[name=set_pitch]");
+      if (apply && apply.value) {
+        map.set_pitch = apply.value;
+      }
+      return map;
+    }
+
+    function loadForm(form) {
+      var map = formMap(form);
+      var apply = form.querySelector("[name=set_pitch]");
       if (apply && apply.value) {
         applyToAll = apply.value;
       }
       loadFields(map);
     }
 
-    function fillTbody(tbody, pfx, kind, vertices) {
-      if (!tbody) {
-        return;
-      }
-      var html = "";
-      vertices.forEach(function (pt, i) {
-        html += "<tr><td><input name=\"" + pfx + kind + "-x-" + i + "\" value=\"" + esc(pt.x) + "\"></td>";
-        html += "<td><input name=\"" + pfx + kind + "-y-" + i + "\" value=\"" + esc(pt.y) + "\"></td></tr>";
-      });
-      tbody.innerHTML = html;
-    }
-
-    function pitchRowsHtml(pfx, cell) {
-      var html = "";
-      cell.vertices.forEach(function (start, i) {
-        var end = cell.vertices[(i + 1) % cell.vertices.length];
-        var gable = cell.gables[i];
-        html += "<p><label>" + i + ": (" + esc(start.x) + ", " + esc(start.y) + ") → (" + esc(end.x) + ", " + esc(end.y) + ")";
-        html += " <input name=\"" + pfx + "pitch-" + i + "\" value=\"" + esc(cell.pitches[i] || applyToAll) + "\"";
-        if (gable) {
-          html += " disabled";
-        }
-        html += "></label> <label><input type=\"checkbox\" name=\"" + pfx + "gable-" + i + "\"";
-        if (gable) {
-          html += " checked";
-        }
-        html += "> Gable</label> <label>Knee <input name=\"" + pfx + "knee-" + i + "\" value=\"" + esc((cell.knees && cell.knees[i]) || "0") + "\"> m</label>";
-        html += " <label>Shallow <input name=\"" + pfx + "gambrel-shallow-" + i + "\" value=\"" + esc((cell.shallows && cell.shallows[i]) || "") + "\"></label>";
-        html += " <label>Break <input name=\"" + pfx + "gambrel-break-" + i + "\" value=\"" + esc((cell.breaks && cell.breaks[i]) || "0") + "\"> m</label></p>";
-      });
-      return html;
-    }
-
-    function writeForm(form) {
-      var edit = form.querySelector("[name=edit_vertices]");
-      if (edit) {
-        edit.checked = true;
-      }
-      var editorBox = form.querySelector("#vertex-editor");
-      if (editorBox) {
-        editorBox.hidden = false;
-      }
-      if (cells[0]) {
-        fillTbody(form.querySelector("#outer-vertices"), "", "outer", cells[0].vertices);
-        fillTbody(form.querySelector("#hole-vertices"), "", "hole", cells[0].hole || []);
-        var pitchBox = form.querySelector("#pitch-rows");
-        if (pitchBox) {
-          pitchBox.innerHTML = pitchRowsHtml("", cells[0]);
-        }
-        var eave = form.querySelector("[name=eave_height]");
-        if (eave) {
-          eave.value = cells[0].eaveHeight;
-        }
-        var over = form.querySelector("[name=overhang]");
-        if (over) {
-          over.value = cells[0].overhang;
-        }
-      }
-      var extra = form.querySelector("#extra-cells");
-      if (extra) {
-        var html = "";
-        cells.forEach(function (cell, index) {
-          if (index === 0) {
-            return;
-          }
-          var p = prefix(index);
-          html += "<div class=\"cell-block\" data-cell=\"" + index + "\">";
-          html += "<p>Cell " + index + "</p>";
-          html += "<p>Outer vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>";
-          html += "<tbody id=\"" + p + "outer-vertices\"></tbody></table>";
-          html += "<p>Hole vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>";
-          html += "<tbody id=\"" + p + "hole-vertices\"></tbody></table>";
-          html += "<div>" + pitchRowsHtml(p, cell) + "</div>";
-          html += "<p><label>Overhang <input name=\"" + p + "overhang\" value=\"" + esc(cell.overhang) + "\"> m</label> ";
-          html += "<label>Eave height <input name=\"" + p + "eave_height\" value=\"" + esc(cell.eaveHeight) + "\"> m</label></p>";
-          html += "</div>";
-        });
-        extra.innerHTML = html;
-        cells.forEach(function (cell, index) {
-          if (index === 0) {
-            return;
-          }
-          var p = prefix(index);
-          fillTbody(form.querySelector("#" + p + "outer-vertices"), p, "outer", cell.vertices);
-          fillTbody(form.querySelector("#" + p + "hole-vertices"), p, "hole", cell.hole || []);
-        });
-      }
-      if (draft.length) {
-        var dp = prefix(cells.length);
-        if (cells.length === 0) {
-          fillTbody(form.querySelector("#outer-vertices"), "", "outer", draft);
-        } else if (extra) {
-          extra.insertAdjacentHTML(
-            "beforeend",
-            "<div class=\"cell-block\" data-cell=\"" + cells.length + "\"><p>Cell " + cells.length + "</p>" +
-              "<p>Outer vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead>" +
-              "<tbody id=\"" + dp + "outer-vertices\"></tbody></table></div>"
-          );
-          fillTbody(form.querySelector("#" + dp + "outer-vertices"), dp, "outer", draft);
-        }
-      }
-      writeDormerTables(form);
-    }
-
-    function writeDormerTables(form) {
-      var box = form.querySelector("#dormer-tables");
-      if (!box) {
-        return;
-      }
-      var html = "";
-      dormers.forEach(function (dormer, index) {
-        var dp = "dormer-" + index + "-";
-        html += "<p>Dormer " + index + " vertices (m)</p>";
-        html += "<input type=\"hidden\" name=\"" + dp + "cell\" value=\"" + esc(dormer.cell) + "\">";
-        html += "<table><thead><tr><th>x</th><th>y</th></tr></thead><tbody>";
-        dormer.vertices.forEach(function (pt, i) {
-          html += "<tr><td><input name=\"" + dp + "x-" + i + "\" value=\"" + esc(pt.x) + "\"></td>";
-          html += "<td><input name=\"" + dp + "y-" + i + "\" value=\"" + esc(pt.y) + "\"></td></tr>";
-        });
-        html += "</tbody></table>";
-        (dormer.pitches || []).forEach(function (pitch, i) {
-          var gable = !!(dormer.gables && dormer.gables[i]);
-          html += "<p><label>Pitch <input name=\"" + dp + "pitch-" + i + "\" value=\"" + esc(pitch) + "\"";
-          if (gable) {
-            html += " disabled";
-          }
-          html += "></label> <label><input type=\"checkbox\" name=\"" + dp + "gable-" + i + "\"";
-          if (gable) {
-            html += " checked";
-          }
-          html += "> Gable</label></p>";
-        });
-      });
-      box.innerHTML = html;
-    }
-
     return {
       clickPlan: clickPlan,
-      closeRing: closeRing,
-      addCell: addCell,
-      startDormer: startDormer,
-      setEaveHeight: setEaveHeight,
+      addDetachedCell: addDetachedCell,
+      addCellOnSelectedWall: addCellOnSelectedWall,
+      addVertexOnSelectedWall: addVertexOnSelectedWall,
+      deleteCell: deleteCell,
+      setWallType: setWallType,
       setPitch: setPitch,
       setGable: setGable,
       setKneeHeight: setKneeHeight,
       setGambrel: setGambrel,
+      setEaveHeight: setEaveHeight,
+      setPitchOnSloping: setPitchOnSloping,
       moveVertex: moveVertex,
-      deleteCell: deleteCell,
+      moveDormerVertex: moveDormerVertex,
+      applySettings: applySettings,
+      applyForm: function (formEl) { applySettings(formMap(formEl)); },
+      loadFields: loadFields,
+      loadForm: loadForm,
       fields: fields,
       rings: rings,
-      draft: function () {
-        return draft.map(function (pt) {
-          return [pt.x, pt.y];
-        });
-      },
-      loadForm: loadForm,
-      writeForm: writeForm,
-      setApplyToAll: function (value) {
-        applyToAll = value;
-      },
-      selectedCell: function () {
-        return selectedCell;
-      },
-      selectedEdge: function () {
-        return selectedEdge;
-      },
+      setApplyToAll: function (value) { applyToAll = value; },
+      selectedCell: function () { return selectedCell; },
+      selectedEdge: function () { return selectedEdge; },
+      selectedVertex: function () { return selectedVertex; },
+      selectedDormer: function () { return selectedDormer; },
+      selectedDormerVertex: function () { return selectedDormerVertex; },
+      cells: function () { return cells; },
+      dormers: function () { return dormers; },
+      setUseHole: function (on) {
+        if (selectedCell < 0) { return; }
+        var cell = cells[selectedCell];
+        cell.useHole = !!on;
+        if (cell.useHole && (!cell.hole || !cell.hole.length)) {
+          cell.hole = defaultHole(cell.vertices);
+        }
+        if (!cell.useHole) {
+          cell.types.splice(cell.vertices.length);
+          cell.pitches.splice(cell.vertices.length);
+          cell.knees.splice(cell.vertices.length);
+          cell.shallows.splice(cell.vertices.length);
+          cell.breaks.splice(cell.vertices.length);
+          cell.hole = [];
+        } else {
+          while (cell.types.length < cell.vertices.length + cell.hole.length) {
+            cell.types.push("hip");
+            cell.pitches.push(applyToAll);
+            cell.knees.push("0");
+            cell.shallows.push("");
+            cell.breaks.push("0");
+          }
+        }
+      }
     };
   }
 
@@ -656,23 +806,46 @@
     pt.x = event.clientX;
     pt.y = event.clientY;
     var loc = pt.matrixTransform(ctm.inverse());
-    return {
-      x: Math.round(loc.x * 100) / 100,
-      y: Math.round(loc.y * 100) / 100,
-    };
+    return { x: snap(loc.x), y: snap(loc.y) };
   }
 
   function collectPoints(editor) {
     var pts = [];
-    editor.rings().forEach(function (ring) {
-      ring.forEach(function (pt) {
-        pts.push(pt);
-      });
+    editor.cells().forEach(function (cell) {
+      cell.vertices.forEach(function (pt) { pts.push([pt.x, pt.y]); });
+      if (cell.useHole && cell.hole) {
+        cell.hole.forEach(function (pt) { pts.push([pt.x, pt.y]); });
+      }
     });
-    editor.draft().forEach(function (pt) {
-      pts.push(pt);
+    editor.dormers().forEach(function (d) {
+      d.vertices.forEach(function (pt) { pts.push([pt.x, pt.y]); });
     });
     return pts;
+  }
+
+  function appendRing(html, ring, index, wallOffset, selectedCell, selectedEdge, holeClass) {
+    var cls = index === selectedCell ? " is-selected" : "";
+    if (holeClass) {
+      cls += " " + holeClass;
+    }
+    html += "<polygon class=\"" + cls.trim() + "\" data-cell=\"" + index + "\" data-ring=\"" +
+      ringAttr(ring) + "\" points=\"" + ringAttr(ring) + "\"></polygon>";
+    ring.forEach(function (start, i) {
+      var wall = wallOffset + i;
+      var end = ring[(i + 1) % ring.length];
+      var hitCls = (index === selectedCell && selectedEdge === wall) ? " is-selected" : "";
+      html += "<line class=\"wall-hit" + hitCls + "\" x1=\"" + start[0] + "\" y1=\"" + start[1] +
+        "\" x2=\"" + end[0] + "\" y2=\"" + end[1] + "\" data-cell=\"" + index + "\" data-wall=\"" + wall + "\"></line>";
+      var mx = (start[0] + end[0]) / 2;
+      var my = (start[1] + end[1]) / 2;
+      html += "<text font-size=\"0.35\" transform=\"translate(" + mx + " " + my + ") scale(1,-1)\" text-anchor=\"middle\" dy=\"-0.4em\">" +
+        (wall + 1) + "</text>";
+    });
+    ring.forEach(function (pt, i) {
+      html += "<circle cx=\"" + pt[0] + "\" cy=\"" + pt[1] + "\" r=\"0.18\" data-cell=\"" +
+        index + "\" data-vertex=\"" + (wallOffset + i) + "\"></circle>";
+    });
+    return html;
   }
 
   function drawSvg(svg, editor) {
@@ -682,10 +855,8 @@
     var maxX = 10;
     var maxY = 6;
     if (pts.length) {
-      minX = pts[0][0];
-      minY = pts[0][1];
-      maxX = pts[0][0];
-      maxY = pts[0][1];
+      minX = maxX = pts[0][0];
+      minY = maxY = pts[0][1];
       pts.forEach(function (pt) {
         if (pt[0] < minX) { minX = pt[0]; }
         if (pt[1] < minY) { minY = pt[1]; }
@@ -693,7 +864,7 @@
         if (pt[1] > maxY) { maxY = pt[1]; }
       });
     }
-    var pad = 1;
+    var pad = 1.5;
     minX -= pad;
     minY -= pad;
     maxX += pad;
@@ -701,173 +872,351 @@
     var width = maxX - minX || 12;
     var height = maxY - minY || 8;
     svg.setAttribute("viewBox", minX + " " + (-maxY) + " " + width + " " + height);
+    svg.setAttribute("preserveAspectRatio", "xMinYMid meet");
     var html = "<g id=\"plan-metres\" transform=\"scale(1,-1)\">";
-    editor.rings().forEach(function (ring, index) {
-      html += "<polygon data-cell=\"" + index + "\" data-ring=\"" + ringAttr(ring) + "\" points=\"" + ringAttr(ring) + "\"></polygon>";
+    var selectedCell = editor.selectedCell();
+    var selectedEdge = editor.selectedEdge();
+    editor.cells().forEach(function (cell, index) {
+      var outer = cell.vertices.map(function (pt) { return [pt.x, pt.y]; });
+      html = appendRing(html, outer, index, 0, selectedCell, selectedEdge, "");
+      if (cell.useHole && cell.hole && cell.hole.length) {
+        var hole = cell.hole.map(function (pt) { return [pt.x, pt.y]; });
+        html = appendRing(html, hole, index, outer.length, selectedCell, selectedEdge, "is-hole");
+      }
     });
-    if (editor.draft().length) {
-      html += "<polyline data-draft=\"1\" data-ring=\"" + ringAttr(editor.draft()) + "\" points=\"" + ringAttr(editor.draft()) + "\" fill=\"none\"></polyline>";
-    }
+    editor.dormers().forEach(function (dormer, dIndex) {
+      var dRing = dormer.vertices.map(function (pt) { return [pt.x, pt.y]; });
+      html += "<polygon class=\"is-dormer\" points=\"" + ringAttr(dRing) + "\"></polygon>";
+      dRing.forEach(function (pt, i) {
+        var dSel = (editor.selectedDormer() === dIndex && editor.selectedDormerVertex() === i) ? " is-selected" : "";
+        html += "<circle class=\"is-dormer" + dSel + "\" cx=\"" + pt[0] + "\" cy=\"" + pt[1] +
+          "\" r=\"0.18\" data-dormer=\"" + dIndex + "\" data-vertex=\"" + i + "\"></circle>";
+      });
+    });
     html += "</g>";
     svg.innerHTML = html;
   }
 
-  function syncInspector(form, editor) {
-    var eave = form.querySelector("#selected-eave-height");
-    var pitch = form.querySelector("#selected-pitch");
-    var gable = form.querySelector("#selected-gable");
-    var knee = form.querySelector("#selected-knee-height");
-    var shallow = form.querySelector("#selected-gambrel-shallow");
-    var brk = form.querySelector("#selected-gambrel-break");
-    var cellIndex = editor.selectedCell();
-    var data = editor.fields();
-    var p = cellIndex <= 0 ? "" : "cell-" + cellIndex + "-";
-    if (eave) {
-      eave.value = cellIndex < 0 ? "" : (data[p + "eave_height"] || "");
+  function wallRowHtml(pfx, cell, i, cellIndex) {
+    var kind = cell.types[i] || "hip";
+    var hints = (typeof window !== "undefined" && window.KROVLAB_HINTS) ? window.KROVLAB_HINTS : HINTS;
+    var html = "<div class=\"wall\" data-cell=\"" + cellIndex + "\" data-wall=\"" + i + "\">";
+    html += "<div class=\"wall-head\"><span>Wall " + (i + 1) + "</span></div>";
+    html += "<div class=\"wall-types\" role=\"radiogroup\">";
+    ["hip", "gable", "knee", "gambrel"].forEach(function (k) {
+      var label = k.charAt(0).toUpperCase() + k.slice(1);
+      html += "<label><input type=\"radio\" name=\"" + pfx + "type-" + i + "\" value=\"" + k + "\"";
+      if (kind === k) { html += " checked"; }
+      html += "> " + label + "</label>";
+    });
+    html += "</div><p class=\"hint wall-hint\">" + esc(hints[kind] || "") + "</p>";
+    html += "<p class=\"wall-extra js-pitch\"" + (kind === "gable" ? " hidden" : "") + "><label>Pitch ";
+    html += "<input name=\"" + pfx + "pitch-" + i + "\" value=\"" + esc(cell.pitches[i] || "45") + "\"";
+    if (kind === "gable") { html += " disabled"; }
+    html += "></label></p>";
+    html += "<p class=\"wall-extra js-knee\"" + (kind !== "knee" ? " hidden" : "") + "><label>Knee height ";
+    html += "<input name=\"" + pfx + "knee-" + i + "\" value=\"" + esc(cell.knees[i] || "0") + "\"> m</label></p>";
+    html += "<p class=\"wall-extra js-gambrel\"" + (kind !== "gambrel" ? " hidden" : "") + ">";
+    html += "<label>Shallow pitch <input name=\"" + pfx + "gambrel-shallow-" + i + "\" value=\"" +
+      esc(cell.shallows[i] || "") + "\"></label> ";
+    html += "<label>Break <input name=\"" + pfx + "gambrel-break-" + i + "\" value=\"" +
+      esc(cell.breaks[i] || "0") + "\"> m</label></p></div>";
+    return html;
+  }
+
+  function writeForm(form, editor) {
+    var root = form.querySelector("#cells-root");
+    var vertex = form.querySelector("#vertex-editor");
+    if (!root) {
+      return;
     }
+    var html = "";
+    var vhtml = "";
+    editor.cells().forEach(function (cell, index) {
+      var p = prefixOf(index);
+      html += "<section class=\"cell-card\" data-cell=\"" + index + "\"><h3>Cell " + (index + 1) + "</h3>";
+      html += "<div class=\"cell-extras\">";
+      html += "<label><input type=\"checkbox\" name=\"" + p + "use_overhang\"" + (cell.useOverhang ? " checked" : "") +
+        " data-extra=\"overhang\"> Overhang</label>";
+      html += "<label><input type=\"checkbox\" name=\"" + p + "use_eave_height\"" + (cell.useEave ? " checked" : "") +
+        " data-extra=\"eave\"> Eave height</label>";
+      html += "<label><input type=\"checkbox\" name=\"" + p + "use_hole\"" + (cell.useHole ? " checked" : "") +
+        " data-extra=\"hole\"> Courtyard / hole</label></div>";
+      html += "<p class=\"wall-extra js-extra\" data-kind=\"overhang\"" + (cell.useOverhang ? "" : " hidden") +
+        "><label>Overhang <input name=\"" + p + "overhang\" value=\"" + esc(cell.overhang) + "\"> m past the walls</label></p>";
+      html += "<p class=\"wall-extra js-extra\" data-kind=\"eave\"" + (cell.useEave ? "" : " hidden") +
+        "><label>Eave height <input name=\"" + p + "eave_height\" value=\"" + esc(cell.eaveHeight) +
+        "\"> m above datum</label></p>";
+      var wallCount = cell.vertices.length + ((cell.useHole && cell.hole) ? cell.hole.length : 0);
+      var w;
+      for (w = 0; w < wallCount; w += 1) {
+        html += wallRowHtml(p, cell, w, index);
+      }
+      html += "</section>";
+      vhtml += "<p>Cell " + (index + 1) + " vertices (m)</p><table><thead><tr><th>x</th><th>y</th></tr></thead><tbody id=\"" +
+        p + "outer-vertices\">";
+      cell.vertices.forEach(function (pt, i) {
+        vhtml += "<tr><td><input name=\"" + p + "outer-x-" + i + "\" value=\"" + esc(pt.x) +
+          "\"></td><td><input name=\"" + p + "outer-y-" + i + "\" value=\"" + esc(pt.y) + "\"></td></tr>";
+      });
+      vhtml += "</tbody></table>";
+      vhtml += "<p class=\"js-extra\" data-kind=\"hole\"" + (cell.useHole ? "" : " hidden") + ">Cell " +
+        (index + 1) + " courtyard vertices (m)</p>";
+      vhtml += "<table class=\"js-extra\" data-kind=\"hole\"" + (cell.useHole ? "" : " hidden") +
+        "><thead><tr><th>x</th><th>y</th></tr></thead><tbody id=\"" + p + "hole-vertices\">";
+      (cell.hole || []).forEach(function (pt, i) {
+        vhtml += "<tr><td><input name=\"" + p + "hole-x-" + i + "\" value=\"" + esc(pt.x) +
+          "\"></td><td><input name=\"" + p + "hole-y-" + i + "\" value=\"" + esc(pt.y) + "\"></td></tr>";
+      });
+      vhtml += "</tbody></table>";
+    });
+    root.innerHTML = html;
+    if (vertex) {
+      vertex.innerHTML = vhtml;
+    }
+    var dormerBox = form.querySelector("#dormer-tables");
+    if (dormerBox) {
+      var dhtml = "";
+      editor.dormers().forEach(function (dormer, index) {
+        var dp = "dormer-" + index + "-";
+        dhtml += "<section class=\"cell-card\"><h3>Dormer " + (index + 1) + "</h3>";
+        dhtml += "<input type=\"hidden\" name=\"" + dp + "cell\" value=\"" + esc(dormer.cell) + "\">";
+        dormer.vertices.forEach(function (pt, i) {
+          dhtml += "<input type=\"hidden\" name=\"" + dp + "x-" + i + "\" value=\"" + esc(pt.x) + "\">";
+          dhtml += "<input type=\"hidden\" name=\"" + dp + "y-" + i + "\" value=\"" + esc(pt.y) + "\">";
+        });
+        (dormer.pitches || []).forEach(function (pitch, i) {
+          var kind = (dormer.types && dormer.types[i]) || "hip";
+          dhtml += "<p><span>Dormer wall " + (i + 1) + "</span> ";
+          dhtml += "<label><input type=\"radio\" name=\"" + dp + "type-" + i + "\" value=\"hip\"" +
+            (kind === "hip" ? " checked" : "") + "> Hip</label> ";
+          dhtml += "<label><input type=\"radio\" name=\"" + dp + "type-" + i + "\" value=\"gable\"" +
+            (kind === "gable" ? " checked" : "") + "> Gable</label> ";
+          dhtml += "<label>Pitch <input name=\"" + dp + "pitch-" + i + "\" value=\"" + esc(pitch) + "\"" +
+            (kind === "gable" ? " disabled" : "") + "></label></p>";
+        });
+        dhtml += "</section>";
+      });
+      dormerBox.innerHTML = dhtml;
+    }
+  }
+
+  function highlightWalls(form, editor) {
+    var cell = editor.selectedCell();
     var edge = editor.selectedEdge();
-    if (pitch) {
-      pitch.value = edge === null || cellIndex < 0 ? "" : (data[p + "pitch-" + edge] || "");
-      pitch.disabled = !!(edge !== null && data[p + "gable-" + edge]);
-    }
-    if (gable) {
-      gable.checked = !!(edge !== null && data[p + "gable-" + edge]);
-    }
-    if (knee) {
-      knee.value = edge === null || cellIndex < 0 ? "" : (data[p + "knee-" + edge] || "0");
-    }
-    if (shallow) {
-      shallow.value = edge === null || cellIndex < 0 ? "" : (data[p + "gambrel-shallow-" + edge] || "");
-    }
-    if (brk) {
-      brk.value = edge === null || cellIndex < 0 ? "" : (data[p + "gambrel-break-" + edge] || "0");
-    }
+    form.querySelectorAll(".wall").forEach(function (el) {
+      var c = parseInt(el.getAttribute("data-cell") || el.closest(".cell-card").getAttribute("data-cell"), 10);
+      var w = parseInt(el.getAttribute("data-wall"), 10);
+      if (c === cell && w === edge) {
+        el.classList.add("is-selected");
+      } else {
+        el.classList.remove("is-selected");
+      }
+    });
   }
 
   function mount(svg, form) {
     if (!svg || !form) {
       return null;
     }
-    var apply = form.querySelector("[name=apply_to_all]");
+    var apply = form.querySelector("[name=set_pitch]");
     var editor = createEditor({ applyToAll: apply ? apply.value : "45" });
     editor.loadForm(form);
 
-    function commit() {
-      editor.writeForm(form);
+    function commit(rebuild) {
+      if (rebuild) {
+        writeForm(form, editor);
+      }
       drawSvg(svg, editor);
-      syncInspector(form, editor);
+      highlightWalls(form, editor);
+      var onWall = form.querySelector("#add-cell-on-wall");
+      var addVert = form.querySelector("#add-vertex");
+      var disabled = editor.selectedEdge() === null;
+      if (onWall) { onWall.disabled = disabled; }
+      if (addVert) { addVert.disabled = disabled; }
+      var hint = form.querySelector("#wall-action-hint");
+      if (hint) {
+        hint.textContent = disabled
+          ? "Select a wall on the building plan to attach a cell or split a vertex."
+          : "A wall is selected. Add a cell on it, or add a vertex at its midpoint.";
+      }
     }
 
     drawSvg(svg, editor);
-    syncInspector(form, editor);
+    highlightWalls(form, editor);
+    commit(false);
 
-    svg.addEventListener("click", function (event) {
+    var dragging = null;
+
+    svg.addEventListener("pointerdown", function (event) {
       var metres = metresFromEvent(svg, event);
       editor.clickPlan(metres.x, metres.y);
-      commit();
+      if (editor.selectedDormer() >= 0 && editor.selectedDormerVertex() !== null) {
+        dragging = { dormer: editor.selectedDormer(), vertex: editor.selectedDormerVertex() };
+        svg.setPointerCapture(event.pointerId);
+      } else if (editor.selectedVertex() !== null) {
+        dragging = { cell: editor.selectedCell(), vertex: editor.selectedVertex() };
+        svg.setPointerCapture(event.pointerId);
+      }
+      commit(false);
+    });
+    svg.addEventListener("pointermove", function (event) {
+      if (!dragging) { return; }
+      var metres = metresFromEvent(svg, event);
+      if (dragging.dormer !== undefined) {
+        editor.moveDormerVertex(dragging.dormer, dragging.vertex, metres.x, metres.y);
+        var dxName = "dormer-" + dragging.dormer + "-x-" + dragging.vertex;
+        var dyName = "dormer-" + dragging.dormer + "-y-" + dragging.vertex;
+        var dxIn = form.querySelector("[name='" + dxName + "']");
+        var dyIn = form.querySelector("[name='" + dyName + "']");
+        if (dxIn) { dxIn.value = String(metres.x); }
+        if (dyIn) { dyIn.value = String(metres.y); }
+        drawSvg(svg, editor);
+        return;
+      }
+      editor.moveVertex(dragging.cell, dragging.vertex, metres.x, metres.y);
+      var p = prefixOf(dragging.cell);
+      var cell = editor.cells()[dragging.cell];
+      var n = cell ? cell.vertices.length : 0;
+      var xName = dragging.vertex < n ? p + "outer-x-" + dragging.vertex : p + "hole-x-" + (dragging.vertex - n);
+      var yName = dragging.vertex < n ? p + "outer-y-" + dragging.vertex : p + "hole-y-" + (dragging.vertex - n);
+      var xIn = form.querySelector("[name='" + xName + "']");
+      var yIn = form.querySelector("[name='" + yName + "']");
+      if (xIn) { xIn.value = String(metres.x); }
+      if (yIn) { yIn.value = String(metres.y); }
+      drawSvg(svg, editor);
+    });
+    svg.addEventListener("pointerup", function () {
+      dragging = null;
     });
 
-    var closeBtn = form.querySelector("#close-ring");
-    if (closeBtn) {
-      closeBtn.addEventListener("click", function () {
-        editor.closeRing();
-        commit();
+    var addDetached = form.querySelector("#add-detached-cell");
+    var onWall = form.querySelector("#add-cell-on-wall");
+    var addVert = form.querySelector("#add-vertex");
+    if (addDetached) {
+      addDetached.addEventListener("click", function () {
+        editor.applyForm(form);
+        editor.addDetachedCell();
+        commit(true);
       });
     }
-    var deleteBtn = form.querySelector("#delete-cell");
-    if (deleteBtn) {
-      deleteBtn.addEventListener("click", function () {
+    if (onWall) {
+      onWall.addEventListener("click", function () {
+        editor.applyForm(form);
+        editor.addCellOnSelectedWall();
+        commit(true);
+      });
+    }
+    if (addVert) {
+      addVert.addEventListener("click", function () {
+        editor.applyForm(form);
+        editor.addVertexOnSelectedWall();
+        commit(true);
+      });
+    }
+    var del = form.querySelector("#delete-cell");
+    if (del) {
+      del.addEventListener("click", function () {
         editor.deleteCell();
-        commit();
+        commit(true);
       });
     }
-    var addBtn = form.querySelector("#add-cell");
-    if (addBtn) {
-      addBtn.addEventListener("click", function () {
-        editor.addCell();
-        commit();
+    var setPitchBtn = form.querySelector("#set-pitch");
+    if (setPitchBtn) {
+      setPitchBtn.addEventListener("click", function () {
+        var input = form.querySelector("[name=set_pitch]");
+        editor.setPitchOnSloping(input ? input.value : "45");
+        commit(true);
       });
     }
-    var drawDormer = form.querySelector("#draw-dormer");
-    if (drawDormer) {
-      drawDormer.addEventListener("click", function () {
-        editor.startDormer();
-        commit();
+    var edit = form.querySelector("#edit-coordinates");
+    if (edit) {
+      edit.addEventListener("change", function () {
+        var box = form.querySelector("#vertex-editor");
+        if (box) { box.hidden = !edit.checked; }
       });
     }
+
+    form.addEventListener("change", function (event) {
+      var el = event.target;
+      if (!el || !el.name) { return; }
+      if (el.name.indexOf("type-") !== -1 && el.type === "radio" && el.checked) {
+        var match = el.name.match(/^(?:cell-(\d+)-)?type-(\d+)$/);
+        if (match) {
+          var ci = match[1] ? parseInt(match[1], 10) : 0;
+          var wi = parseInt(match[2], 10);
+          var cell = editor.cells()[ci];
+          if (cell) {
+            var outerN = cell.vertices.length;
+            var ring = wi < outerN ? cell.vertices : cell.hole;
+            var local = wi < outerN ? wi : wi - outerN;
+            if (ring && ring.length) {
+              var a = ring[local];
+              var b = ring[(local + 1) % ring.length];
+              editor.clickPlan((a.x + b.x) / 2, (a.y + b.y) / 2);
+            }
+          }
+          editor.setWallType(el.value);
+          commit(true);
+        }
+        return;
+      }
+      if (el.dataset && el.dataset.extra === "hole") {
+        var card = el.closest(".cell-card");
+        var idx = card ? parseInt(card.getAttribute("data-cell"), 10) : 0;
+        var target = editor.cells()[idx];
+        if (target && target.vertices.length) {
+          editor.clickPlan(target.vertices[0].x, target.vertices[0].y);
+        }
+        editor.setUseHole(el.checked);
+        commit(true);
+        return;
+      }
+      if (el.dataset && el.dataset.extra === "overhang") {
+        var cardO = el.closest(".cell-card");
+        var idxO = cardO ? parseInt(cardO.getAttribute("data-cell"), 10) : 0;
+        if (editor.cells()[idxO]) {
+          editor.cells()[idxO].useOverhang = el.checked;
+          if (el.checked && (!editor.cells()[idxO].overhang || editor.cells()[idxO].overhang === "0")) {
+            editor.cells()[idxO].overhang = "0.5";
+          }
+        }
+        commit(true);
+        return;
+      }
+      if (el.dataset && el.dataset.extra === "eave") {
+        var cardE = el.closest(".cell-card");
+        var idxE = cardE ? parseInt(cardE.getAttribute("data-cell"), 10) : 0;
+        if (editor.cells()[idxE]) {
+          editor.cells()[idxE].useEave = el.checked;
+        }
+        commit(true);
+      }
+    });
 
     form.addEventListener("input", function (event) {
       var input = event.target;
-      if (!input || !input.name && !input.id) {
-        return;
-      }
-      if (input.id === "selected-eave-height") {
-        editor.setEaveHeight(input.value);
-        editor.writeForm(form);
-        drawSvg(svg, editor);
-        return;
-      }
-      if (input.id === "selected-pitch") {
-        editor.setPitch(input.value);
-        commit();
-        return;
-      }
-      if (input.id === "selected-knee-height") {
-        editor.setKneeHeight(input.value);
-        commit();
-        return;
-      }
-      if (input.id === "selected-gambrel-shallow" || input.id === "selected-gambrel-break") {
-        var steepEl = form.querySelector("#selected-pitch");
-        var shallowEl = form.querySelector("#selected-gambrel-shallow");
-        var breakEl = form.querySelector("#selected-gambrel-break");
-        var steep = steepEl ? steepEl.value : "";
-        var sh = shallowEl ? shallowEl.value : "";
-        var bh = breakEl ? breakEl.value : "";
-        if (sh !== "" && parseFloat(bh) > 0) {
-          editor.setGambrel(steep, sh, bh);
-        }
-        commit();
-        return;
-      }
-      if (input.name === "apply_to_all") {
-        editor.setApplyToAll(input.value);
-        return;
-      }
-      var match = input.name && input.name.match(/^(?:cell-(\d+)-)?outer-([xy])-(\d+)$/);
-      if (!match) {
-        return;
-      }
-      var cellIndex = match[1] ? parseInt(match[1], 10) : 0;
-      var axis = match[2];
-      var vertex = parseInt(match[3], 10);
+      if (!input || !input.name) { return; }
+      var vm = input.name.match(/^(?:cell-(\d+)-)?outer-([xy])-(\d+)$/);
+      if (!vm) { return; }
+      var cellIndex = vm[1] ? parseInt(vm[1], 10) : 0;
+      var axis = vm[2];
+      var vertex = parseInt(vm[3], 10);
       var ring = editor.rings()[cellIndex];
-      if (!ring || !ring[vertex]) {
-        editor.loadForm(form);
-        drawSvg(svg, editor);
-        return;
-      }
+      if (!ring || !ring[vertex]) { return; }
+      var parsed = parseFloat(input.value);
+      if (Number.isNaN(parsed)) { return; }
       var x = ring[vertex][0];
       var y = ring[vertex][1];
-      var parsed = parseFloat(input.value);
-      if (Number.isNaN(parsed)) {
-        return;
-      }
-      if (axis === "x") {
-        x = parsed;
-      } else {
-        y = parsed;
-      }
+      if (axis === "x") { x = parsed; } else { y = parsed; }
       editor.moveVertex(cellIndex, vertex, x, y);
       drawSvg(svg, editor);
     });
 
-    form.addEventListener("change", function (event) {
-      var box = event.target;
-      if (box && box.id === "selected-gable") {
-        editor.setGable(box.checked);
-        commit();
-      }
+    form.addEventListener("submit", function () {
+      form.querySelectorAll("input[name*='pitch-']").forEach(function (input) {
+        input.disabled = false;
+      });
     });
 
     return editor;

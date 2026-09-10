@@ -6,46 +6,53 @@ import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Flask, render_template, request
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 from krovlab.viz import plan_view, solid_view
-from web.corpus import DEFAULT_PRESET, Preset, load_presets
+from web.examples import DEFAULT_EXAMPLE, WALL_HINTS, Example, load_examples
 from web.figures import input_footprint
 
 
 @dataclass(frozen=True)
-class EdgeRow:
-    """One footprint edge on the form: index, endpoints, posted pitch."""
+class WallView:
+    """One wall on a cell: exclusive type plus the fields that type needs."""
 
     index: int
+    number: int
     start: tuple[Any, Any]
     end: tuple[Any, Any]
+    kind: str
     pitch: str
-    gable: bool
-    pitch_name: str
-    gable_name: str
     knee: str
-    knee_name: str
     shallow: str
-    shallow_name: str
     break_height: str
+    hint: str
+    prefix: str
+    type_name: str
+    pitch_name: str
+    knee_name: str
+    shallow_name: str
     break_name: str
 
 
 @dataclass(frozen=True)
-class ExtraCellView:
-    """Posted tables for a cell after the first, so the form can round-trip."""
+class CellView:
+    """One cell card on the form, including the first cell (prefix empty)."""
 
     index: int
+    title: str
     prefix: str
+    walls: list[WallView]
     footprint: list[tuple[Any, Any]]
     hole: list[tuple[Any, Any]]
-    edges: list[EdgeRow]
-    overhang: float | str
-    eave_height: float | str
+    overhang: str
+    eave_height: str
+    use_overhang: bool
+    use_eave: bool
+    use_hole: bool
 
 
 @dataclass(frozen=True)
@@ -56,202 +63,557 @@ class DormerView:
     cell_index: int
     footprint: list[tuple[Any, Any]]
     pitches: list[str]
-    gables: list[bool]
+    kinds: list[str]
 
 
 def create_app() -> Flask:
     """Build the single-page form app. One route for GET and POST."""
     app = Flask(__name__)
-    presets = load_presets()
+    examples = load_examples()
+    groups = _example_groups(examples)
 
     @app.route("/", methods=["GET", "POST"])
     def index() -> str:
-        name = (
-            request.form.get("fixture", DEFAULT_PRESET)
-            if request.method == "POST"
-            else DEFAULT_PRESET
-        )
-        preset = presets.get(name, presets[DEFAULT_PRESET])
-        stale = _fixture_changed(request.method, request.form, preset.name)
-        footprint, holes, parse_error = _rings_for_request(
-            request.method, request.form, preset, stale
-        )
-        n_edges = len(footprint) + sum(len(hole) for hole in (holes or []))
-        fallback = _expand_pitches(preset.pitch, n_edges)
-        draw_overhang = preset.overhang
-        form_overhang: float | str = preset.overhang
-        form_eave_height: float | str = 0.0
-        extra_views: list[ExtraCellView] = []
-        extra_footprints: list[list[tuple[float, float]]] = []
-        knees: list[float] = [0.0] * n_edges
-        gambrels: list[tuple[Pitch, Pitch, float] | None] = [None] * n_edges
-        dormer_views: list[DormerView] = []
-        result: Roof | Project | Failure
-        if parse_error is not None:
-            apply_to_all = request.form.get("apply_to_all") or (
-                str(fallback[0]) if fallback else ""
+        if request.method != "POST":
+            slug = request.args.get("example") or DEFAULT_EXAMPLE
+            example = examples.get(slug, examples[DEFAULT_EXAMPLE])
+            return _render(
+                example,
+                groups,
+                cells=_cell_views_from_cells(example.cells),
+                dormers=_dormer_views_from_items(example.dormers),
+                result=_run_cells(list(example.cells), list(example.dormers)),
+                set_pitch=_default_set_pitch(example.cells[0]),
+                edit_coordinates=False,
             )
-            pitches = _posted_pitches(request.form, n_edges, fallback, apply_to_all)
-            posted_knees = _posted_knees(request.form, n_edges)
-            if not isinstance(posted_knees, Failure):
-                knees = posted_knees
-            posted_gambrels = _posted_gambrels(request.form, n_edges, pitches)
-            if not isinstance(posted_gambrels, Failure):
-                gambrels = posted_gambrels
-            result = parse_error
-            draw_rings: tuple[
-                list[tuple[float, float]],
-                list[list[tuple[float, float]]] | None,
-            ] = ([], None)
-        elif request.method == "POST" and not stale:
-            apply_to_all = request.form.get("apply_to_all") or ""
-            pitches = _posted_pitches(request.form, n_edges, fallback, apply_to_all)
-            if not apply_to_all:
-                apply_to_all = str(pitches[0]) if pitches else ""
-            parsed_overhang = _posted_overhang(request.form, preset.overhang)
-            parsed_eave_height = _posted_eave_height(request.form, preset.eave_height)
-            parsed_knees = _posted_knees(request.form, n_edges)
-            parsed_gambrels = _posted_gambrels(request.form, n_edges, pitches)
-            parsed_footprint = cast(list[tuple[float, float]], footprint)
-            parsed_holes = cast(list[list[tuple[float, float]]] | None, holes)
-            if isinstance(parsed_overhang, Failure):
-                result = parsed_overhang
-                form_overhang = request.form.get("overhang") or preset.overhang
-                draw_overhang = 0.0
-                draw_rings = (parsed_footprint, parsed_holes)
-            elif isinstance(parsed_eave_height, Failure):
-                result = parsed_eave_height
-                form_eave_height = request.form.get("eave_height") or 0.0
-                draw_rings = (parsed_footprint, parsed_holes)
-            elif isinstance(parsed_knees, Failure):
-                result = parsed_knees
-                draw_rings = (parsed_footprint, parsed_holes)
-            elif isinstance(parsed_gambrels, Failure):
-                result = parsed_gambrels
-                draw_rings = (parsed_footprint, parsed_holes)
-            else:
-                draw_overhang = parsed_overhang
-                form_overhang = parsed_overhang
-                form_eave_height = parsed_eave_height
-                knees = parsed_knees
-                gambrels = parsed_gambrels
-                posted_gambrel = _optional_gambrel(parsed_gambrels)
-                draw_rings = (parsed_footprint, parsed_holes)
-                extra_views, extra_parsed = _extra_cells_for_post(
-                    request.form, apply_to_all, preset
-                )
-                dormer_views, parsed_dormers = _posted_dormers(request.form)
-                first_cell = Cell(
-                    parsed_footprint,
-                    pitches,
-                    holes=parsed_holes,
-                    overhang=parsed_overhang,
-                    eave_height=parsed_eave_height,
-                    knee_height=parsed_knees,
-                    gambrel=posted_gambrel,
-                )
-                if isinstance(extra_parsed, Failure):
-                    result = extra_parsed
-                elif isinstance(parsed_dormers, Failure):
-                    result = parsed_dormers
-                elif extra_parsed:
-                    extra_footprints = [cell.footprint for cell in extra_parsed]
-                    result = project(
-                        [first_cell, *extra_parsed],
-                        parsed_dormers or None,
-                    )
-                elif parsed_dormers:
-                    result = project([first_cell], parsed_dormers)
-                else:
-                    result = roof(
-                        parsed_footprint,
-                        pitches,
-                        holes=parsed_holes,
-                        overhang=parsed_overhang,
-                        eave_height=parsed_eave_height,
-                        knee_height=parsed_knees,
-                        gambrel=posted_gambrel,
-                    )
-        else:
-            pitches = fallback
-            apply_to_all = str(pitches[0]) if pitches else ""
-            form_eave_height = preset.eave_height
-            parsed_footprint = cast(list[tuple[float, float]], footprint)
-            parsed_holes = cast(list[list[tuple[float, float]]] | None, holes)
-            extra_views = _extra_views_from_cells(preset.extra_cells)
-            extra_footprints = [cell.footprint for cell in preset.extra_cells]
-            result = _from_preset(preset)
-            draw_rings = (parsed_footprint, parsed_holes)
-        rows = _edge_rows(footprint, holes, pitches, knees=knees, gambrels=gambrels)
-        plan_html, solid_html, footprint_html = _draw(
-            result,
-            draw_rings[0],
-            draw_rings[1],
-            draw_overhang,
-            extra_footprints,
-        )
-        return render_template(
-            "page.html",
-            names=list(presets),
-            selected=preset.name,
-            apply_to_all=apply_to_all,
-            overhang=form_overhang,
-            eave_height=form_eave_height,
-            edges=rows,
-            footprint=footprint,
-            hole=holes[0] if holes else [],
-            extra_cells=extra_views,
-            dormers=dormer_views,
-            describe=_describe(result),
-            plan_html=plan_html,
-            solid_html=solid_html,
-            footprint_html=footprint_html,
-            edit_vertices=bool(
-                (request.method == "POST" and request.form.get("edit_vertices"))
-                or extra_views
-            ),
-        )
+        slug = request.form.get("example") or DEFAULT_EXAMPLE
+        example = examples.get(slug, examples[DEFAULT_EXAMPLE])
+        return _render_post(request.form, example, groups)
 
     return app
 
 
-def _fixture_changed(method: str, form: Mapping[str, str], name: str) -> bool:
-    if method != "POST":
-        return False
-    loaded = form.get("loaded_fixture")
-    return bool(loaded) and loaded != name
+def _example_groups(
+    examples: dict[str, Example],
+) -> list[tuple[str, list[Example]]]:
+    groups: list[tuple[str, list[Example]]] = []
+    current = ""
+    bucket: list[Example] = []
+    for item in examples.values():
+        if item.group != current:
+            if bucket:
+                groups.append((current, bucket))
+            current = item.group
+            bucket = [item]
+        else:
+            bucket.append(item)
+    if bucket:
+        groups.append((current, bucket))
+    return groups
 
 
-def _rings_for_request(
-    method: str,
+def _render_post(
     form: Mapping[str, str],
-    preset: Preset,
-    stale: bool,
-) -> tuple[
-    list[tuple[Any, Any]],
-    list[list[tuple[Any, Any]]] | None,
-    Failure | None,
-]:
-    if method != "POST" or stale:
-        return preset.footprint, preset.holes, None
-    if not form.get("edit_vertices"):
-        return preset.footprint, preset.holes, None
-    posted_outer = _posted_ring(form, "outer")
-    if posted_outer is None:
-        return preset.footprint, preset.holes, None
-    parsed_outer = _as_xy_ring(posted_outer, "footprint")
-    posted_hole = _posted_ring(form, "hole")
-    if isinstance(parsed_outer, Failure):
-        holes: list[list[tuple[Any, Any]]] | None = (
-            [posted_hole] if posted_hole else None
+    example: Example,
+    groups: list[tuple[str, list[Example]]],
+) -> str:
+    set_pitch = form.get("set_pitch") or "45"
+    edit_coordinates = bool(form.get("edit_coordinates"))
+    views, parsed = _posted_cells(form, set_pitch)
+    dormer_views, parsed_dormers = _posted_dormers(form)
+    result: Roof | Project | Failure
+    if isinstance(parsed, Failure):
+        result = parsed
+    elif isinstance(parsed_dormers, Failure):
+        result = parsed_dormers
+    else:
+        result = _run_cells(parsed, parsed_dormers)
+    return _render(
+        example,
+        groups,
+        cells=views,
+        dormers=dormer_views,
+        result=result,
+        set_pitch=set_pitch,
+        edit_coordinates=edit_coordinates,
+    )
+
+
+def _render(
+    example: Example,
+    groups: list[tuple[str, list[Example]]],
+    *,
+    cells: list[CellView],
+    dormers: list[DormerView],
+    result: Roof | Project | Failure,
+    set_pitch: str,
+    edit_coordinates: bool,
+) -> str:
+    extra_footprints = [cell.footprint for cell in cells[1:]]
+    first = cells[0] if cells else None
+    holes: list[list[tuple[Any, Any]]] | None = None
+    draw_overhang = 0.0
+    draw_footprint: list[tuple[Any, Any]] = []
+    if first is not None:
+        draw_footprint = first.footprint
+        if first.use_hole and first.hole:
+            holes = [first.hole]
+        if first.use_overhang:
+            try:
+                draw_overhang = float(first.overhang)
+            except ValueError:
+                draw_overhang = 0.0
+    plan_html, solid_html, footprint_html = _draw(
+        result,
+        draw_footprint,
+        holes,
+        draw_overhang,
+        extra_footprints,
+    )
+    return render_template(
+        "page.html",
+        example=example,
+        groups=groups,
+        cells=cells,
+        dormers=dormers,
+        set_pitch=set_pitch,
+        edit_coordinates=edit_coordinates,
+        describe=_describe(result),
+        plan_html=plan_html,
+        solid_html=solid_html,
+        footprint_html=footprint_html,
+        wall_hints=WALL_HINTS,
+    )
+
+
+def _run_cells(
+    cells: list[Cell],
+    dormers: Sequence[Dormer],
+) -> Roof | Project | Failure:
+    if not cells:
+        return Failure(kind="empty", reason="a project needs at least one cell")
+    if dormers:
+        return project(cells, list(dormers))
+    if len(cells) == 1:
+        cell = cells[0]
+        return roof(
+            cell.footprint,
+            cell.pitch,
+            holes=cell.holes,
+            overhang=cell.overhang,
+            eave_height=cell.eave_height,
+            knee_height=cell.knee_height,
+            gambrel=cell.gambrel,
         )
-        return posted_outer, holes, parsed_outer
-    if posted_hole is None:
-        return parsed_outer, None, None
-    parsed_hole = _as_xy_ring(posted_hole, "hole")
-    if isinstance(parsed_hole, Failure):
-        return parsed_outer, [posted_hole], parsed_hole
-    return parsed_outer, [parsed_hole], None
+    return project(cells)
+
+
+def _default_set_pitch(cell: Cell) -> str:
+    if isinstance(cell.pitch, list):
+        for item in cell.pitch:
+            if not _is_gable(item):
+                return str(item)
+        return "45"
+    return str(cell.pitch)
+
+
+def _cell_views_from_cells(cells: Sequence[Cell]) -> list[CellView]:
+    return [_view_from_cell(i, cell) for i, cell in enumerate(cells)]
+
+
+def _view_from_cell(index: int, cell: Cell) -> CellView:
+    prefix = "" if index == 0 else f"cell-{index}-"
+    hole = list(cell.holes[0]) if cell.holes else []
+    n_edges = len(cell.footprint) + len(hole)
+    pitches = _expand_pitches(cell.pitch, n_edges)
+    knees = _expand_knees(cell.knee_height, n_edges)
+    return CellView(
+        index=index,
+        title=f"Cell {index + 1}",
+        prefix=prefix,
+        walls=_wall_views(
+            cell.footprint,
+            hole,
+            pitches,
+            prefix=prefix,
+            knees=knees,
+            gambrels=cell.gambrel,
+        ),
+        footprint=list(cell.footprint),
+        hole=hole,
+        overhang=_fmt(cell.overhang),
+        eave_height=_fmt(cell.eave_height),
+        use_overhang=float(cell.overhang) != 0.0,
+        use_eave=float(cell.eave_height) != 0.0,
+        use_hole=bool(hole),
+    )
+
+
+def _wall_views(
+    footprint: list[tuple[Any, Any]],
+    hole: list[tuple[Any, Any]],
+    pitches: list[Pitch],
+    *,
+    prefix: str = "",
+    knees: list[float] | None = None,
+    gambrels: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
+) -> list[WallView]:
+    rings = [footprint, *([hole] if hole else [])]
+    rows: list[WallView] = []
+    for ring in rings:
+        count = len(ring)
+        for i, start in enumerate(ring):
+            end = ring[(i + 1) % count]
+            index = len(rows)
+            raw = pitches[index] if index < len(pitches) else ""
+            knee = 0.0
+            if knees is not None and index < len(knees):
+                knee = knees[index]
+            item = (
+                None if gambrels is None or index >= len(gambrels) else gambrels[index]
+            )
+            kind, pitch, shallow, break_height = _kind_fields(raw, knee, item)
+            rows.append(
+                WallView(
+                    index=index,
+                    number=index + 1,
+                    start=start,
+                    end=end,
+                    kind=kind,
+                    pitch=pitch,
+                    knee=_fmt(knee) if kind == "knee" else "0",
+                    shallow=shallow,
+                    break_height=break_height,
+                    hint=WALL_HINTS[kind],
+                    prefix=prefix,
+                    type_name=f"{prefix}type-{index}",
+                    pitch_name=f"{prefix}pitch-{index}",
+                    knee_name=f"{prefix}knee-{index}",
+                    shallow_name=f"{prefix}gambrel-shallow-{index}",
+                    break_name=f"{prefix}gambrel-break-{index}",
+                )
+            )
+    return rows
+
+
+def _kind_fields(
+    raw: Pitch,
+    knee: float,
+    item: tuple[Pitch, Pitch, float] | None,
+) -> tuple[str, str, str, str]:
+    if item is not None:
+        steep, shallow_pitch, height = item
+        return "gambrel", str(steep), str(shallow_pitch), str(height)
+    if _is_gable(raw):
+        return "gable", "90", "", "0"
+    if knee > 0.0:
+        return "knee", str(raw), "", "0"
+    return "hip", str(raw), "", "0"
+
+
+def _fmt(value: Any) -> str:
+    return str(value)
+
+
+def _posted_cells(
+    form: Mapping[str, str],
+    set_pitch: str,
+) -> tuple[list[CellView], list[Cell] | Failure]:
+    views: list[CellView] = []
+    cells: list[Cell] = []
+    index = 0
+    while index <= 32:
+        prefix = "" if index == 0 else f"cell-{index}-"
+        posted_outer = _posted_ring(form, f"{prefix}outer")
+        if posted_outer is None:
+            if index == 0:
+                return views, Failure(
+                    kind="degenerate",
+                    reason="a cell needs an outer ring",
+                )
+            break
+        posted_hole = _posted_ring(form, f"{prefix}hole")
+        use_hole = bool(form.get(f"{prefix}use_hole"))
+        hole_display = posted_hole if use_hole and posted_hole else []
+        n_edges = len(posted_outer) + len(hole_display)
+        spec = _posted_edge_spec(form, n_edges, prefix, set_pitch)
+        use_overhang = bool(form.get(f"{prefix}use_overhang"))
+        use_eave = bool(form.get(f"{prefix}use_eave_height"))
+        raw_overhang = form.get(f"{prefix}overhang") or "0"
+        raw_eave = form.get(f"{prefix}eave_height") or "0"
+        if isinstance(spec, Failure):
+            views.append(
+                _cell_view_from_parts(
+                    index,
+                    prefix,
+                    posted_outer,
+                    hole_display,
+                    [],
+                    None,
+                    None,
+                    raw_overhang,
+                    raw_eave,
+                    use_overhang,
+                    use_eave,
+                    use_hole,
+                    set_pitch,
+                )
+            )
+            return views, spec
+        pitches, knees, gambrels = spec
+        parsed_outer = _as_xy_ring(
+            posted_outer, "footprint" if index == 0 else f"cell {index} footprint"
+        )
+        display_outer: list[tuple[Any, Any]] = posted_outer
+        display_hole: list[tuple[Any, Any]] = hole_display
+        if isinstance(parsed_outer, Failure):
+            views.append(
+                _cell_view_from_parts(
+                    index,
+                    prefix,
+                    display_outer,
+                    display_hole,
+                    pitches,
+                    knees,
+                    gambrels,
+                    raw_overhang,
+                    raw_eave,
+                    use_overhang,
+                    use_eave,
+                    use_hole,
+                    set_pitch,
+                )
+            )
+            return views, parsed_outer
+        display_outer = parsed_outer
+        parsed_holes: list[list[tuple[float, float]]] | None = None
+        if use_hole and posted_hole:
+            parsed_hole = _as_xy_ring(
+                posted_hole, "hole" if index == 0 else f"cell {index} hole"
+            )
+            if isinstance(parsed_hole, Failure):
+                views.append(
+                    _cell_view_from_parts(
+                        index,
+                        prefix,
+                        display_outer,
+                        display_hole,
+                        pitches,
+                        knees,
+                        gambrels,
+                        raw_overhang,
+                        raw_eave,
+                        use_overhang,
+                        use_eave,
+                        use_hole,
+                        set_pitch,
+                    )
+                )
+                return views, parsed_hole
+            parsed_holes = [parsed_hole]
+            display_hole = parsed_hole
+        if use_overhang:
+            overhang = _posted_overhang(form, 0.0, field=f"{prefix}overhang")
+        else:
+            overhang = 0.0
+        if isinstance(overhang, Failure):
+            views.append(
+                _cell_view_from_parts(
+                    index,
+                    prefix,
+                    display_outer,
+                    display_hole,
+                    pitches,
+                    knees,
+                    gambrels,
+                    raw_overhang,
+                    raw_eave,
+                    use_overhang,
+                    use_eave,
+                    use_hole,
+                    set_pitch,
+                )
+            )
+            return views, overhang
+        if use_eave:
+            eave_height = _posted_eave_height(form, field=f"{prefix}eave_height")
+        else:
+            eave_height = 0.0
+        if isinstance(eave_height, Failure):
+            views.append(
+                _cell_view_from_parts(
+                    index,
+                    prefix,
+                    display_outer,
+                    display_hole,
+                    pitches,
+                    knees,
+                    gambrels,
+                    raw_overhang,
+                    raw_eave,
+                    use_overhang,
+                    use_eave,
+                    use_hole,
+                    set_pitch,
+                )
+            )
+            return views, eave_height
+        views.append(
+            CellView(
+                index=index,
+                title=f"Cell {index + 1}",
+                prefix=prefix,
+                walls=_wall_views(
+                    display_outer,
+                    display_hole,
+                    pitches,
+                    prefix=prefix,
+                    knees=knees,
+                    gambrels=gambrels,
+                ),
+                footprint=display_outer,
+                hole=display_hole,
+                overhang=raw_overhang,
+                eave_height=raw_eave,
+                use_overhang=use_overhang,
+                use_eave=use_eave,
+                use_hole=use_hole,
+            )
+        )
+        cells.append(
+            Cell(
+                parsed_outer,
+                pitches,
+                holes=parsed_holes,
+                overhang=overhang,
+                eave_height=eave_height,
+                knee_height=knees,
+                gambrel=_optional_gambrel(gambrels),
+            )
+        )
+        index += 1
+    return views, cells
+
+
+def _cell_view_from_parts(
+    index: int,
+    prefix: str,
+    outer: list[tuple[Any, Any]],
+    hole: list[tuple[Any, Any]],
+    pitches: list[Pitch],
+    knees: list[float] | None,
+    gambrels: Sequence[tuple[Pitch, Pitch, float] | None] | None,
+    overhang: str,
+    eave_height: str,
+    use_overhang: bool,
+    use_eave: bool,
+    use_hole: bool,
+    set_pitch: str,
+) -> CellView:
+    if not pitches:
+        pitches = [set_pitch] * (len(outer) + len(hole))
+    return CellView(
+        index=index,
+        title=f"Cell {index + 1}",
+        prefix=prefix,
+        walls=_wall_views(
+            outer, hole, pitches, prefix=prefix, knees=knees, gambrels=gambrels
+        ),
+        footprint=outer,
+        hole=hole,
+        overhang=overhang,
+        eave_height=eave_height,
+        use_overhang=use_overhang,
+        use_eave=use_eave,
+        use_hole=use_hole,
+    )
+
+
+def _posted_edge_spec(
+    form: Mapping[str, str],
+    n: int,
+    prefix: str,
+    set_pitch: str,
+) -> (
+    tuple[
+        list[Pitch],
+        list[float],
+        list[tuple[Pitch, Pitch, float] | None],
+    ]
+    | Failure
+):
+    pitches: list[Pitch] = []
+    knees: list[float] = []
+    gambrels: list[tuple[Pitch, Pitch, float] | None] = []
+    for i in range(n):
+        kind = form.get(f"{prefix}type-{i}") or "hip"
+        if kind == "gable":
+            pitches.append("90")
+            knees.append(0.0)
+            gambrels.append(None)
+            continue
+        posted = form.get(f"{prefix}pitch-{i}")
+        pitches.append(posted if posted not in (None, "") else set_pitch)
+        if kind == "knee":
+            parsed_knee = _posted_one_knee(form.get(f"{prefix}knee-{i}"))
+            if isinstance(parsed_knee, Failure):
+                return parsed_knee
+            knees.append(parsed_knee)
+            gambrels.append(None)
+            continue
+        knees.append(0.0)
+        if kind == "gambrel":
+            parsed_g = _posted_one_gambrel(
+                pitches[-1],
+                form.get(f"{prefix}gambrel-shallow-{i}"),
+                form.get(f"{prefix}gambrel-break-{i}"),
+            )
+            if isinstance(parsed_g, Failure):
+                return parsed_g
+            gambrels.append(parsed_g)
+        else:
+            gambrels.append(None)
+    return pitches, knees, gambrels
+
+
+def _posted_one_knee(raw: str | None) -> float | Failure:
+    if raw is None or str(raw).strip() == "":
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return Failure(
+            kind="degenerate",
+            reason="knee height must be a finite number of metres, zero or positive",
+        )
+
+
+def _posted_one_gambrel(
+    steep: Pitch,
+    raw_shallow: str | None,
+    raw_break: str | None,
+) -> tuple[Pitch, Pitch, float] | Failure | None:
+    shallow_blank = raw_shallow is None or str(raw_shallow).strip() == ""
+    break_blank = raw_break is None or str(raw_break).strip() == ""
+    if shallow_blank or break_blank:
+        if not shallow_blank and break_blank:
+            return None
+        if shallow_blank and not break_blank:
+            return Failure(
+                kind="degenerate",
+                reason="a gambrel needs a shallow pitch and a break height",
+            )
+        return None
+    try:
+        height = float(str(raw_break))
+    except ValueError:
+        return Failure(
+            kind="degenerate",
+            reason="break height must be a finite number of metres above the eave",
+        )
+    if not math.isfinite(height) or height <= 0.0:
+        return None
+    return (steep, str(raw_shallow).strip(), height)
 
 
 def _posted_ring(form: Mapping[str, str], prefix: str) -> list[tuple[str, str]] | None:
@@ -272,7 +634,8 @@ def _posted_ring(form: Mapping[str, str], prefix: str) -> list[tuple[str, str]] 
 
 
 def _as_xy_ring(
-    points: list[tuple[str, str]], name: str
+    points: list[tuple[str, str]],
+    name: str,
 ) -> list[tuple[float, float]] | Failure:
     ring: list[tuple[float, float]] = []
     for i, (raw_x, raw_y) in enumerate(points):
@@ -284,29 +647,6 @@ def _as_xy_ring(
                 reason=f"{name} vertex {i} is not an (x, y) metre pair",
             )
     return ring
-
-
-def _posted_pitches(
-    form: Mapping[str, str],
-    n: int,
-    fallback: list[Pitch],
-    apply_to_all: str,
-    *,
-    prefix: str = "",
-) -> list[Pitch]:
-    pitches: list[Pitch] = []
-    for i in range(n):
-        if form.get(f"{prefix}gable-{i}"):
-            pitches.append("90")
-            continue
-        posted = form.get(f"{prefix}pitch-{i}")
-        if posted is not None and posted != "":
-            pitches.append(posted)
-        elif apply_to_all:
-            pitches.append(apply_to_all)
-        else:
-            pitches.append(fallback[i] if i < len(fallback) else "")
-    return pitches
 
 
 def _posted_overhang(
@@ -342,76 +682,6 @@ def _posted_eave_height(
         )
 
 
-def _posted_knees(
-    form: Mapping[str, str],
-    n: int,
-    *,
-    prefix: str = "",
-) -> list[float] | Failure:
-    knees: list[float] = []
-    for i in range(n):
-        raw = form.get(f"{prefix}knee-{i}")
-        if raw is None or str(raw).strip() == "":
-            knees.append(0.0)
-            continue
-        try:
-            value = float(raw)
-        except ValueError:
-            return Failure(
-                kind="degenerate",
-                reason=(
-                    "knee height must be a finite number of metres, zero or positive"
-                ),
-            )
-        knees.append(value)
-    return knees
-
-
-def _posted_gambrels(
-    form: Mapping[str, str],
-    n: int,
-    pitches: list[Pitch],
-    *,
-    prefix: str = "",
-) -> list[tuple[Pitch, Pitch, float] | None] | Failure:
-    items: list[tuple[Pitch, Pitch, float] | None] = []
-    for i in range(n):
-        raw_shallow = form.get(f"{prefix}gambrel-shallow-{i}")
-        raw_break = form.get(f"{prefix}gambrel-break-{i}")
-        shallow_blank = raw_shallow is None or str(raw_shallow).strip() == ""
-        break_blank = raw_break is None or str(raw_break).strip() == ""
-        if shallow_blank and break_blank:
-            items.append(None)
-            continue
-        if break_blank:
-            items.append(None)
-            continue
-        try:
-            height = float(str(raw_break))
-        except ValueError:
-            return Failure(
-                kind="degenerate",
-                reason="break height must be a finite number of metres above the eave",
-            )
-        if not math.isfinite(height) or height <= 0.0:
-            items.append(None)
-            continue
-        if shallow_blank:
-            return Failure(
-                kind="degenerate",
-                reason="a gambrel needs a shallow pitch and a break height",
-            )
-        steep = pitches[i] if i < len(pitches) else ""
-        items.append((steep, str(raw_shallow).strip(), height))
-    return items
-
-
-def _optional_gambrel(
-    items: list[tuple[Pitch, Pitch, float] | None],
-) -> list[tuple[Pitch, Pitch, float] | None] | None:
-    return items if any(items) else None
-
-
 def _posted_dormers(
     form: Mapping[str, str],
 ) -> tuple[list[DormerView], list[Dormer] | Failure]:
@@ -433,8 +703,17 @@ def _posted_dormers(
         while ring_display and ring_display[-1] == ("", ""):
             ring_display.pop()
         n_edges = len(ring_display)
-        pitches = _posted_pitches(form, n_edges, [], "", prefix=f"dormer-{index}-")
-        gables = [bool(form.get(f"dormer-{index}-gable-{j}")) for j in range(n_edges)]
+        pitches: list[Pitch] = []
+        kinds: list[str] = []
+        for j in range(n_edges):
+            kind = form.get(f"dormer-{index}-type-{j}") or "hip"
+            if kind == "gable" or form.get(f"dormer-{index}-gable-{j}"):
+                kinds.append("gable")
+                pitches.append("90")
+            else:
+                kinds.append("hip")
+                posted = form.get(f"dormer-{index}-pitch-{j}") or "45"
+                pitches.append(posted)
         raw_cell = form.get(f"dormer-{index}-cell") or "0"
         try:
             cell_index = int(raw_cell)
@@ -445,7 +724,7 @@ def _posted_dormers(
                     cell_index=0,
                     footprint=ring_display,
                     pitches=[str(p) for p in pitches],
-                    gables=gables,
+                    kinds=kinds,
                 )
             )
             return views, Failure(
@@ -458,7 +737,7 @@ def _posted_dormers(
                 cell_index=cell_index,
                 footprint=ring_display,
                 pitches=[str(p) for p in pitches],
-                gables=gables,
+                kinds=kinds,
             )
         )
         parsed_ring = _as_xy_ring(ring_display, f"dormer {index} ring")
@@ -467,6 +746,27 @@ def _posted_dormers(
         items.append(Dormer(cell_index, parsed_ring, pitches))
         index += 1
     return views, items
+
+
+def _dormer_views_from_items(items: Sequence[Dormer]) -> list[DormerView]:
+    views: list[DormerView] = []
+    for index, item in enumerate(items):
+        n = len(item.footprint)
+        pitches = _expand_pitches(item.pitch, n)
+        kinds = ["gable" if _is_gable(p) else "hip" for p in pitches]
+        views.append(
+            DormerView(
+                index=index,
+                cell_index=item.cell_index,
+                footprint=list(item.footprint),
+                pitches=[
+                    "90" if k == "gable" else str(p)
+                    for p, k in zip(pitches, kinds, strict=True)
+                ],
+                kinds=kinds,
+            )
+        )
+    return views
 
 
 def _expand_knees(value: float | list[float], n: int) -> list[float]:
@@ -490,194 +790,10 @@ def _is_gable(pitch: Pitch) -> bool:
         return False
 
 
-def _edge_rows(
-    footprint: list[tuple[Any, Any]],
-    holes: list[list[tuple[Any, Any]]] | None,
-    pitches: list[Pitch],
-    *,
-    prefix: str = "",
-    knees: list[float] | None = None,
-    gambrels: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
-) -> list[EdgeRow]:
-    rings = [footprint, *(holes or [])]
-    rows: list[EdgeRow] = []
-    for ring in rings:
-        count = len(ring)
-        for i, start in enumerate(ring):
-            end = ring[(i + 1) % count]
-            raw = pitches[len(rows)] if len(rows) < len(pitches) else ""
-            gable = _is_gable(raw)
-            index = len(rows)
-            knee = 0.0
-            if knees is not None and index < len(knees):
-                knee = knees[index]
-            shallow = ""
-            break_height = "0"
-            item = (
-                None if gambrels is None or index >= len(gambrels) else gambrels[index]
-            )
-            if item is not None:
-                _steep, shallow_pitch, height = item
-                shallow = str(shallow_pitch)
-                break_height = str(height)
-            rows.append(
-                EdgeRow(
-                    index=index,
-                    start=start,
-                    end=end,
-                    pitch="90" if gable else str(raw),
-                    gable=gable,
-                    pitch_name=f"{prefix}pitch-{index}",
-                    gable_name=f"{prefix}gable-{index}",
-                    knee=str(knee),
-                    knee_name=f"{prefix}knee-{index}",
-                    shallow=shallow,
-                    shallow_name=f"{prefix}gambrel-shallow-{index}",
-                    break_height=break_height,
-                    break_name=f"{prefix}gambrel-break-{index}",
-                )
-            )
-    return rows
-
-
-def _from_preset(preset: Preset) -> Roof | Project | Failure:
-    cells = [
-        Cell(
-            preset.footprint,
-            preset.pitch,
-            holes=preset.holes,
-            overhang=preset.overhang,
-            eave_height=preset.eave_height,
-        ),
-        *preset.extra_cells,
-    ]
-    if len(cells) == 1:
-        return roof(
-            cells[0].footprint,
-            cells[0].pitch,
-            holes=cells[0].holes,
-            overhang=cells[0].overhang,
-            eave_height=cells[0].eave_height,
-            knee_height=cells[0].knee_height,
-            gambrel=cells[0].gambrel,
-        )
-    return project(cells)
-
-
-def _extra_cells_for_post(
-    form: Mapping[str, str], apply_to_all: str, preset: Preset
-) -> tuple[list[ExtraCellView], list[Cell] | Failure]:
-    if form.get("edit_vertices"):
-        return _posted_extra_cells(form, apply_to_all)
-    extras = list(preset.extra_cells)
-    return _extra_views_from_cells(extras), extras
-
-
-def _extra_views_from_cells(cells: Sequence[Cell]) -> list[ExtraCellView]:
-    return [_view_from_cell(i + 1, cell) for i, cell in enumerate(cells)]
-
-
-def _view_from_cell(index: int, cell: Cell) -> ExtraCellView:
-    prefix = f"cell-{index}-"
-    hole = cell.holes[0] if cell.holes else []
-    n_edges = len(cell.footprint) + len(hole)
-    pitches = _expand_pitches(cell.pitch, n_edges)
-    knees = _expand_knees(cell.knee_height, n_edges)
-    return ExtraCellView(
-        index=index,
-        prefix=prefix,
-        footprint=cell.footprint,
-        hole=hole,
-        edges=_edge_rows(
-            cell.footprint,
-            [hole] if hole else None,
-            pitches,
-            prefix=prefix,
-            knees=knees,
-            gambrels=cell.gambrel,
-        ),
-        overhang=cell.overhang,
-        eave_height=cell.eave_height,
-    )
-
-
-def _posted_extra_cells(
-    form: Mapping[str, str], apply_to_all: str
-) -> tuple[list[ExtraCellView], list[Cell] | Failure]:
-    views: list[ExtraCellView] = []
-    cells: list[Cell] = []
-    index = 1
-    while form.get(f"cell-{index}-outer-x-0") is not None:
-        prefix = f"cell-{index}-"
-        posted_outer = _posted_ring(form, f"{prefix}outer")
-        posted_hole = _posted_ring(form, f"{prefix}hole")
-        outer_display = posted_outer or []
-        hole_display = posted_hole or []
-        n_edges = len(outer_display) + len(hole_display)
-        pitches = _posted_pitches(form, n_edges, [], apply_to_all, prefix=prefix)
-        posted_knees = _posted_knees(form, n_edges, prefix=prefix)
-        posted_gambrels = _posted_gambrels(form, n_edges, pitches, prefix=prefix)
-        display_knees = posted_knees if not isinstance(posted_knees, Failure) else None
-        display_gambrels = (
-            posted_gambrels if not isinstance(posted_gambrels, Failure) else None
-        )
-        raw_overhang = form.get(f"{prefix}overhang") or "0"
-        raw_eave = form.get(f"{prefix}eave_height") or "0"
-        views.append(
-            ExtraCellView(
-                index=index,
-                prefix=prefix,
-                footprint=outer_display,
-                hole=hole_display,
-                edges=_edge_rows(
-                    outer_display,
-                    [hole_display] if hole_display else None,
-                    pitches,
-                    prefix=prefix,
-                    knees=display_knees,
-                    gambrels=display_gambrels,
-                ),
-                overhang=raw_overhang,
-                eave_height=raw_eave,
-            )
-        )
-        if posted_outer is None:
-            return views, Failure(
-                kind="degenerate",
-                reason=f"cell {index} needs an outer ring",
-            )
-        parsed_outer = _as_xy_ring(posted_outer, f"cell {index} footprint")
-        if isinstance(parsed_outer, Failure):
-            return views, parsed_outer
-        parsed_holes: list[list[tuple[float, float]]] | None = None
-        if posted_hole:
-            parsed_hole = _as_xy_ring(posted_hole, f"cell {index} hole")
-            if isinstance(parsed_hole, Failure):
-                return views, parsed_hole
-            parsed_holes = [parsed_hole]
-        overhang = _posted_overhang(form, 0.0, field=f"{prefix}overhang")
-        if isinstance(overhang, Failure):
-            return views, overhang
-        eave_height = _posted_eave_height(form, field=f"{prefix}eave_height")
-        if isinstance(eave_height, Failure):
-            return views, eave_height
-        if isinstance(posted_knees, Failure):
-            return views, posted_knees
-        if isinstance(posted_gambrels, Failure):
-            return views, posted_gambrels
-        cells.append(
-            Cell(
-                parsed_outer,
-                pitches,
-                holes=parsed_holes,
-                overhang=overhang,
-                eave_height=eave_height,
-                knee_height=posted_knees,
-                gambrel=_optional_gambrel(posted_gambrels),
-            )
-        )
-        index += 1
-    return views, cells
+def _optional_gambrel(
+    items: list[tuple[Pitch, Pitch, float] | None],
+) -> list[tuple[Pitch, Pitch, float] | None] | None:
+    return items if any(items) else None
 
 
 def _describe(result: Roof | Project | Failure) -> str:
@@ -717,30 +833,33 @@ def _shows_solid(result: Roof | Project) -> bool:
 
 def _draw(
     result: Roof | Project | Failure,
-    footprint: list[tuple[float, float]],
-    holes: list[list[tuple[float, float]]] | None,
+    footprint: list[tuple[Any, Any]],
+    holes: list[list[tuple[Any, Any]]] | None,
     overhang: float,
-    extra_footprints: list[list[tuple[float, float]]] | None = None,
+    extra_footprints: list[list[tuple[Any, Any]]] | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     extras = extra_footprints or []
+    numeric_foot = _numeric_ring(footprint)
+    numeric_holes = _numeric_holes(holes)
+    numeric_extras = [_numeric_ring(ring) for ring in extras]
     if isinstance(result, Failure):
         return (
             None,
             None,
             _embed(
-                input_footprint(footprint, holes, extras),
+                input_footprint(numeric_foot, numeric_holes, numeric_extras),
                 include_js=True,
             ),
         )
+    walls: dict[str, Any] = {}
+    if overhang != 0.0:
+        walls = {"walls": numeric_foot, "wall_holes": numeric_holes}
     if isinstance(result, Project):
         plan_html = _embed(plan_view(result), include_js=True)
         solid_html: str | None = None
         if _shows_solid(result):
             solid_html = _embed(solid_view(result), include_js=False)
         return plan_html, solid_html, None
-    walls: dict[str, Any] = {}
-    if overhang != 0.0:
-        walls = {"walls": footprint, "wall_holes": holes}
     plan_html = _embed(plan_view(result, **walls), include_js=True)
     solid_html = None
     if _shows_solid(result):
@@ -748,7 +867,27 @@ def _draw(
     return plan_html, solid_html, None
 
 
+def _numeric_ring(ring: list[tuple[Any, Any]]) -> list[tuple[float, float]]:
+    out: list[tuple[float, float]] = []
+    for x, y in ring:
+        try:
+            out.append((float(x), float(y)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _numeric_holes(
+    holes: list[list[tuple[Any, Any]]] | None,
+) -> list[list[tuple[float, float]]] | None:
+    if not holes:
+        return None
+    return [_numeric_ring(hole) for hole in holes]
+
+
 def _embed(fig: Any, *, include_js: bool) -> str:
     js: bool | str = "cdn" if include_js else False
     html: str = fig.to_html(full_html=False, include_plotlyjs=js)
     return html
+
+

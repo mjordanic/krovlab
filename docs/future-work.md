@@ -153,10 +153,11 @@ partly to keep this possible. CGAL would have foreclosed it permanently.
 
 ## 3. Web application
 
-The first UI is decided: a Python form server wrapping `roof`, developed on
-localhost, hosted on Cloud Run when a URL is needed. See ADR-0002 and
-`.scratch/roof-web-ui/PRD.md`. The core still must not assume that answer:
-data in, data out, no I/O, no framework.
+The first UI ships: a Python form server wrapping `roof` / `project`,
+developed on localhost, hosted on Cloud Run when a URL is needed. The
+dropdown is a curated example catalog, not the test corpus. See ADR-0002.
+The core still must not assume that answer: data in, data out, no I/O, no
+framework.
 
 Pyodide (no server, large runtime) and a TypeScript port of the core remain
 the unused alternatives. They would only be reopened if the server wrap were

@@ -300,7 +300,7 @@ still draws. Units on a valid roof are metres and degrees.
 
 ## Web demo
 
-A form page that wraps `roof` / `project` and the existing plan and 3D views. From the
+A demo that wraps `roof` / `project` and the existing plan and 3D views. From the
 repo root:
 
 ```bash
@@ -308,13 +308,15 @@ uv sync --extra web
 uv run --extra web python -m web
 ```
 
-Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
-Pick a named footprint from the project's corpus and submit to see the
-matching roof, or a Failure with the input drawn. `concatenated-gables`
-is two cells at plate heights 5 m and 7 m. Click vertices on the plan to
-draw a cell, close the ring, and add another. Click an edge to set knee
-height or a gambrel; draw a rectangle on a host face for a dormer.
-Millimetre tables stay in sync. Submit is still one form POST.
+Open http://127.0.0.1:5000 — the 10 × 6 m hip rectangle at 45° is already run.
+The dropdown is a catalog of complete examples (gable, shed, knee, gambrel,
+courtyard, two-cell projects, a dormer, a named Failure). Each example is a
+template: its settings are on the page and can be changed. Unusual options
+(overhang, eave height, a courtyard hole) stay hidden until checked, or until
+the example already uses them. Changing the example goes to
+`/?example=gambrel` (and so on) and runs immediately. **Update roof** rebuilds
+after edits. Draw on the building plan: add a detached cell, or add a cell on a
+selected wall. There is no ring to close. Submit is still one form POST.
 
 The same process is what a container runs. `Dockerfile` at the repo root
 starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
@@ -364,8 +366,8 @@ Step-through examples after `uv sync --extra notebooks`:
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
   call `roof`, read quantities, gables, holes, overhang, eave height,
   a project of two cells, concatenated gables and a valley, knee
-  (gablet), gambrel, a dormer on a host face, drawing those on
-  the form page, and the views.
+  (gablet), gambrel, a dormer on a host face, those same examples
+  on the web demo, and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, the dormer exception (not a terrain, 3D
   still draws), inherent method limits, and how to read `validity`.

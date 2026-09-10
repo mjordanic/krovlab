@@ -2,502 +2,362 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>krovlab</title>
   <style>
+    :root {
+      --ink: #1c1917;
+      --muted: #57534e;
+      --line: #d6d3d1;
+      --paper: #fafaf9;
+      --panel: #ffffff;
+      --accent: #7c2d12;
+      --accent-soft: rgba(124, 45, 18, 0.12);
+      --selected: #c2410c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    a { color: var(--accent); }
+    header {
+      padding: 1.25rem 1.5rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    header h1 { margin: 0 0 0.25rem; font-size: 1.5rem; letter-spacing: -0.02em; }
+    header .lede { margin: 0; color: var(--muted); max-width: 46rem; }
+    .example-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      align-items: flex-start;
+      padding: 1rem 1.5rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .example-bar label { font-weight: 600; }
+    .example-bar select { font: inherit; padding: 0.3rem 0.4rem; min-width: 16rem; }
+    .caption { margin: 0; color: var(--muted); max-width: 40rem; }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(22rem, 28rem) 1fr;
+      gap: 0;
+      min-height: calc(100vh - 10rem);
+    }
+    @media (max-width: 880px) {
+      .workspace { grid-template-columns: 1fr; }
+    }
+    .settings {
+      padding: 1rem 1.25rem 2rem;
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .results { padding: 1rem 1.25rem 2rem; }
+    h2 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; }
+    h3 { font-size: 1rem; margin: 0 0 0.6rem; }
+    .toolbar, .pitch-all, .cell-extras { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; align-items: center; margin: 0.6rem 0; }
+    button, .update {
+      font: inherit;
+      padding: 0.35rem 0.7rem;
+      border: 1px solid var(--accent);
+      background: var(--panel);
+      color: var(--accent);
+      cursor: pointer;
+    }
+    button[type="submit"], .update {
+      background: var(--accent);
+      color: #fff;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .hint { margin: 0.35rem 0 0.7rem; color: var(--muted); font-size: 0.92rem; }
+    .cell-card {
+      border: 1px solid var(--line);
+      padding: 0.75rem;
+      margin: 0.75rem 0;
+      background: var(--paper);
+    }
+    .wall {
+      border-top: 1px solid var(--line);
+      padding: 0.65rem 0 0.2rem;
+    }
+    .wall:first-of-type { border-top: 0; }
+    .wall.is-selected { background: var(--accent-soft); margin: 0 -0.75rem; padding: 0.65rem 0.75rem 0.2rem; }
+    .wall-head { display: flex; justify-content: space-between; gap: 0.5rem; font-weight: 600; }
+    .wall-types { display: flex; flex-wrap: wrap; gap: 0.2rem; margin: 0.4rem 0; }
+    .wall-types label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      border: 1px solid var(--line);
+      padding: 0.15rem 0.45rem;
+      background: var(--panel);
+      cursor: pointer;
+      font-weight: 400;
+    }
+    .wall-types input { accent-color: var(--accent); }
+    .wall-extra { margin: 0.35rem 0; }
+    .wall-extra label { margin-right: 0.75rem; }
+    input[type="text"], input[type="number"], input:not([type]) {
+      font: inherit;
+      width: 5.5rem;
+      padding: 0.15rem 0.3rem;
+      border: 1px solid var(--line);
+    }
+    table { border-collapse: collapse; margin: 0.4rem 0 0.8rem; }
+    td, th { padding: 0.15rem 0.35rem; text-align: left; }
     #plan-editor {
-      width: 28rem;
-      max-width: 100%;
-      height: 16rem;
-      border: 1px solid #444;
-      background: #fafafa;
+      width: 100%;
+      max-width: 38rem;
+      height: 22rem;
+      border: 1px solid var(--ink);
+      background: #fff;
     }
-    #plan-editor polygon {
-      fill: rgba(124, 45, 18, 0.12);
-      stroke: #7c2d12;
-      stroke-width: 2px;
-      vector-effect: non-scaling-stroke;
-    }
-    #plan-editor polyline {
+    #plan-editor polygon { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+    #plan-editor polygon.is-hole { fill: #fff; stroke-dasharray: 4 3; }
+    #plan-editor polygon.is-dormer {
       fill: none;
-      stroke: #7c2d12;
+      stroke: #1d4ed8;
+      stroke-dasharray: 4 3;
+    }
+    #plan-editor .wall-hit { fill: none; stroke: transparent; stroke-width: 12px; vector-effect: non-scaling-stroke; pointer-events: stroke; }
+    #plan-editor .wall-hit.is-selected { stroke: var(--selected); stroke-opacity: 0.35; }
+    #plan-editor circle {
+      fill: #fff;
+      stroke: var(--accent);
       stroke-width: 2px;
       vector-effect: non-scaling-stroke;
     }
+    #plan-editor circle.is-dormer { stroke: #1d4ed8; }
+    #plan-editor circle.is-selected { fill: var(--selected); }
+    #plan-editor text {
+      fill: var(--ink);
+    }
+    .takeoff {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 0.75rem 1rem;
+      overflow: auto;
+    }
+    .takeoff pre { margin: 0; font: 13px/1.4 ui-monospace, Menlo, monospace; }
+    .js-extra[hidden], [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <h1>krovlab</h1>
-  <p>
-    Give a building footprint in metres and a pitch in degrees. Get back a
-    hipped roof, or a named failure.
-    <a href="https://github.com/mjordanic/krovlab">Source on GitHub</a>.
-  </p>
-  <p>Units: metres and degrees.</p>
-  <form method="post">
-    <input type="hidden" name="loaded_fixture" value="{{ selected }}">
-    <p>
-      Choose a named footprint from the list, or draw cells on the plan.
-      Click vertices of the active cell, close the ring, then add another
-      cell the same way. Tick Edit vertices to type millimetres when a
-      click is too coarse.
+  <header>
+    <h1>krovlab</h1>
+    <p class="lede">
+      Give a building footprint in metres and a pitch in degrees. Get back a
+      hipped roof, or a named failure. Units: metres and degrees.
+      <a href="https://github.com/mjordanic/krovlab">Source on GitHub</a>.
     </p>
+  </header>
+  <form class="example-bar" method="get" action="/">
     <label>
-      Footprint
-      <select name="fixture">
-        {% for name in names %}
-        <option value="{{ name }}"{% if name == selected %} selected{% endif %}>{{ name }}</option>
+      Example
+      <select name="example" onchange="this.form.submit()">
+        {% for group, items in groups %}
+        <optgroup label="{{ group }}">
+          {% for item in items %}
+          <option value="{{ item.slug }}"{% if item.slug == example.slug %} selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+        </optgroup>
         {% endfor %}
       </select>
     </label>
-    <p>
-      Each row is one wall. Enter pitch as degrees, rise:run (4:12), or a
-      percentage. Apply to all fills every row. Gable is a vertical wall
-      (pitch 90).
-    </p>
-    <p>
-      <label>
-        Apply to all
-        <input name="apply_to_all" value="{{ apply_to_all }}">
-      </label>
-      <button type="button" id="apply-to-all">Apply to all</button>
-    </p>
-    <div id="pitch-rows">
-    {% for edge in edges %}
-    <p>
-      <label>
-        {{ edge.index }}: ({{ edge.start[0] }}, {{ edge.start[1] }}) → ({{ edge.end[0] }}, {{ edge.end[1] }})
-        <input name="{{ edge.pitch_name }}" value="{{ edge.pitch }}"{% if edge.gable %} disabled{% endif %}>
-      </label>
-      <label>
-        <input type="checkbox" name="{{ edge.gable_name }}"{% if edge.gable %} checked{% endif %}>
-        Gable
-      </label>
-      <label>
-        Knee
-        <input name="{{ edge.knee_name }}" value="{{ edge.knee }}">
-        m
-      </label>
-      <label>
-        Shallow
-        <input name="{{ edge.shallow_name }}" value="{{ edge.shallow }}">
-      </label>
-      <label>
-        Break
-        <input name="{{ edge.break_name }}" value="{{ edge.break_height }}">
-        m
-      </label>
-    </p>
-    {% endfor %}
-    </div>
-    <p>
-      <label>
-        Overhang
-        <input name="overhang" value="{{ overhang }}">
-        m
-      </label>
-      metres the eaves project past the walls.
-    </p>
-    <p>
-      <label>
-        Eave height
-        <input name="eave_height" value="{{ eave_height }}">
-        m
-      </label>
-      metres above datum of the plate.
-    </p>
-    <p>
-      Click vertices on the plan to draw a cell. Close the ring, then add
-      another cell. Click a cell to select it and set its eave height;
-      click an edge to set pitch, a gable, a knee height, or a gambrel. Draw a small
-      rectangle on a face for a dormer.
-    </p>
-    <svg id="plan-editor" viewBox="-1 -1 12 8" role="img" aria-label="Plan editor">
-      <polygon data-cell="0" data-ring="{% for x, y in footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
-      {% for cell in extra_cells %}
-      <polygon data-cell="{{ cell.index }}" data-ring="{% for x, y in cell.footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
-      {% endfor %}
-    </svg>
-    <p>
-      <button type="button" id="close-ring">Close ring</button>
-      <button type="button" id="delete-cell">Delete cell</button>
-    </p>
-    <p>
-      <label>
-        Selected cell eave height
-        <input id="selected-eave-height" value="{{ eave_height }}">
-        m
-      </label>
-      <label>
-        Selected edge pitch
-        <input id="selected-pitch">
-      </label>
-      <label>
-        <input type="checkbox" id="selected-gable">
-        Gable
-      </label>
-      <label>
-        Selected edge knee height
-        <input id="selected-knee-height">
-        m
-      </label>
-      <label>
-        Selected edge shallow pitch
-        <input id="selected-gambrel-shallow">
-      </label>
-      <label>
-        Selected edge break height
-        <input id="selected-gambrel-break">
-        m
-      </label>
-      <button type="button" id="draw-dormer">Dormer</button>
-    </p>
-    <div id="dormer-tables">
-      {% for dormer in dormers %}
-      <p>Dormer {{ dormer.index }} vertices (m)</p>
-      <input type="hidden" name="dormer-{{ dormer.index }}-cell" value="{{ dormer.cell_index }}">
-      <table>
-        <thead>
-          <tr><th>x</th><th>y</th></tr>
-        </thead>
-        <tbody>
+    <p class="caption">{{ example.caption }}</p>
+  </form>
+  <form method="post" class="workspace">
+    <input type="hidden" name="example" value="{{ example.slug }}">
+    <aside class="settings">
+      <p>
+        <button type="submit">Update roof</button>
+      </p>
+      <div class="toolbar">
+        <button type="button" id="add-detached-cell">Add detached cell</button>
+        <button type="button" id="add-cell-on-wall" disabled>Add cell on selected wall</button>
+        <button type="button" id="add-vertex" disabled>Add vertex on selected wall</button>
+        <button type="button" id="delete-cell">Delete cell</button>
+      </div>
+      <p class="hint" id="wall-action-hint">Select a wall on the building plan to attach a cell or split a vertex.</p>
+      <p class="pitch-all">
+        <label>
+          Set pitch on all sloping walls
+          <input name="set_pitch" value="{{ set_pitch }}">
+        </label>
+        <button type="button" id="set-pitch">Apply</button>
+      </p>
+      <div id="cells-root">
+        {% for cell in cells %}
+        <section class="cell-card" data-cell="{{ cell.index }}">
+          <h3>{{ cell.title }}</h3>
+          <div class="cell-extras">
+            <label>
+              <input type="checkbox" name="{{ cell.prefix }}use_overhang"{% if cell.use_overhang %} checked{% endif %} data-extra="overhang">
+              Overhang
+            </label>
+            <label>
+              <input type="checkbox" name="{{ cell.prefix }}use_eave_height"{% if cell.use_eave %} checked{% endif %} data-extra="eave">
+              Eave height
+            </label>
+            <label>
+              <input type="checkbox" name="{{ cell.prefix }}use_hole"{% if cell.use_hole %} checked{% endif %} data-extra="hole">
+              Courtyard / hole
+            </label>
+          </div>
+          <p class="wall-extra js-extra" data-kind="overhang"{% if not cell.use_overhang %} hidden{% endif %}>
+            <label>
+              Overhang
+              <input name="{{ cell.prefix }}overhang" value="{{ cell.overhang }}">
+              m past the walls
+            </label>
+          </p>
+          <p class="wall-extra js-extra" data-kind="eave"{% if not cell.use_eave %} hidden{% endif %}>
+            <label>
+              Eave height
+              <input name="{{ cell.prefix }}eave_height" value="{{ cell.eave_height }}">
+              m above datum
+            </label>
+          </p>
+          {% for wall in cell.walls %}
+          <div class="wall" data-cell="{{ cell.index }}" data-wall="{{ wall.index }}">
+            <div class="wall-head"><span>Wall {{ wall.number }}</span></div>
+            <div class="wall-types" role="radiogroup" aria-label="Wall {{ wall.number }} type">
+              {% for kind, label in [("hip", "Hip"), ("gable", "Gable"), ("knee", "Knee"), ("gambrel", "Gambrel")] %}
+              <label>
+                <input type="radio" name="{{ wall.type_name }}" value="{{ kind }}"{% if wall.kind == kind %} checked{% endif %}>
+                {{ label }}
+              </label>
+              {% endfor %}
+            </div>
+            <p class="hint wall-hint">{{ wall.hint }}</p>
+            <p class="wall-extra js-pitch"{% if wall.kind == "gable" %} hidden{% endif %}>
+              <label>
+                Pitch
+                <input name="{{ wall.pitch_name }}" value="{{ wall.pitch }}"{% if wall.kind == "gable" %} disabled{% endif %}>
+              </label>
+            </p>
+            <p class="wall-extra js-knee"{% if wall.kind != "knee" %} hidden{% endif %}>
+              <label>
+                Knee height
+                <input name="{{ wall.knee_name }}" value="{{ wall.knee }}">
+                m
+              </label>
+            </p>
+            <p class="wall-extra js-gambrel"{% if wall.kind != "gambrel" %} hidden{% endif %}>
+              <label>
+                Shallow pitch
+                <input name="{{ wall.shallow_name }}" value="{{ wall.shallow }}">
+              </label>
+              <label>
+                Break
+                <input name="{{ wall.break_name }}" value="{{ wall.break_height }}">
+                m
+              </label>
+            </p>
+          </div>
+          {% endfor %}
+        </section>
+        {% endfor %}
+      </div>
+      <div id="dormer-tables">
+        {% for dormer in dormers %}
+        <section class="cell-card" data-dormer="{{ dormer.index }}">
+          <h3>Dormer {{ dormer.index + 1 }}</h3>
+          <input type="hidden" name="dormer-{{ dormer.index }}-cell" value="{{ dormer.cell_index }}">
           {% for x, y in dormer.footprint %}
-          <tr>
-            <td><input name="dormer-{{ dormer.index }}-x-{{ loop.index0 }}" value="{{ x }}"></td>
-            <td><input name="dormer-{{ dormer.index }}-y-{{ loop.index0 }}" value="{{ y }}"></td>
-          </tr>
+          <input type="hidden" name="dormer-{{ dormer.index }}-x-{{ loop.index0 }}" value="{{ x }}">
+          <input type="hidden" name="dormer-{{ dormer.index }}-y-{{ loop.index0 }}" value="{{ y }}">
           {% endfor %}
-        </tbody>
-      </table>
-      {% for pitch in dormer.pitches %}
-      <p>
-        <label>
-          Pitch
-          <input name="dormer-{{ dormer.index }}-pitch-{{ loop.index0 }}" value="{{ pitch }}"{% if dormer.gables[loop.index0] %} disabled{% endif %}>
-        </label>
-        <label>
-          <input type="checkbox" name="dormer-{{ dormer.index }}-gable-{{ loop.index0 }}"{% if dormer.gables[loop.index0] %} checked{% endif %}>
-          Gable
-        </label>
-      </p>
-      {% endfor %}
-      {% endfor %}
-    </div>
-    <p>
-      <label>
-        <input type="checkbox" name="edit_vertices" id="edit-vertices"{% if edit_vertices %} checked{% endif %}>
-        Edit vertices
-      </label>
-      <button type="button" id="add-cell">Add cell</button>
-    </p>
-    <div id="vertex-editor"{% if not edit_vertices %} hidden{% endif %}>
-    <p>Outer vertices (m)</p>
-    <table>
-      <thead>
-        <tr><th>x</th><th>y</th></tr>
-      </thead>
-      <tbody id="outer-vertices">
-        {% for x, y in footprint %}
-        <tr>
-          <td><input name="outer-x-{{ loop.index0 }}" value="{{ x }}"></td>
-          <td><input name="outer-y-{{ loop.index0 }}" value="{{ y }}"></td>
-        </tr>
+          {% for pitch in dormer.pitches %}
+          <p>
+            <span>Dormer wall {{ loop.index }}</span>
+            <label>
+              <input type="radio" name="dormer-{{ dormer.index }}-type-{{ loop.index0 }}" value="hip"{% if dormer.kinds[loop.index0] == "hip" %} checked{% endif %}>
+              Hip
+            </label>
+            <label>
+              <input type="radio" name="dormer-{{ dormer.index }}-type-{{ loop.index0 }}" value="gable"{% if dormer.kinds[loop.index0] == "gable" %} checked{% endif %}>
+              Gable
+            </label>
+            <label>
+              Pitch
+              <input name="dormer-{{ dormer.index }}-pitch-{{ loop.index0 }}" value="{{ pitch }}"{% if dormer.kinds[loop.index0] == "gable" %} disabled{% endif %}>
+            </label>
+          </p>
+          {% endfor %}
+        </section>
         {% endfor %}
-      </tbody>
-    </table>
-    <p>
-      <button type="button" id="add-outer">Add outer vertex</button>
-      <button type="button" id="remove-outer">Remove outer vertex</button>
-    </p>
-    <p>Hole vertices (m)</p>
-    <table>
-      <thead>
-        <tr><th>x</th><th>y</th></tr>
-      </thead>
-      <tbody id="hole-vertices">
-        {% for x, y in hole %}
-        <tr>
-          <td><input name="hole-x-{{ loop.index0 }}" value="{{ x }}"></td>
-          <td><input name="hole-y-{{ loop.index0 }}" value="{{ y }}"></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p>
-      <button type="button" id="add-hole">Add hole vertex</button>
-      <button type="button" id="remove-hole">Remove hole vertex</button>
-    </p>
-    <div id="extra-cells">
-    {% for cell in extra_cells %}
-    <div class="cell-block" data-cell="{{ cell.index }}">
-      <p>Cell {{ cell.index }}</p>
-      <p>Outer vertices (m)</p>
-      <table>
-        <thead>
-          <tr><th>x</th><th>y</th></tr>
-        </thead>
-        <tbody id="{{ cell.prefix }}outer-vertices">
-          {% for x, y in cell.footprint %}
-          <tr>
-            <td><input name="{{ cell.prefix }}outer-x-{{ loop.index0 }}" value="{{ x }}"></td>
-            <td><input name="{{ cell.prefix }}outer-y-{{ loop.index0 }}" value="{{ y }}"></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <p>Hole vertices (m)</p>
-      <table>
-        <thead>
-          <tr><th>x</th><th>y</th></tr>
-        </thead>
-        <tbody id="{{ cell.prefix }}hole-vertices">
-          {% for x, y in cell.hole %}
-          <tr>
-            <td><input name="{{ cell.prefix }}hole-x-{{ loop.index0 }}" value="{{ x }}"></td>
-            <td><input name="{{ cell.prefix }}hole-y-{{ loop.index0 }}" value="{{ y }}"></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <div>
-      {% for edge in cell.edges %}
-      <p>
-        <label>
-          {{ edge.index }}: ({{ edge.start[0] }}, {{ edge.start[1] }}) → ({{ edge.end[0] }}, {{ edge.end[1] }})
-          <input name="{{ edge.pitch_name }}" value="{{ edge.pitch }}"{% if edge.gable %} disabled{% endif %}>
-        </label>
-        <label>
-          <input type="checkbox" name="{{ edge.gable_name }}"{% if edge.gable %} checked{% endif %}>
-          Gable
-        </label>
-        <label>
-          Knee
-          <input name="{{ edge.knee_name }}" value="{{ edge.knee }}">
-          m
-        </label>
-        <label>
-          Shallow
-          <input name="{{ edge.shallow_name }}" value="{{ edge.shallow }}">
-        </label>
-        <label>
-          Break
-          <input name="{{ edge.break_name }}" value="{{ edge.break_height }}">
-          m
-        </label>
-      </p>
-      {% endfor %}
       </div>
       <p>
         <label>
-          Overhang
-          <input name="{{ cell.prefix }}overhang" value="{{ cell.overhang }}">
-          m
-        </label>
-        <label>
-          Eave height
-          <input name="{{ cell.prefix }}eave_height" value="{{ cell.eave_height }}">
-          m
+          <input type="checkbox" name="edit_coordinates" id="edit-coordinates"{% if edit_coordinates %} checked{% endif %}>
+          Edit coordinates
         </label>
       </p>
-    </div>
-    {% endfor %}
-    </div>
-    </div>
-    <button type="submit">Submit</button>
+      <div id="vertex-editor"{% if not edit_coordinates %} hidden{% endif %}>
+        {% for cell in cells %}
+        <p>{{ cell.title }} vertices (m)</p>
+        <table>
+          <thead><tr><th>x</th><th>y</th></tr></thead>
+          <tbody id="{{ cell.prefix }}outer-vertices">
+            {% for x, y in cell.footprint %}
+            <tr>
+              <td><input name="{{ cell.prefix }}outer-x-{{ loop.index0 }}" value="{{ x }}"></td>
+              <td><input name="{{ cell.prefix }}outer-y-{{ loop.index0 }}" value="{{ y }}"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="js-extra" data-kind="hole"{% if not cell.use_hole %} hidden{% endif %}>{{ cell.title }} courtyard vertices (m)</p>
+        <table class="js-extra" data-kind="hole"{% if not cell.use_hole %} hidden{% endif %}>
+          <thead><tr><th>x</th><th>y</th></tr></thead>
+          <tbody id="{{ cell.prefix }}hole-vertices">
+            {% for x, y in cell.hole %}
+            <tr>
+              <td><input name="{{ cell.prefix }}hole-x-{{ loop.index0 }}" value="{{ x }}"></td>
+              <td><input name="{{ cell.prefix }}hole-y-{{ loop.index0 }}" value="{{ y }}"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endfor %}
+      </div>
+    </aside>
+    <main class="results">
+      <h2>Building (edit)</h2>
+      <svg id="plan-editor" viewBox="-1 -1 12 8" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Building plan">
+        {% for cell in cells %}
+        <polygon data-cell="{{ cell.index }}" data-ring="{% for x, y in cell.footprint %}{{ x }},{{ y }}{% if not loop.last %} {% endif %}{% endfor %}"></polygon>
+        {% endfor %}
+      </svg>
+      <h2>Takeoff</h2>
+      <div class="takeoff"><pre>{{ describe }}</pre></div>
+      {% if plan_html %}
+      <h2>Roof plan</h2>
+      {{ plan_html | safe }}
+      {% endif %}
+      {% if solid_html %}
+      <h2>3D solid</h2>
+      {{ solid_html | safe }}
+      {% endif %}
+      {% if footprint_html %}
+      <h2>Input footprint</h2>
+      {{ footprint_html | safe }}
+      {% endif %}
+    </main>
   </form>
-  <pre>{{ describe }}</pre>
-  {% if plan_html %}
-  <h2>Plan</h2>
-  {{ plan_html | safe }}
-  {% endif %}
-  {% if solid_html %}
-  <h2>3D solid</h2>
-  {{ solid_html | safe }}
-  {% endif %}
-  {% if footprint_html %}
-  <h2>Input footprint</h2>
-  {{ footprint_html | safe }}
-  {% endif %}
   <script>
-    function readRing(tbodyId) {
-      var points = [];
-      document.querySelectorAll("#" + tbodyId + " tr").forEach(function (row) {
-        var inputs = row.querySelectorAll("input");
-        points.push({ x: inputs[0].value, y: inputs[1].value });
-      });
-      return points;
-    }
-
-    function reindexRing(tbodyId, prefix) {
-      document.querySelectorAll("#" + tbodyId + " tr").forEach(function (row, i) {
-        var inputs = row.querySelectorAll("input");
-        inputs[0].name = prefix + "-x-" + i;
-        inputs[1].name = prefix + "-y-" + i;
-      });
-    }
-
-    function savedPitches() {
-      var saved = {};
-      document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
-        saved[input.name.slice("pitch-".length)] = {
-          pitch: input.value,
-          gable: false,
-          knee: "0",
-          shallow: "",
-          breakHeight: "0"
-        };
-      });
-      document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
-        var i = box.name.slice("gable-".length);
-        if (!saved[i]) {
-          saved[i] = { pitch: "90", gable: box.checked, knee: "0", shallow: "", breakHeight: "0" };
-        } else {
-          saved[i].gable = box.checked;
-        }
-      });
-      document.querySelectorAll("input[name^='knee-']").forEach(function (input) {
-        var i = input.name.slice("knee-".length);
-        if (!saved[i]) {
-          saved[i] = { pitch: "45", gable: false, knee: input.value, shallow: "", breakHeight: "0" };
-        } else {
-          saved[i].knee = input.value;
-        }
-      });
-      document.querySelectorAll("input[name^='gambrel-shallow-']").forEach(function (input) {
-        var i = input.name.slice("gambrel-shallow-".length);
-        if (!saved[i]) {
-          saved[i] = { pitch: "45", gable: false, knee: "0", shallow: input.value, breakHeight: "0" };
-        } else {
-          saved[i].shallow = input.value;
-        }
-      });
-      document.querySelectorAll("input[name^='gambrel-break-']").forEach(function (input) {
-        var i = input.name.slice("gambrel-break-".length);
-        if (!saved[i]) {
-          saved[i] = { pitch: "45", gable: false, knee: "0", shallow: "", breakHeight: input.value };
-        } else {
-          saved[i].breakHeight = input.value;
-        }
-      });
-      return saved;
-    }
-
-    function esc(value) {
-      return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/"/g, "&quot;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-    }
-
-    function edgeLabel(i, start, end) {
-      return i + ": (" + esc(start.x) + ", " + esc(start.y) + ") → (" + esc(end.x) + ", " + esc(end.y) + ")";
-    }
-
-    function rebuildPitches() {
-      var outer = readRing("outer-vertices");
-      var hole = readRing("hole-vertices");
-      var rings = hole.length ? [outer, hole] : [outer];
-      var saved = savedPitches();
-      var fill = document.querySelector("[name=apply_to_all]").value;
-      var html = "";
-      var index = 0;
-      rings.forEach(function (ring) {
-        ring.forEach(function (start, j) {
-          var end = ring[(j + 1) % ring.length];
-          var prev = saved[String(index)] || { pitch: fill, gable: false, knee: "0", shallow: "", breakHeight: "0" };
-          html += "<p><label>" + edgeLabel(index, start, end);
-          html += " <input name=\"pitch-" + index + "\" value=\"" + esc(prev.pitch) + "\"";
-          if (prev.gable) {
-            html += " disabled";
-          }
-          html += "></label> <label><input type=\"checkbox\" name=\"gable-" + index + "\"";
-          if (prev.gable) {
-            html += " checked";
-          }
-          html += "> Gable</label> <label>Knee <input name=\"knee-" + index + "\" value=\"" + esc(prev.knee || "0") + "\"> m</label>";
-          html += " <label>Shallow <input name=\"gambrel-shallow-" + index + "\" value=\"" + esc(prev.shallow || "") + "\"></label>";
-          html += " <label>Break <input name=\"gambrel-break-" + index + "\" value=\"" + esc(prev.breakHeight || "0") + "\"> m</label></p>";
-          index += 1;
-        });
-      });
-      document.getElementById("pitch-rows").innerHTML = html;
-    }
-
-    function addVertex(tbodyId, prefix) {
-      var tbody = document.getElementById(tbodyId);
-      var row = document.createElement("tr");
-      row.innerHTML = "<td><input></td><td><input></td>";
-      tbody.appendChild(row);
-      reindexRing(tbodyId, prefix);
-      rebuildPitches();
-    }
-
-    function removeVertex(tbodyId, prefix, minRows) {
-      var tbody = document.getElementById(tbodyId);
-      if (tbody.rows.length <= minRows) {
-        return;
-      }
-      tbody.deleteRow(-1);
-      reindexRing(tbodyId, prefix);
-      rebuildPitches();
-    }
-
-    document.getElementById("edit-vertices").addEventListener("change", function () {
-      document.getElementById("vertex-editor").hidden = !this.checked;
-    });
-    document.getElementById("add-outer").addEventListener("click", function () {
-      addVertex("outer-vertices", "outer");
-    });
-    document.getElementById("remove-outer").addEventListener("click", function () {
-      removeVertex("outer-vertices", "outer", 3);
-    });
-    document.getElementById("add-hole").addEventListener("click", function () {
-      addVertex("hole-vertices", "hole");
-    });
-    document.getElementById("remove-hole").addEventListener("click", function () {
-      removeVertex("hole-vertices", "hole", 0);
-    });
-    document.getElementById("apply-to-all").addEventListener("click", function () {
-      var value = document.querySelector("[name=apply_to_all]").value;
-      document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
-        input.value = value;
-        input.disabled = false;
-      });
-      document.querySelectorAll("input[name^='gable-']").forEach(function (box) {
-        box.checked = false;
-      });
-    });
-    document.getElementById("pitch-rows").addEventListener("change", function (event) {
-      var box = event.target;
-      if (!box.name || box.name.indexOf("gable-") !== 0) {
-        return;
-      }
-      var input = document.querySelector("[name='pitch-" + box.name.slice("gable-".length) + "']");
-      if (!input) {
-        return;
-      }
-      if (box.checked) {
-        input.value = "90";
-        input.disabled = true;
-      } else {
-        input.disabled = false;
-      }
-    });
-    document.querySelector("form").addEventListener("submit", function () {
-      rebuildPitches();
-      document.querySelectorAll("input[name^='pitch-']").forEach(function (input) {
-        input.disabled = false;
-      });
-      document.querySelectorAll("input[name*='-pitch-']").forEach(function (input) {
-        input.disabled = false;
-      });
-    });
+    window.KROVLAB_HINTS = {{ wall_hints | tojson }};
   </script>
   <script src="{{ url_for('static', filename='plan-editor.js') }}"></script>
   <script>
     KrovlabPlanEditor.mount(
       document.getElementById("plan-editor"),
-      document.querySelector("form")
+      document.querySelector("form[method='post']")
     );
   </script>
 </body>

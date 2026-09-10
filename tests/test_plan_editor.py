@@ -1,8 +1,6 @@
-"""Plan editor: metre-space clicks write the same form fields the page POSTs.
+"""Plan editor: metre-space actions write the same form fields the page POSTs.
 
-The seam is ``createEditor`` in ``web/static/plan-editor.js``. Clicks are
-metres, not pixels. HTTP tests in ``test_web.py`` assert the page still
-POSTs those fields and has no JSON API.
+The seam is ``createEditor`` in ``web/static/plan-editor.js``.
 """
 
 from __future__ import annotations
@@ -16,9 +14,28 @@ from typing import Any
 import pytest
 from web.app import create_app
 
-from krovlab import Cell, Dormer, Pitch, Project, project
+from krovlab import Cell, Pitch, Project, project
 
 EDITOR_JS = Path(__file__).resolve().parents[1] / "web" / "static" / "plan-editor.js"
+
+RECT = {
+    "outer-x-0": "0",
+    "outer-y-0": "0",
+    "outer-x-1": "10",
+    "outer-y-1": "0",
+    "outer-x-2": "10",
+    "outer-y-2": "6",
+    "outer-x-3": "0",
+    "outer-y-3": "6",
+    "type-0": "hip",
+    "pitch-0": "45",
+    "type-1": "hip",
+    "pitch-1": "45",
+    "type-2": "hip",
+    "pitch-2": "45",
+    "type-3": "hip",
+    "pitch-3": "45",
+}
 
 
 def _run_editor(body: str) -> dict[str, Any]:
@@ -28,12 +45,14 @@ def _run_editor(body: str) -> dict[str, Any]:
     script = f"""
 const {{ createEditor }} = require({json.dumps(str(EDITOR_JS))});
 const editor = createEditor({{ applyToAll: "45" }});
+editor.loadFields({json.dumps(RECT)});
 {body}
 process.stdout.write(JSON.stringify({{
   fields: editor.fields(),
   rings: editor.rings(),
   selectedCell: editor.selectedCell(),
-  selectedEdge: editor.selectedEdge()
+  selectedEdge: editor.selectedEdge(),
+  selectedDormer: editor.selectedDormer()
 }}));
 """
     proc = subprocess.run(
@@ -62,244 +81,139 @@ def _xy(fields: dict[str, str], prefix: str) -> list[tuple[float, float]]:
     return points
 
 
-def test_closing_a_clicked_ring_writes_that_cells_tables() -> None:
-    result = _run_editor(
-        """
-editor.clickPlan(0, 0);
-editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-"""
-    )
+def test_add_detached_cell_places_a_closed_rectangle() -> None:
+    result = _run_editor("editor.addDetachedCell();")
     fields = result["fields"]
-    assert fields["edit_vertices"] == "on"
-    assert _xy(fields, "") == [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
-    assert fields["pitch-0"] == "45"
-    assert fields["pitch-3"] == "45"
-    assert "cell-1-outer-x-0" not in fields
-
-
-def test_a_second_drawn_cell_does_not_insert_into_the_first() -> None:
-    result = _run_editor(
-        """
-editor.clickPlan(0, 0);
-editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.addCell();
-editor.clickPlan(5, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(5, 6);
-editor.closeRing();
-"""
-    )
-    fields = result["fields"]
-    assert _xy(fields, "") == [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
-    assert _xy(fields, "cell-1-") == [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)]
+    assert _xy(fields, "") == [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+    assert _xy(fields, "cell-1-") == [
+        (11.0, 0.0),
+        (16.0, 0.0),
+        (16.0, 6.0),
+        (11.0, 6.0),
+    ]
     assert len(result["rings"]) == 2
-    assert fields["cell-1-pitch-0"] == "45"
+    assert fields["cell-1-type-0"] == "hip"
 
 
-def test_selecting_a_cell_and_setting_eave_height_posts_on_that_cell() -> None:
+def test_cannot_delete_the_last_cell() -> None:
+    result = _run_editor("editor.deleteCell();")
+    assert len(result["rings"]) == 1
+    assert _xy(result["fields"], "")[0] == (0.0, 0.0)
+
+
+def test_delete_removes_an_extra_cell() -> None:
     result = _run_editor(
         """
-editor.clickPlan(0, 0);
+editor.addDetachedCell();
+editor.deleteCell();
+"""
+    )
+    assert len(result["rings"]) == 1
+    assert "cell-1-outer-x-0" not in result["fields"]
+
+
+def test_add_cell_on_selected_wall_shares_that_edge() -> None:
+    result = _run_editor(
+        """
 editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.setEaveHeight(5);
-editor.addCell();
-editor.clickPlan(5, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(5, 6);
-editor.closeRing();
-editor.clickPlan(2.5, 3);
-editor.clickPlan(7.5, 3);
-editor.setEaveHeight(7);
+editor.addCellOnSelectedWall();
 """
     )
     fields = result["fields"]
-    assert result["selectedCell"] == 1
-    assert float(fields["eave_height"]) == 5.0
-    assert float(fields["cell-1-eave_height"]) == 7.0
+    assert len(result["rings"]) == 2
+    second = _xy(fields, "cell-1-")
+    assert (0.0, 0.0) in second
+    assert (10.0, 0.0) in second
+    assert all(y <= 0.0 for _, y in second)
+
+
+def test_add_vertex_splits_the_selected_wall() -> None:
+    result = _run_editor(
+        """
+editor.clickPlan(5, 0);
+editor.addVertexOnSelectedWall();
+"""
+    )
+    assert _xy(result["fields"], "") == [
+        (0.0, 0.0),
+        (5.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (0.0, 6.0),
+    ]
 
 
 def test_clicking_an_edge_sets_pitch_or_marks_a_gable() -> None:
     result = _run_editor(
         """
-editor.clickPlan(0, 0);
 editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.clickPlan(2.5, 0);
 editor.setGable(true);
-editor.clickPlan(2.5, 6);
+editor.clickPlan(5, 6);
 editor.setPitch("30");
 """
     )
     fields = result["fields"]
     assert result["selectedCell"] == 0
     assert result["selectedEdge"] == 2
-    assert fields["gable-0"] == "on"
+    assert fields["type-0"] == "gable"
     assert fields["pitch-0"] == "90"
+    assert fields["type-2"] == "hip"
     assert fields["pitch-2"] == "30"
-    assert "gable-2" not in fields
 
 
 def test_clicking_an_edge_sets_knee_height() -> None:
     result = _run_editor(
         """
-editor.clickPlan(0, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
 editor.clickPlan(10, 3);
 editor.setKneeHeight(3);
 """
     )
     fields = result["fields"]
-    assert result["selectedCell"] == 0
     assert result["selectedEdge"] == 1
+    assert fields["type-1"] == "knee"
     assert float(fields["knee-1"]) == 3.0
-    assert fields.get("knee-0", "0") in ("0", "0.0", "")
 
 
 def test_clicking_an_edge_sets_gambrel() -> None:
     result = _run_editor(
         """
-editor.clickPlan(0, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
 editor.clickPlan(5, 0);
 editor.setGambrel(60, 30, Math.sqrt(3));
 """
     )
     fields = result["fields"]
-    assert result["selectedCell"] == 0
     assert result["selectedEdge"] == 0
+    assert fields["type-0"] == "gambrel"
     assert float(fields["pitch-0"]) == 60.0
     assert float(fields["gambrel-shallow-0"]) == 30.0
     assert float(fields["gambrel-break-0"]) == pytest.approx(3**0.5)
-    assert "gambrel-shallow-1" not in fields or fields.get("gambrel-break-1", "0") in (
-        "0",
-        "0.0",
-        "",
-    )
 
 
-def test_drawing_a_dormer_rectangle_writes_millimetre_fields() -> None:
+def test_selecting_a_cell_and_setting_eave_height_posts_on_that_cell() -> None:
     result = _run_editor(
         """
-editor.clickPlan(0, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.startDormer();
-editor.clickPlan(4, 0.5);
-editor.clickPlan(6, 0.5);
-editor.clickPlan(6, 2);
-editor.clickPlan(4, 2);
-editor.closeRing();
+editor.setEaveHeight(5);
+editor.addDetachedCell();
+editor.setEaveHeight(7);
 """
     )
     fields = result["fields"]
-    assert fields["dormer-0-cell"] == "0"
-    assert float(fields["dormer-0-x-0"]) == 4.0
-    assert float(fields["dormer-0-y-0"]) == 0.5
-    assert float(fields["dormer-0-x-1"]) == 6.0
-    assert float(fields["dormer-0-y-1"]) == 0.5
-    assert float(fields["dormer-0-x-2"]) == 6.0
-    assert float(fields["dormer-0-y-2"]) == 2.0
-    assert float(fields["dormer-0-x-3"]) == 4.0
-    assert float(fields["dormer-0-y-3"]) == 2.0
-    assert fields["dormer-0-pitch-0"] == "45"
-    assert fields["dormer-0-pitch-3"] == "45"
-
-
-def test_posted_drawn_dormer_matches_project() -> None:
-    ring = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
-    host = [
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (10.0, 6.0),
-        (0.0, 6.0),
-    ]
-    built = project([Cell(host, 45.0)], [Dormer(0, ring, 45.0)])
-    assert isinstance(built, Project)
-    result = _run_editor(
-        """
-editor.clickPlan(0, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.startDormer();
-editor.clickPlan(4, 0.5);
-editor.clickPlan(6, 0.5);
-editor.clickPlan(6, 2);
-editor.clickPlan(4, 2);
-editor.closeRing();
-"""
-    )
-    data = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        **result["fields"],
-    }
-    page = create_app().test_client().post("/", data=data).get_data(as_text=True)
-    assert "terrain: False" in page
-    assert f"ridge height: {built.ridge_height:.3f} m" in page
-    assert f"{built.total_sloped_area:.3f}" in page
-    assert "3D solid" in page
+    assert result["selectedCell"] == 1
+    assert float(fields["eave_height"]) == 5.0
+    assert fields.get("use_eave_height") == "on"
+    assert float(fields["cell-1-eave_height"]) == 7.0
+    assert fields.get("cell-1-use_eave_height") == "on"
 
 
 def test_editing_a_table_vertex_moves_it_on_the_plan() -> None:
-    result = _run_editor(
-        """
-editor.clickPlan(0, 0);
-editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.moveVertex(0, 2, 5, 4);
-"""
-    )
-    fields = result["fields"]
-    assert _xy(fields, "") == [(0.0, 0.0), (5.0, 0.0), (5.0, 4.0), (0.0, 6.0)]
-    assert result["rings"][0][2] == [5, 4]
-
-
-def test_a_cell_can_be_deleted() -> None:
-    result = _run_editor(
-        """
-editor.clickPlan(0, 0);
-editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.addCell();
-editor.clickPlan(5, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(5, 6);
-editor.closeRing();
-editor.deleteCell();
-"""
-    )
-    fields = result["fields"]
-    assert _xy(fields, "") == [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
-    assert "cell-1-outer-x-0" not in fields
-    assert len(result["rings"]) == 1
+    result = _run_editor("editor.moveVertex(0, 2, 10, 4);")
+    assert _xy(result["fields"], "") == [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 4.0),
+        (0.0, 6.0),
+    ]
+    assert result["rings"][0][2] == [10, 4]
 
 
 def test_posted_editor_fields_for_the_5m_7m_pair_match_project() -> None:
@@ -315,35 +229,114 @@ def test_posted_editor_fields_for_the_5m_7m_pair_match_project() -> None:
     assert isinstance(built, Project)
     result = _run_editor(
         """
-editor.clickPlan(0, 0);
-editor.clickPlan(5, 0);
-editor.clickPlan(5, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.clickPlan(5, 3);
-editor.setGable(true);
-editor.clickPlan(0, 3);
-editor.setGable(true);
-editor.setEaveHeight(5);
-editor.addCell();
-editor.clickPlan(5, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(5, 6);
-editor.closeRing();
-editor.clickPlan(10, 3);
-editor.setGable(true);
-editor.clickPlan(5, 3);
-editor.setGable(true);
-editor.setEaveHeight(7);
+editor.loadFields({
+  "outer-x-0": "0", "outer-y-0": "0",
+  "outer-x-1": "5", "outer-y-1": "0",
+  "outer-x-2": "5", "outer-y-2": "6",
+  "outer-x-3": "0", "outer-y-3": "6",
+  "type-0": "hip", "pitch-0": "45",
+  "type-1": "gable", "pitch-1": "90",
+  "type-2": "hip", "pitch-2": "45",
+  "type-3": "gable", "pitch-3": "90",
+  "use_eave_height": "on", "eave_height": "5",
+  "cell-1-outer-x-0": "5", "cell-1-outer-y-0": "0",
+  "cell-1-outer-x-1": "10", "cell-1-outer-y-1": "0",
+  "cell-1-outer-x-2": "10", "cell-1-outer-y-2": "6",
+  "cell-1-outer-x-3": "5", "cell-1-outer-y-3": "6",
+  "cell-1-type-0": "hip", "cell-1-pitch-0": "45",
+  "cell-1-type-1": "gable", "cell-1-pitch-1": "90",
+  "cell-1-type-2": "hip", "cell-1-pitch-2": "45",
+  "cell-1-type-3": "gable", "cell-1-pitch-3": "90",
+  "cell-1-use_eave_height": "on", "cell-1-eave_height": "7"
+});
 """
     )
-    data = {
-        "fixture": "rectangle-10x6",
-        "loaded_fixture": "rectangle-10x6",
-        **result["fields"],
-    }
+    data = {"example": "hip-rectangle", **result["fields"]}
     page = create_app().test_client().post("/", data=data).get_data(as_text=True)
     assert "terrain: True" in page
     assert f"ridge height: {built.ridge_height:.3f} m" in page
     assert f"{built.total_sloped_area:.3f}" in page
+
+
+def test_apply_settings_keeps_typed_pitch_when_adding_a_cell() -> None:
+    result = _run_editor(
+        """
+editor.applySettings(Object.assign({}, {
+  "outer-x-0": "0", "outer-y-0": "0",
+  "outer-x-1": "10", "outer-y-1": "0",
+  "outer-x-2": "10", "outer-y-2": "6",
+  "outer-x-3": "0", "outer-y-3": "6",
+  "type-0": "hip", "pitch-0": "30",
+  "type-1": "hip", "pitch-1": "45",
+  "type-2": "hip", "pitch-2": "45",
+  "type-3": "hip", "pitch-3": "45"
+}));
+editor.addDetachedCell();
+"""
+    )
+    assert result["fields"]["pitch-0"] == "30"
+    assert result["fields"]["cell-1-type-0"] == "hip"
+    assert len(result["rings"]) == 2
+
+
+def test_dormer_vertex_can_be_moved() -> None:
+    dormer = {
+        **RECT,
+        "dormer-0-cell": "0",
+        "dormer-0-x-0": "4",
+        "dormer-0-y-0": "0.5",
+        "dormer-0-x-1": "6",
+        "dormer-0-y-1": "0.5",
+        "dormer-0-x-2": "6",
+        "dormer-0-y-2": "2",
+        "dormer-0-x-3": "4",
+        "dormer-0-y-3": "2",
+        "dormer-0-type-0": "hip",
+        "dormer-0-pitch-0": "45",
+        "dormer-0-type-1": "gable",
+        "dormer-0-pitch-1": "90",
+        "dormer-0-type-2": "hip",
+        "dormer-0-pitch-2": "45",
+        "dormer-0-type-3": "gable",
+        "dormer-0-pitch-3": "90",
+    }
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(dormer)});
+editor.clickPlan(4, 0.5);
+editor.moveDormerVertex(0, 0, 4.2, 0.6);
+"""
+    )
+    fields = result["fields"]
+    assert fields["dormer-0-x-0"] == "4.2"
+    assert fields["dormer-0-y-0"] == "0.6"
+    assert result["selectedDormer"] == 0
+
+
+def test_hole_vertices_round_trip_in_fields() -> None:
+    hole = {
+        **RECT,
+        "use_hole": "on",
+        "hole-x-0": "3",
+        "hole-y-0": "3",
+        "hole-x-1": "7",
+        "hole-y-1": "3",
+        "hole-x-2": "7",
+        "hole-y-2": "7",
+        "hole-x-3": "3",
+        "hole-y-3": "7",
+        "type-4": "hip",
+        "pitch-4": "45",
+        "type-5": "hip",
+        "pitch-5": "45",
+        "type-6": "hip",
+        "pitch-6": "45",
+        "type-7": "hip",
+        "pitch-7": "45",
+    }
+    result = _run_editor(f"editor.loadFields({json.dumps(hole)});")
+    fields = result["fields"]
+    assert fields["use_hole"] == "on"
+    assert (fields["hole-x-0"], fields["hole-y-0"]) == ("3", "3")
+    assert (fields["hole-x-2"], fields["hole-y-2"]) == ("7", "7")
+    assert fields["type-4"] == "hip"
