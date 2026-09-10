@@ -237,8 +237,8 @@ def drainage_runs_to_each_faces_own_eave(
 ) -> None:
     """Steepest descent on every face points toward that face's own eave.
 
-    The eave is the footprint edges named by ``face.eave_indices`` (or
-    ``face.edge_index``), the union of wrapped edges when a face wraps.
+    The eave is the footprint edge named by ``face.edge_index``
+    (or ``face.eave_indices`` when set).
     """
     rings = _caller_rings(footprint, holes)
     for face in built.faces:

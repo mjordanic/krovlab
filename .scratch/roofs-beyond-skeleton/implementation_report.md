@@ -69,9 +69,11 @@ Cap 1 split the two independent roots (01, 03) into consecutive single-issue wav
 
 ## Outstanding follow-ups
 
-- Wrap path ignores non-zero `knee_height` rather than refusing the combination.
-- Merged wrap embeddings can leave unused interior skeleton nodes in `Roof.nodes`.
-- Wrap of gambrel edges still uses the steep plane only; stacked wrap+gambrel faces are not this ticket.
+- Wrap was subsequently removed from the product. Findings and options:
+  [`docs/future-work.md`](../../../docs/future-work.md) §6. Do not revive
+  chord-plane embedding on the original outline.
+- Wrap path (while it shipped) ignored non-zero `knee_height` rather than
+  refusing the combination.
 
 ## Resume instructions
 

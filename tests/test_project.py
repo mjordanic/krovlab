@@ -266,26 +266,6 @@ def test_knee_on_one_cell_leaves_the_other_cell_unchanged() -> None:
     assert sorted(face.edge_index for face in result.roofs[1].faces) == [0, 1, 2, 3]
 
 
-def test_wrap_on_a_cell_goes_through_project() -> None:
-    l_shape = [
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (10.0, 6.0),
-        (3.0, 6.0),
-        (3.0, 10.0),
-        (0.0, 10.0),
-    ]
-    alone = roof(l_shape, 45.0, wrap=[[2, 3]])
-    result = project([Cell(l_shape, 45.0, wrap=[[2, 3]])])
-    assert isinstance(alone, Roof)
-    assert isinstance(result, Project)
-    assert result.roofs[0] == alone
-    assert len(result.faces) == 5
-    assert {face.edge_index for face in result.faces} == {0, 1, 2, 4, 5}
-    wrapped = next(face for face in result.faces if face.edge_index == 2)
-    assert wrapped.eave_indices == (2, 3)
-
-
 def test_a_bad_cell_is_a_failure_not_an_exception() -> None:
     bowtie = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
     result = project([Cell(bowtie, 45.0)])
@@ -398,36 +378,6 @@ def test_dormer_outside_the_host_is_a_named_failure() -> None:
     assert isinstance(result, Failure)
     assert result.kind == "dormer_outside"
     assert "host" in result.reason.lower()
-
-
-def test_a_dormer_on_a_wrapped_face_clips_that_plane() -> None:
-    import math
-
-    l_shape = [
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (10.0, 6.0),
-        (3.0, 6.0),
-        (3.0, 10.0),
-        (0.0, 10.0),
-    ]
-    ring = [(5.0, 5.2), (6.5, 5.2), (6.5, 5.7), (5.0, 5.7)]
-    host = project([Cell(l_shape, 45.0, wrap=[[2, 3]])])
-    result = project(
-        [Cell(l_shape, 45.0, wrap=[[2, 3]])],
-        [Dormer(0, ring, GABLE_DORMER)],
-    )
-    assert isinstance(host, Project)
-    assert isinstance(result, Project)
-    wrapped = next(face for face in host.faces if face.edge_index == 2)
-    wrapped_after = next(face for face in result.faces if face.edge_index == 2)
-    opening_plan = 1.5 * 0.5
-    opening_sloped = opening_plan / math.cos(math.radians(45.0))
-    assert wrapped_after.sloped_area == pytest.approx(
-        wrapped.sloped_area - opening_sloped
-    )
-    assert wrapped_after.eave_indices == (2, 3)
-    assert len(result.faces) == len(host.faces) + 2
 
 
 def test_dormers_are_not_a_third_engine() -> None:

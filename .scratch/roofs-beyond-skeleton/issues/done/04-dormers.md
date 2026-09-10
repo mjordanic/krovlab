@@ -1,5 +1,9 @@
 # 04: Dormers
 
+> Wrap was removed from the product. A dormer on a wrapped face is no
+> longer a requirement; dormers on ordinary host faces remain. See
+> `docs/future-work.md` §6.
+
 **Prerequisite:** Same as ticket 01 — project-from-cells already on the branch.
 
 **What to build:** The architect places a dormer by drawing a small footprint on
@@ -7,7 +11,7 @@ a host face, with its own pitch (gable or shed). Several dormers on one project
 are several placements. A dormer that does not sit on a single host face, or
 that lies outside the host, is refused by name.
 
-`project` roofs every cell first (including knee, gambrel, wrap), then locates
+`project` roofs every cell first (including knee and gambrel), then locates
 each dormer by plan overlap onto exactly one face of that cell. The child is the
 one-footprint function on the dormer ring, lifted onto the host plane — the
 dormer's eave is the intersection with the host, not the building eave. Clip.

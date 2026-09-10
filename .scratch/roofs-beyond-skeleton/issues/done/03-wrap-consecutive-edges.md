@@ -1,5 +1,10 @@
 # 03: Wrap consecutive edges
 
+> **Removed from the product.** Consecutive-edge wrap was taken out after
+> the embedding produced a pierced 3D on the headline L and sent outer
+> corners below the eave. Findings and options:
+> [`docs/future-work.md`](../../../../docs/future-work.md) §6.
+
 **Prerequisite:** Same as ticket 01 — project-from-cells already on the branch.
 
 **What to build:** The architect marks consecutive edges of a cell as one plane.

@@ -2,6 +2,10 @@
 
 Status: ready-for-agent
 
+> Wrap (`wrap=` / one-plane consecutive edges) was **removed from the
+> product** after this spec shipped it. Do not re-implement from these
+> stories. Findings: `docs/future-work.md` §6.
+
 Vocabulary in this document is defined in `CONTEXT.md`. Terms are used in their
 glossary sense — cell, project, roof, face, pitch, eave, gable end, terrain,
 additive weight, Failure — and not loosely. Respects ADR-0001 (own skeleton, so

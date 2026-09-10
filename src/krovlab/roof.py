@@ -28,7 +28,6 @@ from krovlab._input import (
     resolve_gambrels,
     resolve_knee_heights,
     resolve_pitches,
-    resolve_wrap_groups,
 )
 from krovlab._offset import apply_overhang
 from krovlab._skeleton import skeleton as _skeleton
@@ -50,9 +49,6 @@ FailureKind = Literal[
     "gable_versus_knee",
     "gambrel_versus_knee",
     "gambrel_versus_gable",
-    "nonconsecutive_wrap",
-    "wrap_pitch",
-    "nonplanar_wrap",
     "dormer_two_faces",
     "dormer_outside",
 ]
@@ -75,9 +71,6 @@ FailureKind = Literal[
 ``gable_versus_knee`` — the same edge is a gable and has a knee height.
 ``gambrel_versus_knee`` — the same edge is a gambrel and has a knee height.
 ``gambrel_versus_gable`` — the same edge is a gambrel and a gable.
-``nonconsecutive_wrap`` — a wrap group is not consecutive edges of one ring.
-``wrap_pitch`` — wrapped edges do not share one pitch, or a wrap is a gable.
-``nonplanar_wrap`` — the wrap cannot embed as a planar terrain.
 ``dormer_two_faces`` — a dormer overlaps two host faces.
 ``dormer_outside`` — a dormer does not lie on a host face.
 """
@@ -155,7 +148,7 @@ class Node:
 
 @dataclass(frozen=True)
 class Face:
-    """One planar piece of the roof, rising from one or more consecutive eaves."""
+    """One planar piece of the roof, rising from one footprint edge."""
 
     edge_index: int
     """Index of the caller's footprint edge this face rises from.
@@ -163,8 +156,6 @@ class Face:
     Edge ``i`` runs from ``footprint[i]`` to ``footprint[(i + 1) % n]``
     on the outer ring, then continues through each hole in order, even
     if a ring was reversed internally to put the roofed region on the left.
-    A wrapped face uses the first edge of the wrap group; ``eave_indices``
-    lists every wrapped edge.
     """
 
     pitch: float
@@ -183,10 +174,7 @@ class Face:
     """``Roof.nodes`` indices walking the face boundary, eave first."""
 
     eave_indices: tuple[int, ...] = ()
-    """Caller-edge indices this face drains to. Empty means ``(edge_index,)``.
-
-    A wrap group stores every consecutive edge of the merged eave.
-    """
+    """Caller-edge indices this face drains to. Empty means ``(edge_index,)``."""
 
 
 @dataclass(frozen=True)
@@ -247,8 +235,7 @@ class Roof:
     faces: tuple[Face, ...]
     """One face per non-gabled footprint edge, in the caller's edge order.
 
-    A wrap group contributes one face, named by its first edge. A gambrel
-    edge contributes two faces, steep then shallow.
+    A gambrel edge contributes two faces, steep then shallow.
     """
 
     arcs: tuple[Arc, ...]
@@ -313,7 +300,6 @@ def roof(
     overhang: float = 0.0,
     eave_height: float = 0.0,
     knee_height: float | list[float] = 0.0,
-    wrap: list[list[int]] | None = None,
     gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
     *,
     events: Literal[False] = False,
@@ -328,7 +314,6 @@ def roof(
     overhang: float = 0.0,
     eave_height: float = 0.0,
     knee_height: float | list[float] = 0.0,
-    wrap: list[list[int]] | None = None,
     gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
     *,
     events: Literal[True],
@@ -342,7 +327,6 @@ def roof(
     overhang: float = 0.0,
     eave_height: float = 0.0,
     knee_height: float | list[float] = 0.0,
-    wrap: list[list[int]] | None = None,
     gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
     *,
     events: bool = False,
@@ -395,13 +379,6 @@ def roof(
         single pitch per wall. A gambrel with a knee on the same edge
         is ``gambrel_versus_knee``. A gambrel with a gable on the same
         edge is ``gambrel_versus_gable``.
-    wrap
-        Groups of consecutive footprint-edge indices to treat as one
-        plane. Omitting it, or an empty list, is the existing skeleton.
-        Non-consecutive edges are ``nonconsecutive_wrap``. Edges in a
-        group that do not share one pitch, or a gable wrap, are
-        ``wrap_pitch``. A wrap that cannot embed as a planar terrain is
-        ``nonplanar_wrap``.
     events
         If true, return ``(Roof, events)`` so the processed wavefront
         events can be inspected in order. The roof itself is unchanged;
@@ -490,22 +467,6 @@ def roof(
                 reason="a gambrel cannot also be a gable",
             )
         parsed[i] = steep
-    ring_sizes = [len(cleaned)] + [len(h) for h in cleaned_holes]
-    wraps = resolve_wrap_groups(wrap, n_edges, ring_sizes)
-    if isinstance(wraps, Failure):
-        return wraps
-    for group in wraps:
-        pitches_in_group = [parsed[i] for i in group]
-        if any(abs(p - pitches_in_group[0]) > 1e-9 for p in pitches_in_group[1:]):
-            return Failure(
-                kind="wrap_pitch",
-                reason="wrapped edges must share one pitch",
-            )
-        if pitches_in_group[0] >= 90.0:
-            return Failure(
-                kind="wrap_pitch",
-                reason="a wrapped face cannot be a gable",
-            )
     expanded = apply_overhang(cleaned, cleaned_holes, float(overhang))
     if isinstance(expanded, Failure):
         return expanded
@@ -537,10 +498,9 @@ def roof(
         for item, w in zip(ring_gambrels, weights, strict=True)
     ]
     break_times = [item[2] if item is not None else math.inf for item in ring_gambrels]
-    use_motion = (
-        any(k > 0.0 for k in ring_knees)
-        or any(item is not None for item in ring_gambrels)
-    ) and not wraps
+    use_motion = any(k > 0.0 for k in ring_knees) or any(
+        item is not None for item in ring_gambrels
+    )
     raw = (
         _skeleton(
             rings,
@@ -557,25 +517,6 @@ def roof(
             kind="incomplete",
             reason="the wavefront did not finish; the roof could not be produced",
         )
-    if wraps:
-        from krovlab._wrap import embed_wrap
-
-        built = embed_wrap(
-            rings,
-            ring_pitches,
-            raw,
-            edge_map,
-            cleaned,
-            cleaned_holes,
-            float(eave_height),
-            wraps,
-            parsed,
-        )
-        if isinstance(built, Failure):
-            return built
-        if not events:
-            return built
-        return built, ()
     built = _roof_from_skeleton(
         rings,
         ring_pitches,

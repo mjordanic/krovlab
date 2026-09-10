@@ -49,8 +49,7 @@ folds back over itself. A geometry that violates this is not a roof, and saying
 so is how we reject bad output.
 
 **Face** — one planar piece of the roof, rising from one footprint edge at
-that edge's pitch, or from several consecutive edges marked as one plane
-(a wrap). Every face is a plane, never curved, never warped.
+that edge's pitch. Every face is a plane, never curved, never warped.
 
 **Pitch** — the angle of a face from horizontal, in degrees, `0 < pitch < 90`.
 The single most important design variable. _Not: slope, inclination, fall, rise

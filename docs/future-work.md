@@ -189,3 +189,95 @@ Ranked by how much they'd change adoption:
 
 Documented for the reader in [`docs/limitations.md`](limitations.md).
 The three inherent limits come from Ren et al. (SIGGRAPH Asia 2021).
+
+---
+
+## 6. One plane over several walls (wrap)
+
+Shipped once as `wrap=` on `roof` / `Cell`: consecutive footprint edges
+marked as one face, no hip or valley at that corner. Removed from the
+product. The knob produced a self-intersecting 3D face on the headline
+L-shape and sent outer-corner wraps below the eave plane. Keeping it
+would have been worse than not having it.
+
+### Why the stated meaning is impossible
+
+A wrap group is two or more walls that are not collinear, with both
+eaves at the same height, asking for one pitched plane. Two level eave
+segments that meet at a corner already define a plane: the horizontal
+plane through those eaves. A non-zero pitch is a different plane. One
+of pitch, level eaves, or the bent outline has to give.
+
+Collinear split walls are the exception: they already lie on one pitched
+plane. That case is two combinatorial faces of the same geometry, not a
+new roof. The skeleton already draws it.
+
+### What the removed implementation actually did
+
+It did not run a different wavefront. It took the ordinary skeleton,
+merged the two faces in the dual, and defined the wrap plane from the
+**chord** of the wrap polyline (first vertex to last), not from the
+walls. Intermediate corners were then lifted onto that plane.
+
+That is the same geometry as **cutting the corner off** and roofing the
+simpler polygon. On the L, the pentagon `(0,0)–(10,0)–(10,6)–(3,10)–(0,10)`
+at 45° is a clean terrain. The old inner corner sits under the middle of
+a face, about 3.5 m above the walls — not on an eave.
+
+The code then glued that pentagon roof back onto the original L and
+still called the inner walls eaves. The inland hip of the pentagon
+(wrap plane ∩ west face) crosses those walls in plan. The wrap-face
+cycle walks along the inner walls and then across them. Filling that
+bowtie is the pierced 3D.
+
+The leftover valley node is a symptom. After the merge it is incident to
+only two planes, so it is not a roof vertex (those are three-plane
+hits). Dropping it and joining its neighbours **is** the hip that cuts
+the eave. Keeping the node makes the plan simple and the faces non-planar:
+it cannot sit on both remaining planes.
+
+Outer-corner wrap does not pierce. It sends the shared corner below
+grade (about −5 m on that L). Same chord plane, opposite side of the
+eave.
+
+### Options, if this is ever reopened
+
+Ranked. The first is the recommendation.
+
+1. **Do not add a wrap knob.** Cut the corner in the footprint, or split
+   the L into two cells. Gable and multi-cell `project` are the style
+   knobs that already work.
+2. **Wrap means chamfer, then roof.** Replace the grouped walls with the
+   chord and run the existing skeleton on that polygon. Clean 3D of a
+   *different building*. The API must say so; it is not “these walls are
+   one plane”.
+3. **Clip the chamfer roof back to the original footprint.** The roof
+   floats above the inner walls. Those walls are not eaves.
+4. **Split the wrap face where a hip crosses an eave.** Un-pierces the
+   mesh. The inner corner is still lifted, the “eaves” are still not
+   level. A drawing fix, not the stated feature.
+5. **Refuse unless every face is a simple polygon and every outline
+   vertex stays at eave height.** The L example and almost every
+   interesting wrap become `Failure`. Outer wraps still go underground
+   unless those are refused too.
+6. **Collinear groups only.** Geometrically honest, and not worth an API
+   knob: it merges two faces that already share a plane.
+7. **A location rule for the dropped node** (“if the projected point
+   falls outside, snap / drop / split”). The dropped node’s XY is inside
+   the footprint and inside the wrap envelope; it simply cannot be a
+   vertex of both remaining faces. The current code already drops it.
+   That is the pierce, not a missed rule.
+8. **A full roof-graph embedding (Ren et al. 2021)** with planarity as
+   the objective. The supporting planes are still the same. A better
+   solver does not create a 45° plane through two bent, level eaves.
+   The original spec also forbade a public from-graph function.
+
+### What would have to be true to start
+
+A different meaning than “these walls stay at eave height as one pitched
+plane”, written into the public API, with a 3D that is a simple terrain
+on the building the architect drew. Option 1 is that meaning: change the
+footprint. Option 2 is the only other construction that produced a
+simple solid in the investigation, and it is option 1 with a helper.
+
+Do not revive chord-plane embedding on the original outline.

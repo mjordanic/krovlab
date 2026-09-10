@@ -66,12 +66,6 @@ class Cell:
     per edge of this cell.
     """
 
-    wrap: list[list[int]] | None = None
-    """Consecutive edge groups to treat as one plane, or ``None``.
-
-    Empty or omitted is the existing skeleton of this cell.
-    """
-
     gambrel: Sequence[tuple[Pitch, Pitch, float] | None] | None = None
     """Optional barn break per edge: steep pitch, shallow pitch, break height.
 
@@ -122,11 +116,7 @@ class ProjectFace:
     """``Project.nodes`` indices walking the face boundary, eave first."""
 
     eave_indices: tuple[int, ...] = ()
-    """Caller-edge indices this face drains to. Empty means ``(edge_index,)``.
-
-    Copied from the cell's :class:`~krovlab.roof.Face` so a wrap still
-    names every consecutive eave after cells are concatenated.
-    """
+    """Caller-edge indices this face drains to. Empty means ``(edge_index,)``."""
 
 
 @dataclass(frozen=True)
@@ -207,7 +197,6 @@ def project(
             overhang=cell.overhang,
             eave_height=cell.eave_height,
             knee_height=cell.knee_height,
-            wrap=cell.wrap,
             gambrel=cell.gambrel,
         )
         if isinstance(built, Failure):

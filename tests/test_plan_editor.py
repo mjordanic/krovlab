@@ -33,8 +33,7 @@ process.stdout.write(JSON.stringify({{
   fields: editor.fields(),
   rings: editor.rings(),
   selectedCell: editor.selectedCell(),
-  selectedEdge: editor.selectedEdge(),
-  selectedEdges: editor.selectedEdges()
+  selectedEdge: editor.selectedEdge()
 }}));
 """
     proc = subprocess.run(
@@ -195,24 +194,6 @@ editor.setGambrel(60, 30, Math.sqrt(3));
         "0.0",
         "",
     )
-
-
-def test_selecting_consecutive_edges_sets_one_plane() -> None:
-    result = _run_editor(
-        """
-editor.clickPlan(0, 0);
-editor.clickPlan(10, 0);
-editor.clickPlan(10, 6);
-editor.clickPlan(0, 6);
-editor.closeRing();
-editor.clickPlan(5, 0);
-editor.clickPlan(10, 3);
-editor.setOnePlane();
-"""
-    )
-    fields = result["fields"]
-    assert result["selectedEdges"] == [0, 1]
-    assert fields["wrap-0"] == "0,1"
 
 
 def test_drawing_a_dormer_rectangle_writes_millimetre_fields() -> None:

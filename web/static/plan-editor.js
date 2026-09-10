@@ -23,7 +23,6 @@
     var drawing = false;
     var selectedCell = -1;
     var selectedEdge = null;
-    var selectedEdges = [];
     var dormers = [];
     var dormerMode = false;
 
@@ -101,32 +100,8 @@
       }
       var edge = hitEdge(x, y);
       if (edge) {
-        if (selectedCell !== edge.cell) {
-          selectedEdges = [];
-        }
         selectedCell = edge.cell;
         selectedEdge = edge.edge;
-        if (selectedEdges.length === 0) {
-          selectedEdges = [edge.edge];
-        } else if (selectedEdges.indexOf(edge.edge) !== -1) {
-          selectedEdges = selectedEdges.filter(function (i) {
-            return i !== edge.edge;
-          });
-        } else {
-          var n = cells[edge.cell].vertices.length;
-          var first = selectedEdges[0];
-          var last = selectedEdges[selectedEdges.length - 1];
-          if (edge.edge === (last + 1) % n) {
-            selectedEdges.push(edge.edge);
-          } else if (edge.edge === (first - 1 + n) % n) {
-            selectedEdges.unshift(edge.edge);
-          } else {
-            selectedEdges = [edge.edge];
-          }
-        }
-        if (selectedEdges.length) {
-          selectedEdge = selectedEdges[selectedEdges.length - 1];
-        }
         return;
       }
       var i;
@@ -134,7 +109,6 @@
         if (pointInRing(x, y, cells[i].vertices)) {
           selectedCell = i;
           selectedEdge = null;
-          selectedEdges = [];
           return;
         }
       }
@@ -148,7 +122,6 @@
       drawing = true;
       draft = [];
       selectedEdge = null;
-      selectedEdges = [];
     }
 
     function addCell() {
@@ -157,7 +130,6 @@
       dormerMode = false;
       selectedCell = -1;
       selectedEdge = null;
-      selectedEdges = [];
     }
 
     function setEaveHeight(height) {
@@ -217,15 +189,6 @@
       cell.knees[selectedEdge] = "0";
     }
 
-    function setOnePlane() {
-      if (selectedCell < 0 || selectedEdges.length < 2) {
-        return;
-      }
-      var cell = cells[selectedCell];
-      cell.wraps = cell.wraps || [];
-      cell.wraps.push(selectedEdges.slice());
-    }
-
     function moveVertex(cellIndex, vertexIndex, x, y) {
       var cell = cells[cellIndex];
       if (!cell || vertexIndex < 0 || vertexIndex >= cell.vertices.length) {
@@ -242,7 +205,6 @@
           selectedCell = 0;
         }
         selectedEdge = null;
-        selectedEdges = [];
         return;
       }
       if (selectedCell < 0) {
@@ -255,7 +217,6 @@
         selectedCell = cells.length - 1;
       }
       selectedEdge = null;
-      selectedEdges = [];
       drawing = false;
       draft = [];
     }
@@ -298,14 +259,12 @@
         breaks: draft.map(function () {
           return "0";
         }),
-        wraps: [],
         overhang: "0",
         eaveHeight: "0",
         hole: [],
       });
       selectedCell = cells.length - 1;
       selectedEdge = null;
-      selectedEdges = [];
       draft = [];
       drawing = false;
     }
@@ -347,9 +306,6 @@
           if (brk !== "" && brk != null && parseFloat(String(brk)) > 0) {
             out[p + "gambrel-break-" + i] = String(brk);
           }
-        });
-        (cell.wraps || []).forEach(function (group, i) {
-          out[p + "wrap-" + i] = group.join(",");
         });
         out[p + "overhang"] = cell.overhang;
         out[p + "eave_height"] = cell.eaveHeight;
@@ -402,23 +358,6 @@
       return pts;
     }
 
-    function readWraps(map, pfx) {
-      var groups = [];
-      var i = 0;
-      while (Object.prototype.hasOwnProperty.call(map, pfx + "wrap-" + i)) {
-        var raw = String(map[pfx + "wrap-" + i] || "");
-        if (raw.trim() !== "") {
-          groups.push(raw.split(",").map(function (part) {
-            return parseInt(part.trim(), 10);
-          }).filter(function (n) {
-            return !Number.isNaN(n);
-          }));
-        }
-        i += 1;
-      }
-      return groups;
-    }
-
     function prefixName(pfx, rest) {
       return pfx + rest;
     }
@@ -452,7 +391,6 @@
         overhang: map[pfx + "overhang"] || "0",
         eaveHeight: map[pfx + "eave_height"] || "0",
         hole: readRingFromMap(map, pfx, "hole"),
-        wraps: readWraps(map, pfx),
       };
     }
 
@@ -566,21 +504,6 @@
       return html;
     }
 
-    function wrapFieldsHtml(pfx, wraps) {
-      var html = "";
-      (wraps || []).forEach(function (group, i) {
-        html += "<input type=\"hidden\" name=\"" + pfx + "wrap-" + i + "\" value=\"" + esc(group.join(",")) + "\">";
-      });
-      return html;
-    }
-
-    function fillWrapFields(box, pfx, wraps) {
-      if (!box) {
-        return;
-      }
-      box.innerHTML = wrapFieldsHtml(pfx, wraps);
-    }
-
     function writeForm(form) {
       var edit = form.querySelector("[name=edit_vertices]");
       if (edit) {
@@ -605,7 +528,6 @@
         if (over) {
           over.value = cells[0].overhang;
         }
-        fillWrapFields(form.querySelector("#wrap-fields"), "", cells[0].wraps || []);
       }
       var extra = form.querySelector("#extra-cells");
       if (extra) {
@@ -624,7 +546,6 @@
           html += "<div>" + pitchRowsHtml(p, cell) + "</div>";
           html += "<p><label>Overhang <input name=\"" + p + "overhang\" value=\"" + esc(cell.overhang) + "\"> m</label> ";
           html += "<label>Eave height <input name=\"" + p + "eave_height\" value=\"" + esc(cell.eaveHeight) + "\"> m</label></p>";
-          html += wrapFieldsHtml(p, cell.wraps || []);
           html += "</div>";
         });
         extra.innerHTML = html;
@@ -696,7 +617,6 @@
       setGable: setGable,
       setKneeHeight: setKneeHeight,
       setGambrel: setGambrel,
-      setOnePlane: setOnePlane,
       moveVertex: moveVertex,
       deleteCell: deleteCell,
       fields: fields,
@@ -716,9 +636,6 @@
       },
       selectedEdge: function () {
         return selectedEdge;
-      },
-      selectedEdges: function () {
-        return selectedEdges.slice();
       },
     };
   }
@@ -868,13 +785,6 @@
     if (addBtn) {
       addBtn.addEventListener("click", function () {
         editor.addCell();
-        commit();
-      });
-    }
-    var onePlane = form.querySelector("#one-plane");
-    if (onePlane) {
-      onePlane.addEventListener("click", function () {
-        editor.setOnePlane();
         commit();
       });
     }

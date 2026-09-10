@@ -10,8 +10,7 @@ outward in metres. ``eave_height`` is metres above datum, added to every
 node after the roof is assessed. ``knee_height`` is metres of vertical
 wall on an edge before that edge's pitch begins. ``gambrel`` is a steep
 pitch, a shallow pitch, and a break height in metres above that cell's
-eave. ``wrap`` marks
-consecutive edges as one plane. A :class:`~krovlab.project.Dormer` is extra
+eave. A :class:`~krovlab.project.Dormer` is extra
 input to ``project``: a plan ring on one host face, with its own pitch.
 Every roof carries a
 :class:`Validity` result. Units are metres and degrees throughout. Pass

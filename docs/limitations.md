@@ -8,17 +8,22 @@ Four limits are inherent to the method. They will not go away by
 adding features. Other roofs — a butterfly, a mansard as a four-wall
 break — are simply not produced today; some of those stay reachable later.
 
-## One plane can cover several walls only as a wrap
+## One plane cannot cover several non-collinear walls
 
-Every roof face still rises from footprint edges. Marking consecutive
-edges of a cell as one plane — wrapping a corner without a hip — is the
-one graph edit: those edges share a pitch and become one face. The cell
-is then embedded from a roof graph rather than the wavefront. Alternate
-ridge layouts that are not "these walls are one plane" stay out; use a
-gable mask or a project of several cells.
+Every roof face still rises from one footprint edge. Two level eaves that
+are not collinear already define a horizontal plane; a pitched face is a
+different plane. Marking consecutive walls as one slope — wrapping a
+corner without a hip — is not in the library. A gable mask or a project
+of several cells remains the way to get another style on the same walls.
+Cutting the corner in the footprint is the way to roof the chamfered
+building.
 
-A wrap of non-consecutive edges, wrapped edges with disagreeing pitches,
-or a wrap that cannot embed as a planar terrain is a named Failure.
+Collinear extra vertices on a straight wall, both halves the same pitch,
+are two combinatorial faces of one geometric plane, not one face spanning
+both. That is not a wrap.
+
+Tried constructions, and why they do not ship, are in
+[future work](future-work.md#6-one-plane-over-several-walls-wrap).
 
 ## A dormer sits on a host face
 

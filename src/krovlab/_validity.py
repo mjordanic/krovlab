@@ -425,27 +425,6 @@ def _on_footprint_edge(
     )
 
 
-def _eave_on_wrapped_face(
-    arc: Arc,
-    nodes: tuple[Node, ...],
-    faces: tuple[Face, ...],
-    rings: list[list[tuple[float, float]]],
-) -> bool:
-    start = nodes[arc.start]
-    end = nodes[arc.end]
-    for face in faces:
-        eaves = _face_eave_indices(face)
-        if len(eaves) < 2:
-            continue
-        for idx in eaves:
-            a, b = _edge_endpoints(rings, idx)
-            if _point_on_segment(start.x, start.y, a, b, HEIGHT_TOL_M * 10) and (
-                _point_on_segment(end.x, end.y, a, b, HEIGHT_TOL_M * 10)
-            ):
-                return True
-    return False
-
-
 def _arc_reasons(
     nodes: tuple[Node, ...],
     faces: tuple[Face, ...],
@@ -469,8 +448,7 @@ def _arc_reasons(
                     f"ridge between nodes {arc.start} and {arc.end} is not horizontal"
                 )
         elif arc.kind == "eave":
-            on_wrap = _eave_on_wrapped_face(arc, nodes, faces, rings)
-            if abs(a.height - b.height) > HEIGHT_TOL_M and not on_wrap:
+            if abs(a.height - b.height) > HEIGHT_TOL_M:
                 reasons.append(
                     "arc classification matches geometry: "
                     f"eave between nodes {arc.start} and {arc.end} "
