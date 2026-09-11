@@ -20,6 +20,8 @@ web = [
     "flask>=3.1",
     "nbformat>=5.10",
     "plotly>=5.24",
+    "google-genai>=1.16",
+    "python-dotenv>=1.2.3",
 ]
 
 [dependency-groups]
@@ -35,6 +37,8 @@ dev = [
     "nbformat>=5.10",
     "ipykernel>=6.29",
     "flask>=3.1",
+    "google-genai>=1.16",
+    "python-dotenv>=1.2.3",
 ]
 
 [build-system]

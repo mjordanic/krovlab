@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
   <title>krovlab</title>
   <style>
     :root {
@@ -30,6 +32,11 @@
     }
     header h1 { margin: 0 0 0.25rem; font-size: 1.5rem; letter-spacing: -0.02em; }
     header .lede { margin: 0; color: var(--muted); max-width: 46rem; }
+    header .about { margin: 0.75rem 0 0; max-width: 46rem; }
+    header .about p { margin: 0.55rem 0 0; }
+    header .about p:first-child { margin-top: 0; }
+    header .about ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+    header .about li { margin: 0.2rem 0; }
     .example-bar {
       display: flex;
       flex-wrap: wrap;
@@ -143,6 +150,35 @@
       overflow: auto;
     }
     .takeoff pre { margin: 0; font: 13px/1.4 ui-monospace, Menlo, monospace; }
+    button[type="submit"].needs-update {
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .help-box {
+      border: 1px solid var(--line);
+      padding: 0.75rem;
+      margin: 0.75rem 0 1rem;
+      background: var(--paper);
+    }
+    .help-log {
+      max-height: 14rem;
+      overflow: auto;
+      margin: 0.5rem 0;
+      font-size: 0.92rem;
+      overflow-wrap: anywhere;
+    }
+    .help-log p { margin: 0.35rem 0; }
+    .help-log .you { color: var(--muted); }
+    .help-log .who { font-weight: 600; }
+    .help-log code { font: 0.9em ui-monospace, Menlo, monospace; }
+    .help-compose { display: flex; gap: 0.4rem; align-items: flex-end; }
+    .help-compose textarea {
+      font: inherit;
+      flex: 1;
+      min-height: 3.2rem;
+      padding: 0.3rem 0.4rem;
+      border: 1px solid var(--line);
+      resize: vertical;
+    }
     .js-extra[hidden], [hidden] { display: none !important; }
   </style>
 </head>
@@ -154,6 +190,28 @@
       hipped roof, or a named failure. Units: metres and degrees.
       <a href="https://github.com/mjordanic/krovlab">Source on GitHub</a>.
     </p>
+    <div class="about">
+      <p>
+        Start from an example in the dropdown, or draw on the building plan.
+        Click <strong>Update roof</strong> to rebuild the takeoff, the roof
+        plan, and the 3D. Pitch is degrees (or a trade spelling such as 4:12
+        or 100%).
+      </p>
+      <ul>
+        <li>Load a catalog example (hip, gable, shed, mixed pitches, knee, gambrel, L-shape, courtyard, overhang, two cells, a dormer, a named failure).</li>
+        <li>Select a wall or corner on the plan, drag vertices, add a detached cell, add a cell on a selected wall, split a wall with a vertex, or delete a cell.</li>
+        <li>Set each wall to hip, gable, knee (with height), or gambrel (shallow pitch and break).</li>
+        <li>Give a cell an eaves overhang, an eave height, or a courtyard hole.</li>
+        <li>Apply one pitch to all sloping walls, or type coordinates in the table.</li>
+        <li>Edit a dormer that is already on the example (move it on the plan; hip or gable and pitch per dormer wall).</li>
+        <li>When <strong>Need help?</strong> is on the page: ask about this roof, or have the box fill those same wall and cell knobs. It does not add cells or dormers. Click <strong>Update roof</strong> after it writes the form.</li>
+      </ul>
+      <p>
+        The Python library, Failure kinds, and what this roof family cannot
+        represent are in the
+        <a href="https://github.com/mjordanic/krovlab">README on GitHub</a>.
+      </p>
+    </div>
   </header>
   <form class="example-bar" method="get" action="/">
     <label>
@@ -176,6 +234,25 @@
       <p>
         <button type="submit">Update roof</button>
       </p>
+      {% if agent_enabled %}
+      <div class="help-box" id="help-root">
+        <label>
+          <input type="checkbox" id="need-help">
+          Need help?
+        </label>
+        <div id="help-panel" hidden>
+          <p class="hint">
+            Ask about this roof, or change a wall the same way the knobs do.
+            Then click Update roof.
+          </p>
+          <div class="help-log" id="help-log" aria-live="polite"></div>
+          <div class="help-compose">
+            <textarea id="help-input" rows="2" placeholder="Increase the pitch of wall 3"></textarea>
+            <button type="button" id="help-send">Send</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
       <div class="toolbar">
         <button type="button" id="add-detached-cell">Add detached cell</button>
         <button type="button" id="add-cell-on-wall" disabled>Add cell on selected wall</button>
@@ -354,11 +431,23 @@
     window.KROVLAB_HINTS = {{ wall_hints | tojson }};
   </script>
   <script src="{{ url_for('static', filename='plan-editor.js') }}"></script>
+  {% if agent_enabled %}
+  <script src="{{ url_for('static', filename='help.js') }}"></script>
+  {% endif %}
   <script>
-    KrovlabPlanEditor.mount(
+    var editor = KrovlabPlanEditor.mount(
       document.getElementById("plan-editor"),
       document.querySelector("form[method='post']")
     );
+    {% if agent_enabled %}
+    if (window.KrovlabHelp) {
+      KrovlabHelp.mount(
+        document.getElementById("help-root"),
+        document.querySelector("form[method='post']"),
+        editor
+      );
+    }
+    {% endif %}
   </script>
 </body>
 </html>

@@ -122,6 +122,10 @@ def test_get_shows_a_title_description_and_github_link() -> None:
     assert "Hip rectangle 10x6" in page
     assert "every wall a hip" in page
     assert "Update roof" in page
+    assert "Need help?" in page
+    assert "detached cell" in page
+    assert "courtyard" in page
+    assert "README on GitHub" in page
 
 
 def test_get_hides_coordinate_tables_until_edit_is_checked() -> None:
@@ -378,6 +382,8 @@ def test_readme_documents_one_local_command() -> None:
     text = readme.read_text(encoding="utf-8")
     assert "## Web demo" in text
     assert "python -m web" in text
+    assert "### Help agent" in text
+    assert "Need help?" in text
 
 
 def test_posting_edited_vertices_builds_that_footprint() -> None:
@@ -708,11 +714,12 @@ def test_get_shows_a_plan_editor_with_the_default_rectangle() -> None:
     assert "Close ring" not in page
 
 
-def test_app_has_no_json_api() -> None:
+def test_app_has_no_roof_json_api() -> None:
     app = create_app()
     rules = sorted(
         rule.rule for rule in app.url_map.iter_rules() if rule.endpoint != "static"
     )
-    assert rules == ["/"]
+    assert "/" in rules
+    assert "/api/roofs" not in rules
     response = _client().get("/api/roofs")
     assert response.status_code == 404

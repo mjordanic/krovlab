@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import math
+import os
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 from krovlab.viz import plan_view, solid_view
+from web.agent.loop import HelpModel, run_turn
+from web.agent.rate_limit import RateLimiter
 from web.examples import DEFAULT_EXAMPLE, WALL_HINTS, Example, load_examples
 from web.figures import input_footprint
 
@@ -66,11 +70,21 @@ class DormerView:
     kinds: list[str]
 
 
-def create_app() -> Flask:
-    """Build the single-page form app. One route for GET and POST."""
+def create_app(
+    *,
+    model: HelpModel | None = None,
+    limiter: RateLimiter | None = None,
+) -> Flask:
+    """Build the form app. ``POST /agent`` is the help JSON exception."""
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 100_000
+    if os.environ.get("PORT"):
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # type: ignore[method-assign]
     examples = load_examples()
     groups = _example_groups(examples)
+    help_model = model if model is not None else _live_model()
+    help_limiter = limiter if limiter is not None else RateLimiter()
+    agent_enabled = help_model is not None
 
     @app.route("/", methods=["GET", "POST"])
     def index() -> str:
@@ -85,12 +99,93 @@ def create_app() -> Flask:
                 result=_run_cells(list(example.cells), list(example.dormers)),
                 set_pitch=_default_set_pitch(example.cells[0]),
                 edit_coordinates=False,
+                agent_enabled=agent_enabled,
             )
         slug = request.form.get("example") or DEFAULT_EXAMPLE
         example = examples.get(slug, examples[DEFAULT_EXAMPLE])
-        return _render_post(request.form, example, groups)
+        return _render_post(
+            request.form, example, groups, agent_enabled=agent_enabled
+        )
+
+    @app.post("/agent")
+    def agent_turn() -> Any:
+        if help_model is None:
+            return jsonify(
+                error="Help is not configured on this server."
+            ), 503
+        if not help_limiter.allow(request.remote_addr or "unknown"):
+            return jsonify(
+                error="Too many help requests from this address. Try later."
+            ), 429
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(error="Send JSON with fields and messages."), 400
+        form = _as_form(payload.get("fields"))
+        if form is None or "outer-x-0" not in form:
+            return jsonify(
+                error="fields must be the current form (including the footprint)."
+            ), 400
+        raw_messages = payload.get("messages")
+        if not isinstance(raw_messages, list) or not raw_messages:
+            return jsonify(error="messages must be a non-empty list."), 400
+        describe = payload.get("describe")
+        selected = payload.get("selected")
+        try:
+            reply = run_turn(
+                help_model,
+                form=form,
+                messages=raw_messages,
+                describe=describe if isinstance(describe, str) else "",
+                selected=selected if isinstance(selected, dict) else None,
+            )
+        except Exception as exc:
+            app.logger.exception("help agent model call failed")
+            return jsonify(error=_public_model_error(exc)), _model_status(exc)
+        return jsonify(reply=reply.reply, fields=reply.fields)
 
     return app
+
+
+def _live_model() -> HelpModel | None:
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        from web.agent.gemini import GeminiModel
+    except ImportError:
+        return None
+    return GeminiModel(api_key=key)
+
+
+def _as_form(raw: object) -> dict[str, str] | None:
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            return None
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            if value:
+                out[key] = "on"
+            continue
+        out[key] = str(value)
+    return out
+
+
+def _public_model_error(exc: Exception) -> str:
+    text = str(exc).lower()
+    if "429" in text or "resource_exhausted" in text or "quota" in text:
+        return "Help is used up this month. Try again after the cap resets."
+    return "Help could not reach the language model."
+
+
+def _model_status(exc: Exception) -> int:
+    text = str(exc).lower()
+    if "429" in text or "resource_exhausted" in text or "quota" in text:
+        return 429
+    return 502
 
 
 def _example_groups(
@@ -116,6 +211,8 @@ def _render_post(
     form: Mapping[str, str],
     example: Example,
     groups: list[tuple[str, list[Example]]],
+    *,
+    agent_enabled: bool,
 ) -> str:
     set_pitch = form.get("set_pitch") or "45"
     edit_coordinates = bool(form.get("edit_coordinates"))
@@ -136,6 +233,7 @@ def _render_post(
         result=result,
         set_pitch=set_pitch,
         edit_coordinates=edit_coordinates,
+        agent_enabled=agent_enabled,
     )
 
 
@@ -148,6 +246,7 @@ def _render(
     result: Roof | Project | Failure,
     set_pitch: str,
     edit_coordinates: bool,
+    agent_enabled: bool,
 ) -> str:
     extra_footprints = [cell.footprint for cell in cells[1:]]
     first = cells[0] if cells else None
@@ -183,6 +282,7 @@ def _render(
         solid_html=solid_html,
         footprint_html=footprint_html,
         wall_hints=WALL_HINTS,
+        agent_enabled=agent_enabled,
     )
 
 

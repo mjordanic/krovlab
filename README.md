@@ -318,25 +318,43 @@ the example already uses them. Changing the example goes to
 after edits. Draw on the building plan: add a detached cell, or add a cell on a
 selected wall. There is no ring to close. Submit is still one form POST.
 
+### Help agent
+
+If `GEMINI_API_KEY` is set, a **Need help?** box appears beside the form.
+Ask about the current project (takeoff, why a Failure, what a hip or gable
+is) or have it fill the same knobs the form already has: wall type (hip,
+gable, knee, gambrel), pitch, overhang, and eave height. It does not add
+cells, draw a new footprint, or place a dormer. Click **Update roof** after
+it writes the form so the plan and 3D refresh.
+
+The model is Gemini 3.6 Flash. The key stays on the server. Copy
+[`.env_sample`](.env_sample) to `.env` and paste the key.
+`python -m web` loads `.env` on startup and does not override variables
+already in the environment. Do not commit `.env`.
+
 The same process is what a container runs. `Dockerfile` at the repo root
 starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
-image). Plotly.js still comes from a CDN.
+image). Plotly.js still comes from a CDN. Pass the Gemini key when you want
+help on that container:
 
 ```bash
 docker build -t krovlab .
-docker run --rm -p 8080:8080 krovlab
+docker run --rm -p 8080:8080 -e GEMINI_API_KEY krovlab
 ```
 
 To give it a URL, deploy that image to Cloud Run: region `europe-west1`,
 min instances 0, unauthenticated. No custom domain. Do not run this from
-CI — there is no live Google Cloud project in the test suite.
+CI — there is no live Google Cloud project in the test suite. Store the
+Gemini key as a secret; set a **project spend cap** of $10 in Google AI
+Studio so a leaked URL cannot run past that fuse.
 
 ```bash
 gcloud run deploy krovlab \
   --source . \
   --region europe-west1 \
   --min-instances 0 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest
 ```
 
 ## Worked numbers

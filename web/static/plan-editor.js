@@ -1046,6 +1046,11 @@
     highlightWalls(form, editor);
     commit(false);
 
+    editor.applyFields = function (map) {
+      editor.loadFields(map);
+      commit(true);
+    };
+
     var dragging = null;
 
     svg.addEventListener("pointerdown", function (event) {
