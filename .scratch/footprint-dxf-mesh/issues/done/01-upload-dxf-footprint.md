@@ -30,7 +30,7 @@ The committed example file is ticket 03.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 (DXF bullet), 46, 47, 48
 
@@ -41,16 +41,16 @@ and hole checks on the roof entry point (`self_intersection`, `degenerate`,
 `hole_intersects`). Web demo HTTP tests, including a two-cell post. Help box
 marks **Update roof** after it writes the form. Worked rectangle: 10 × 6 m.
 
-- [ ] A millimetre polyline `(0,0) (10000,0) (10000,6000) (0,6000)` fills the first cell as `(0,0) (10,0) (10,6) (0,6)`, hips at the page's set-pitch
-- [ ] Centimetres `(0, 1000, 600)` and metres `(0, 10, 6)` yield that same ring; a unitless header does not change the chosen scale
-- [ ] The default unit is millimetres
-- [ ] A repeated first vertex counts as closed; either winding is kept; collinear vertices stay; Z is discarded
-- [ ] An inner closed polyline becomes a hole; several inner polylines become several holes
-- [ ] The selected cell is the one replaced; with none selected, the first cell; other cells' footprints, pitches, and wall types stay
-- [ ] Overhang, eave height, and posted dormers on that cell stay
-- [ ] The describe block, plan, and 3D solid are still the pre-upload roof, and **Update roof** is marked as needing a click
-- [ ] An arc beside a straight polyline is ignored; a bulged polyline is skipped
-- [ ] Two outermost rings, a self-intersecting ring, a non-DXF, a body over 2 MB, and an INSERT with no model-space polyline each leave the fields unchanged and show a message; the INSERT message says to explode it
-- [ ] The header instructions mention the DXF upload
-- [ ] `import krovlab` still pulls in no third-party dependencies, and the core does not import the DXF reader
-- [ ] Flask test client covers these cases with DXFs built in the test; nothing asserts on CSS or DXF group codes
+- [x] A millimetre polyline `(0,0) (10000,0) (10000,6000) (0,6000)` fills the first cell as `(0,0) (10,0) (10,6) (0,6)`, hips at the page's set-pitch
+- [x] Centimetres `(0, 1000, 600)` and metres `(0, 10, 6)` yield that same ring; a unitless header does not change the chosen scale
+- [x] The default unit is millimetres
+- [x] A repeated first vertex counts as closed; either winding is kept; collinear vertices stay; Z is discarded
+- [x] An inner closed polyline becomes a hole; several inner polylines become several holes
+- [x] The selected cell is the one replaced; with none selected, the first cell; other cells' footprints, pitches, and wall types stay
+- [x] Overhang, eave height, and posted dormers on that cell stay
+- [x] The describe block, plan, and 3D solid are still the pre-upload roof, and **Update roof** is marked as needing a click
+- [x] An arc beside a straight polyline is ignored; a bulged polyline is skipped
+- [x] Two outermost rings, a self-intersecting ring, a non-DXF, a body over 2 MB, and an INSERT with no model-space polyline each leave the fields unchanged and show a message; the INSERT message says to explode it
+- [x] The header instructions mention the DXF upload
+- [x] `import krovlab` still pulls in no third-party dependencies, and the core does not import the DXF reader
+- [x] Flask test client covers these cases with DXFs built in the test; nothing asserts on CSS or DXF group codes

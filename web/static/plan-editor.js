@@ -106,6 +106,7 @@
       eaveHeight: "0",
       useEave: false,
       hole: [],
+      extraHoles: [],
       useHole: false
     };
   }
@@ -550,7 +551,21 @@
       var breaks = [];
       var i;
       var holePts = map[pfx + "use_hole"] === "on" ? readRingFromMap(map, pfx, "hole") : [];
-      var n = vertices.length + holePts.length;
+      var extraHoles = [];
+      if (map[pfx + "use_hole"] === "on") {
+        var h = 1;
+        while (true) {
+          var extra = readRingFromMap(map, pfx, "hole-" + h);
+          if (!extra.length) {
+            break;
+          }
+          extraHoles.push(extra);
+          h += 1;
+        }
+      }
+      var extraLen = 0;
+      extraHoles.forEach(function (ring) { extraLen += ring.length; });
+      var n = vertices.length + holePts.length + extraLen;
       for (i = 0; i < n; i += 1) {
         var kind = kindFromMap(map, pfx, i);
         types.push(kind);
@@ -575,6 +590,7 @@
         eaveHeight: map[pfx + "eave_height"] || "0",
         useEave: map[pfx + "use_eave_height"] === "on",
         hole: holePts,
+        extraHoles: extraHoles,
         useHole: map[pfx + "use_hole"] === "on"
       };
     }
@@ -598,6 +614,13 @@
       }
       dormers = readDormers(map);
       selectedCell = cells.length ? 0 : -1;
+      var rawSel = map.selected_cell;
+      if (rawSel != null && rawSel !== "" && rawSel !== "-1") {
+        var idx = parseInt(String(rawSel), 10);
+        if (!Number.isNaN(idx) && idx >= 0 && idx < cells.length) {
+          selectedCell = idx;
+        }
+      }
       selectedEdge = null;
       selectedVertex = null;
       selectedDormer = -1;
@@ -675,6 +698,12 @@
           (cell.hole || []).forEach(function (pt, i) {
             out[p + "hole-x-" + i] = String(pt.x);
             out[p + "hole-y-" + i] = String(pt.y);
+          });
+          (cell.extraHoles || []).forEach(function (ring, hi) {
+            ring.forEach(function (pt, i) {
+              out[p + "hole-" + (hi + 1) + "-x-" + i] = String(pt.x);
+              out[p + "hole-" + (hi + 1) + "-y-" + i] = String(pt.y);
+            });
           });
         }
       });
@@ -777,8 +806,11 @@
           cell.shallows.splice(cell.vertices.length);
           cell.breaks.splice(cell.vertices.length);
           cell.hole = [];
+          cell.extraHoles = [];
         } else {
-          while (cell.types.length < cell.vertices.length + cell.hole.length) {
+          var holeLen = (cell.hole ? cell.hole.length : 0);
+          (cell.extraHoles || []).forEach(function (ring) { holeLen += ring.length; });
+          while (cell.types.length < cell.vertices.length + holeLen) {
             cell.types.push("hip");
             cell.pitches.push(applyToAll);
             cell.knees.push("0");
@@ -815,6 +847,9 @@
       cell.vertices.forEach(function (pt) { pts.push([pt.x, pt.y]); });
       if (cell.useHole && cell.hole) {
         cell.hole.forEach(function (pt) { pts.push([pt.x, pt.y]); });
+        (cell.extraHoles || []).forEach(function (ring) {
+          ring.forEach(function (pt) { pts.push([pt.x, pt.y]); });
+        });
       }
     });
     editor.dormers().forEach(function (d) {
@@ -882,6 +917,12 @@
       if (cell.useHole && cell.hole && cell.hole.length) {
         var hole = cell.hole.map(function (pt) { return [pt.x, pt.y]; });
         html = appendRing(html, hole, index, outer.length, selectedCell, selectedEdge, "is-hole");
+        var holeOffset = outer.length + hole.length;
+        (cell.extraHoles || []).forEach(function (ring) {
+          var extra = ring.map(function (pt) { return [pt.x, pt.y]; });
+          html = appendRing(html, extra, index, holeOffset, selectedCell, selectedEdge, "is-hole");
+          holeOffset += extra.length;
+        });
       }
     });
     editor.dormers().forEach(function (dormer, dIndex) {
@@ -947,7 +988,9 @@
       html += "<p class=\"wall-extra js-extra\" data-kind=\"eave\"" + (cell.useEave ? "" : " hidden") +
         "><label>Eave height <input name=\"" + p + "eave_height\" value=\"" + esc(cell.eaveHeight) +
         "\"> m above datum</label></p>";
-      var wallCount = cell.vertices.length + ((cell.useHole && cell.hole) ? cell.hole.length : 0);
+      var extraLen = 0;
+      (cell.extraHoles || []).forEach(function (ring) { extraLen += ring.length; });
+      var wallCount = cell.vertices.length + ((cell.useHole && cell.hole) ? cell.hole.length : 0) + extraLen;
       var w;
       for (w = 0; w < wallCount; w += 1) {
         html += wallRowHtml(p, cell, w, index);
@@ -969,6 +1012,19 @@
           "\"></td><td><input name=\"" + p + "hole-y-" + i + "\" value=\"" + esc(pt.y) + "\"></td></tr>";
       });
       vhtml += "</tbody></table>";
+      (cell.extraHoles || []).forEach(function (ring, hi) {
+        var hn = hi + 1;
+        vhtml += "<p class=\"js-extra\" data-kind=\"hole\"" + (cell.useHole ? "" : " hidden") + ">Cell " +
+          (index + 1) + " courtyard " + (hn + 1) + " vertices (m)</p>";
+        vhtml += "<table class=\"js-extra\" data-kind=\"hole\"" + (cell.useHole ? "" : " hidden") +
+          "><thead><tr><th>x</th><th>y</th></tr></thead><tbody>";
+        ring.forEach(function (pt, i) {
+          vhtml += "<tr><td><input name=\"" + p + "hole-" + hn + "-x-" + i + "\" value=\"" + esc(pt.x) +
+            "\"></td><td><input name=\"" + p + "hole-" + hn + "-y-" + i + "\" value=\"" + esc(pt.y) +
+            "\"></td></tr>";
+        });
+        vhtml += "</tbody></table>";
+      });
     });
     root.innerHTML = html;
     if (vertex) {
@@ -1039,6 +1095,11 @@
         hint.textContent = disabled
           ? "Select a wall on the building plan to attach a cell or split a vertex."
           : "A wall is selected. Add a cell on it, or add a vertex at its midpoint.";
+      }
+      var selected = form.querySelector("[name=selected_cell]");
+      if (selected) {
+        var cell = editor.selectedCell();
+        selected.value = cell >= 0 ? String(cell) : "";
       }
     }
 

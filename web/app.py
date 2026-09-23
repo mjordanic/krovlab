@@ -6,7 +6,7 @@ import math
 import os
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
@@ -16,6 +16,7 @@ from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
 from web.agent.rate_limit import RateLimiter
+from web.dxf import DxfFootprint, rings_from_dxf
 from web.examples import DEFAULT_EXAMPLE, WALL_HINTS, Example, load_examples
 from web.figures import input_footprint
 
@@ -57,6 +58,7 @@ class CellView:
     use_overhang: bool
     use_eave: bool
     use_hole: bool
+    extra_holes: list[list[tuple[Any, Any]]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,7 +79,7 @@ def create_app(
 ) -> Flask:
     """Build the form app. ``POST /agent`` is the help JSON exception."""
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 100_000
+    app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
     if os.environ.get("PORT"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # type: ignore[method-assign]
     examples = load_examples()
@@ -104,15 +106,18 @@ def create_app(
         slug = request.form.get("example") or DEFAULT_EXAMPLE
         example = examples.get(slug, examples[DEFAULT_EXAMPLE])
         return _render_post(
-            request.form, example, groups, agent_enabled=agent_enabled
+            request.form,
+            example,
+            groups,
+            agent_enabled=agent_enabled,
+            files=request.files,
+            is_upload="upload_dxf" in request.form,
         )
 
     @app.post("/agent")
     def agent_turn() -> Any:
         if help_model is None:
-            return jsonify(
-                error="Help is not configured on this server."
-            ), 503
+            return jsonify(error="Help is not configured on this server."), 503
         if not help_limiter.allow(request.remote_addr or "unknown"):
             return jsonify(
                 error="Too many help requests from this address. Try later."
@@ -213,6 +218,8 @@ def _render_post(
     groups: list[tuple[str, list[Example]]],
     *,
     agent_enabled: bool,
+    files: Mapping[str, Any] | None = None,
+    is_upload: bool = False,
 ) -> str:
     set_pitch = form.get("set_pitch") or "45"
     edit_coordinates = bool(form.get("edit_coordinates"))
@@ -225,6 +232,21 @@ def _render_post(
         result = parsed_dormers
     else:
         result = _run_cells(parsed, parsed_dormers)
+    dxf_units = form.get("dxf_units") or "mm"
+    if dxf_units not in {"mm", "cm", "m"}:
+        dxf_units = "mm"
+    dxf_message = ""
+    needs_update = False
+    selected_cell = form.get("selected_cell") or ""
+    if is_upload:
+        loaded = _load_dxf(files, dxf_units)
+        if isinstance(loaded, str):
+            dxf_message = loaded
+        else:
+            index = _selected_cell_index(form, len(views))
+            views = _apply_dxf_to_cell(views, index, loaded, set_pitch)
+            needs_update = True
+            selected_cell = str(index)
     return _render(
         example,
         groups,
@@ -234,7 +256,71 @@ def _render_post(
         set_pitch=set_pitch,
         edit_coordinates=edit_coordinates,
         agent_enabled=agent_enabled,
+        dxf_units=dxf_units,
+        dxf_message=dxf_message,
+        needs_update=needs_update,
+        selected_cell=selected_cell,
     )
+
+
+def _load_dxf(files: Mapping[str, Any] | None, units: str) -> DxfFootprint | str:
+    if files is None:
+        return rings_from_dxf(b"", units)
+    storage = files.get("dxf")
+    if storage is None or not getattr(storage, "filename", None):
+        return rings_from_dxf(b"", units)
+    data = storage.read()
+    if not isinstance(data, (bytes, bytearray)):
+        data = bytes(data)
+    return rings_from_dxf(bytes(data), units)
+
+
+def _selected_cell_index(form: Mapping[str, str], n: int) -> int:
+    raw = form.get("selected_cell")
+    if raw is None or str(raw).strip() in ("", "-1"):
+        return 0
+    try:
+        index = int(raw)
+    except ValueError:
+        return 0
+    if index < 0 or index >= n:
+        return 0
+    return index
+
+
+def _apply_dxf_to_cell(
+    views: list[CellView],
+    index: int,
+    footprint: DxfFootprint,
+    set_pitch: str,
+) -> list[CellView]:
+    if not views:
+        return views
+    if index < 0 or index >= len(views):
+        index = 0
+    current = views[index]
+    holes = list(footprint.holes)
+    hole = list(holes[0]) if holes else []
+    extra = [list(item) for item in holes[1:]]
+    n_edges = len(footprint.outer) + sum(len(item) for item in holes)
+    pitches: list[Pitch] = [set_pitch] * n_edges
+    updated = _cell_view_from_parts(
+        current.index,
+        current.prefix,
+        list(footprint.outer),
+        hole,
+        pitches,
+        None,
+        None,
+        current.overhang,
+        current.eave_height,
+        current.use_overhang,
+        current.use_eave,
+        bool(holes),
+        set_pitch,
+        extra_holes=extra,
+    )
+    return [updated if i == index else cell for i, cell in enumerate(views)]
 
 
 def _render(
@@ -247,6 +333,10 @@ def _render(
     set_pitch: str,
     edit_coordinates: bool,
     agent_enabled: bool,
+    dxf_units: str = "mm",
+    dxf_message: str = "",
+    needs_update: bool = False,
+    selected_cell: str = "",
 ) -> str:
     extra_footprints = [cell.footprint for cell in cells[1:]]
     first = cells[0] if cells else None
@@ -283,6 +373,10 @@ def _render(
         footprint_html=footprint_html,
         wall_hints=WALL_HINTS,
         agent_enabled=agent_enabled,
+        dxf_units=dxf_units,
+        dxf_message=dxf_message,
+        needs_update=needs_update,
+        selected_cell=selected_cell,
     )
 
 
@@ -323,8 +417,10 @@ def _cell_views_from_cells(cells: Sequence[Cell]) -> list[CellView]:
 
 def _view_from_cell(index: int, cell: Cell) -> CellView:
     prefix = "" if index == 0 else f"cell-{index}-"
-    hole = list(cell.holes[0]) if cell.holes else []
-    n_edges = len(cell.footprint) + len(hole)
+    holes = [list(item) for item in (cell.holes or [])]
+    hole = holes[0] if holes else []
+    extra = holes[1:]
+    n_edges = len(cell.footprint) + sum(len(item) for item in holes)
     pitches = _expand_pitches(cell.pitch, n_edges)
     knees = _expand_knees(cell.knee_height, n_edges)
     return CellView(
@@ -338,6 +434,7 @@ def _view_from_cell(index: int, cell: Cell) -> CellView:
             prefix=prefix,
             knees=knees,
             gambrels=cell.gambrel,
+            extra_holes=extra,
         ),
         footprint=list(cell.footprint),
         hole=hole,
@@ -346,6 +443,7 @@ def _view_from_cell(index: int, cell: Cell) -> CellView:
         use_overhang=float(cell.overhang) != 0.0,
         use_eave=float(cell.eave_height) != 0.0,
         use_hole=bool(hole),
+        extra_holes=extra,
     )
 
 
@@ -357,8 +455,9 @@ def _wall_views(
     prefix: str = "",
     knees: list[float] | None = None,
     gambrels: Sequence[tuple[Pitch, Pitch, float] | None] | None = None,
+    extra_holes: Sequence[list[tuple[Any, Any]]] | None = None,
 ) -> list[WallView]:
-    rings = [footprint, *([hole] if hole else [])]
+    rings = [footprint, *([hole] if hole else []), *(extra_holes or [])]
     rows: list[WallView] = []
     for ring in rings:
         count = len(ring)
@@ -433,9 +532,15 @@ def _posted_cells(
                 )
             break
         posted_hole = _posted_ring(form, f"{prefix}hole")
+        extra_posted = _posted_extra_holes(form, prefix)
         use_hole = bool(form.get(f"{prefix}use_hole"))
         hole_display = posted_hole if use_hole and posted_hole else []
-        n_edges = len(posted_outer) + len(hole_display)
+        extra_display = extra_posted if use_hole else []
+        n_edges = (
+            len(posted_outer)
+            + len(hole_display)
+            + sum(len(item) for item in extra_display)
+        )
         spec = _posted_edge_spec(form, n_edges, prefix, set_pitch)
         use_overhang = bool(form.get(f"{prefix}use_overhang"))
         use_eave = bool(form.get(f"{prefix}use_eave_height"))
@@ -487,6 +592,7 @@ def _posted_cells(
             return views, parsed_outer
         display_outer = parsed_outer
         parsed_holes: list[list[tuple[float, float]]] | None = None
+        parsed_extras: list[list[tuple[float, float]]] = []
         if use_hole and posted_hole:
             parsed_hole = _as_xy_ring(
                 posted_hole, "hole" if index == 0 else f"cell {index} hole"
@@ -507,11 +613,40 @@ def _posted_cells(
                         use_eave,
                         use_hole,
                         set_pitch,
+                        extra_holes=extra_display,
                     )
                 )
                 return views, parsed_hole
             parsed_holes = [parsed_hole]
             display_hole = parsed_hole
+            for extra_i, extra_ring in enumerate(extra_display, start=1):
+                parsed_extra = _as_xy_ring(
+                    extra_ring,
+                    f"hole {extra_i}" if index == 0 else f"cell {index} hole {extra_i}",
+                )
+                if isinstance(parsed_extra, Failure):
+                    views.append(
+                        _cell_view_from_parts(
+                            index,
+                            prefix,
+                            display_outer,
+                            display_hole,
+                            pitches,
+                            knees,
+                            gambrels,
+                            raw_overhang,
+                            raw_eave,
+                            use_overhang,
+                            use_eave,
+                            use_hole,
+                            set_pitch,
+                            extra_holes=extra_display,
+                        )
+                    )
+                    return views, parsed_extra
+                parsed_extras.append(parsed_extra)
+            if parsed_extras:
+                parsed_holes.extend(parsed_extras)
         if use_overhang:
             overhang = _posted_overhang(form, 0.0, field=f"{prefix}overhang")
         else:
@@ -570,6 +705,7 @@ def _posted_cells(
                     prefix=prefix,
                     knees=knees,
                     gambrels=gambrels,
+                    extra_holes=parsed_extras or extra_display,
                 ),
                 footprint=display_outer,
                 hole=display_hole,
@@ -578,6 +714,7 @@ def _posted_cells(
                 use_overhang=use_overhang,
                 use_eave=use_eave,
                 use_hole=use_hole,
+                extra_holes=parsed_extras or extra_display,
             )
         )
         cells.append(
@@ -609,15 +746,25 @@ def _cell_view_from_parts(
     use_eave: bool,
     use_hole: bool,
     set_pitch: str,
+    extra_holes: list[list[tuple[Any, Any]]] | None = None,
 ) -> CellView:
+    extras = extra_holes or []
     if not pitches:
-        pitches = [set_pitch] * (len(outer) + len(hole))
+        pitches = [set_pitch] * (
+            len(outer) + len(hole) + sum(len(item) for item in extras)
+        )
     return CellView(
         index=index,
         title=f"Cell {index + 1}",
         prefix=prefix,
         walls=_wall_views(
-            outer, hole, pitches, prefix=prefix, knees=knees, gambrels=gambrels
+            outer,
+            hole,
+            pitches,
+            prefix=prefix,
+            knees=knees,
+            gambrels=gambrels,
+            extra_holes=extras,
         ),
         footprint=outer,
         hole=hole,
@@ -626,6 +773,7 @@ def _cell_view_from_parts(
         use_overhang=use_overhang,
         use_eave=use_eave,
         use_hole=use_hole,
+        extra_holes=extras,
     )
 
 
@@ -731,6 +879,20 @@ def _posted_ring(form: Mapping[str, str], prefix: str) -> list[tuple[str, str]] 
     while points and points[-1] == ("", ""):
         points.pop()
     return points if points else None
+
+
+def _posted_extra_holes(
+    form: Mapping[str, str], prefix: str
+) -> list[list[tuple[str, str]]]:
+    extras: list[list[tuple[str, str]]] = []
+    n = 1
+    while True:
+        ring = _posted_ring(form, f"{prefix}hole-{n}")
+        if ring is None:
+            break
+        extras.append(ring)
+        n += 1
+    return extras
 
 
 def _as_xy_ring(
@@ -989,5 +1151,3 @@ def _embed(fig: Any, *, include_js: bool) -> str:
     js: bool | str = "cdn" if include_js else False
     html: str = fig.to_html(full_html=False, include_plotlyjs=js)
     return html
-
-

@@ -205,6 +205,7 @@
         <li>Apply one pitch to all sloping walls, or type coordinates in the table.</li>
         <li>Edit a dormer that is already on the example (move it on the plan; hip or gable and pitch per dormer wall).</li>
         <li>When <strong>Need help?</strong> is on the page: ask about this roof, or have the box fill those same wall and cell knobs. It does not add cells or dormers. Click <strong>Update roof</strong> after it writes the form.</li>
+        <li>Upload a DXF with one closed straight polyline in model space (and courtyard holes inside it). Choose millimetres, centimetres, or metres — millimetres is the default. Then click <strong>Update roof</strong> to rebuild the drawings.</li>
       </ul>
       <p>
         The Python library, Failure kinds, and what this roof family cannot
@@ -228,12 +229,31 @@
     </label>
     <p class="caption">{{ example.caption }}</p>
   </form>
-  <form method="post" class="workspace">
+  <form method="post" class="workspace" enctype="multipart/form-data">
     <input type="hidden" name="example" value="{{ example.slug }}">
+    <input type="hidden" name="selected_cell" value="{{ selected_cell }}">
     <aside class="settings">
       <p>
-        <button type="submit">Update roof</button>
+        <button type="submit"{% if needs_update %} class="needs-update"{% endif %}>Update roof</button>
       </p>
+      <p>
+        <label>
+          DXF footprint
+          <input type="file" name="dxf" accept=".dxf,application/dxf">
+        </label>
+        <label>
+          Units
+          <select name="dxf_units">
+            <option value="mm"{% if dxf_units == "mm" %} selected{% endif %}>millimetres</option>
+            <option value="cm"{% if dxf_units == "cm" %} selected{% endif %}>centimetres</option>
+            <option value="m"{% if dxf_units == "m" %} selected{% endif %}>metres</option>
+          </select>
+        </label>
+        <button type="submit" name="upload_dxf" value="1">Load DXF</button>
+      </p>
+      {% if dxf_message %}
+      <p class="hint" id="dxf-message">{{ dxf_message }}</p>
+      {% endif %}
       {% if agent_enabled %}
       <div class="help-box" id="help-root">
         <label>
@@ -401,6 +421,21 @@
             {% endfor %}
           </tbody>
         </table>
+        {% for extra in cell.extra_holes %}
+        {% set hole_n = loop.index %}
+        <p class="js-extra" data-kind="hole"{% if not cell.use_hole %} hidden{% endif %}>{{ cell.title }} courtyard {{ hole_n + 1 }} vertices (m)</p>
+        <table class="js-extra" data-kind="hole"{% if not cell.use_hole %} hidden{% endif %}>
+          <thead><tr><th>x</th><th>y</th></tr></thead>
+          <tbody>
+            {% for x, y in extra %}
+            <tr>
+              <td><input name="{{ cell.prefix }}hole-{{ hole_n }}-x-{{ loop.index0 }}" value="{{ x }}"></td>
+              <td><input name="{{ cell.prefix }}hole-{{ hole_n }}-y-{{ loop.index0 }}" value="{{ y }}"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endfor %}
         {% endfor %}
       </div>
     </aside>
