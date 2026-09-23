@@ -78,7 +78,7 @@ entry point refused.
 ``dormer_outside`` — a dormer does not lie on a host face.
 ``no_face_graph`` — the experimental method was called with neither a
     supplied face graph nor a checkpoint.
-``unliftable`` — a supplied face graph could not be lifted into a roof.
+``unliftable`` — a face graph could not be lifted into a roof.
 """
 
 

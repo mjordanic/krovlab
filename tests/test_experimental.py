@@ -23,13 +23,38 @@ L_SHAPE = [
     (3.0, 10.0),
     (0.0, 10.0),
 ]
+RECTANGLE = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+U_SHAPE = [
+    (0.0, 0.0),
+    (10.0, 0.0),
+    (10.0, 6.0),
+    (8.0, 6.0),
+    (8.0, 2.0),
+    (2.0, 2.0),
+    (2.0, 6.0),
+    (0.0, 6.0),
+]
 
 
-def test_a_footprint_with_no_face_graph_is_no_face_graph() -> None:
+def test_omitted_graph_roofs_from_the_committed_checkpoint() -> None:
     result = roof_from_face_graph(L_SHAPE)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert "pitch" not in signature(roof_from_face_graph).parameters
+
+
+def test_omitted_graph_without_a_checkpoint_is_no_face_graph() -> None:
+    result = roof_from_face_graph(L_SHAPE, checkpoint=None)
     assert isinstance(result, Failure)
     assert result.kind == "no_face_graph"
-    assert "pitch" not in signature(roof_from_face_graph).parameters
+
+
+def test_supplied_graph_roofs_without_the_checkpoint() -> None:
+    missing = "/no/such/ren2021-face-adjacency.pt"
+    result = roof_from_face_graph(L_SHAPE, MIXED, checkpoint=missing)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert len(result.faces) == 5
 
 
 def test_a_graph_that_does_not_cover_every_wall_is_unliftable() -> None:
@@ -125,3 +150,69 @@ def test_eave_height_shifts_the_roof_by_that_height() -> None:
     assert [face.plan_area for face in lifted.faces] == pytest.approx(
         [face.plan_area for face in at_datum.faces]
     )
+
+
+def _meet_pairs(built: Roof) -> set[frozenset[int]]:
+    """Which faces share a node, keyed by the caller's wall index."""
+    at_node: dict[int, set[int]] = {}
+    for face in built.faces:
+        for idx in face.node_indices:
+            at_node.setdefault(idx, set()).add(face.edge_index)
+    pairs: set[frozenset[int]] = set()
+    for ids in at_node.values():
+        listed = list(ids)
+        for i, left in enumerate(listed):
+            for right in listed[i + 1 :]:
+                pairs.add(frozenset((left, right)))
+    return pairs
+
+
+def test_checkpoint_roof_has_a_different_face_arrangement_from_the_skeleton() -> None:
+    experimental = roof_from_face_graph(RECTANGLE)
+    skeleton = roof(RECTANGLE, 45.0)
+    assert isinstance(experimental, Roof)
+    assert isinstance(skeleton, Roof)
+    assert _meet_pairs(experimental) != _meet_pairs(skeleton)
+
+
+def test_predicted_graph_that_cannot_be_lifted_is_unliftable() -> None:
+    result = roof_from_face_graph(U_SHAPE)
+    assert isinstance(result, Failure)
+    assert result.kind == "unliftable"
+
+
+def test_omitted_graph_does_not_fetch_the_published_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("fetched the published pairs")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    result = roof_from_face_graph(L_SHAPE)
+    assert isinstance(result, Roof)
+
+
+def test_supplied_graph_does_not_load_torch() -> None:
+    code = """
+import sys
+from krovlab.experimental import roof_from_face_graph
+from krovlab import Roof
+result = roof_from_face_graph(
+    [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (3.0, 6.0), (3.0, 10.0), (0.0, 10.0)],
+    [[0], [1], [2, 3], [4], [5]],
+    checkpoint="/no/such/ren2021-face-adjacency.pt",
+)
+if not isinstance(result, Roof):
+    raise SystemExit(getattr(result, "kind", type(result).__name__))
+if "torch" in sys.modules:
+    raise SystemExit("torch")
+if "krovlab.ren_gnn" in sys.modules:
+    raise SystemExit("krovlab.ren_gnn")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

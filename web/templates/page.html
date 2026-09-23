@@ -244,8 +244,11 @@
       </label>
     </fieldset>
     <p class="caption" id="experimental-copy"{% if method != "experimental" %} hidden{% endif %}>
-      This path lifts a face graph into a planar roof. Pitch is not an input.
-      Gable, knee, gambrel, holes, dormers, and extra cells are not part of this method.
+      A network chooses which faces share a boundary. A planarity step then
+      makes those faces planar. Pitch is not an input. Use this method for a
+      face over several walls or for another ridge layout. Keep the skeleton
+      when each wall has a pitch. Gable, knee, gambrel, holes, dormers, and
+      extra cells are not part of this method.
     </p>
   </div>
   <form class="example-bar" method="get" action="/">
@@ -265,9 +268,6 @@
   </form>
   <form method="post" class="workspace" id="roof-form">
     <input type="hidden" name="example" value="{{ example.slug }}">
-    {% for group in face_graph %}
-    <input type="hidden" name="face-{{ loop.index0 }}" value="{{ group }}">
-    {% endfor %}
     <aside class="settings">
       <p>
         <button type="submit">Update roof</button>

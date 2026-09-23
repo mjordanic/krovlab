@@ -10,7 +10,7 @@ A catalog example roofs under either method. At least one footprint the skeleton
 
 **Blocked by:** 01: Train and ship the face-adjacency checkpoint. 02: Choose the method, and roof one footprint from a face graph.
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 6, 7, 14, 16, 20, 21
 
@@ -18,11 +18,11 @@ A catalog example roofs under either method. At least one footprint the skeleton
 
 **Artifact homes:** None new. Reads `models/ren2021-face-adjacency.pt` from ticket 01.
 
-- [ ] Submitting a footprint on the experimental path, with no supplied face graph, roofs it from the committed checkpoint
-- [ ] That request does not train and does not fetch the published pairs
-- [ ] The explanation names the network, the planarity step, that pitch is not used, and when to prefer this method over the skeleton
-- [ ] A catalog example produces a roof under the skeleton and a roof under the experimental method
-- [ ] At least one footprint comes back with a different face arrangement from the skeleton on the same walls
-- [ ] A predicted graph that cannot be lifted is Failure `unliftable`
-- [ ] Passing a face graph still returns that graph's roof without consulting the checkpoint
-- [ ] `import krovlab` still imports no third-party package
+- [x] Submitting a footprint on the experimental path, with no supplied face graph, roofs it from the committed checkpoint
+- [x] That request does not train and does not fetch the published pairs
+- [x] The explanation names the network, the planarity step, that pitch is not used, and when to prefer this method over the skeleton
+- [x] A catalog example produces a roof under the skeleton and a roof under the experimental method
+- [x] At least one footprint comes back with a different face arrangement from the skeleton on the same walls
+- [x] A predicted graph that cannot be lifted is Failure `unliftable`
+- [x] Passing a face graph still returns that graph's roof without consulting the checkpoint
+- [x] `import krovlab` still imports no third-party package

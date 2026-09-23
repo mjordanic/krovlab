@@ -6,6 +6,7 @@ The core package does not import this module. PyTorch is loaded only here.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 try:
     import torch
@@ -20,6 +21,15 @@ from krovlab.ren_gnn.model import FaceAdjacencyNet
 
 type Footprint = Sequence[tuple[float, float]]
 type MeetLabels = Sequence[Sequence[int]]
+
+
+def load_face_adjacency_net(path: str | Path) -> FaceAdjacencyNet:
+    """Load face-adjacency weights. Eval mode, on CPU."""
+    model = FaceAdjacencyNet()
+    state = torch.load(path, map_location="cpu", weights_only=True)
+    model.load_state_dict(state)
+    model.eval()
+    return model
 
 
 def pairwise_meet_probability(
@@ -66,5 +76,6 @@ def fit(
 __all__ = [
     "FaceAdjacencyNet",
     "fit",
+    "load_face_adjacency_net",
     "pairwise_meet_probability",
 ]

@@ -1,10 +1,13 @@
-"""Experimental roof from a supplied face graph, outside the skeleton core.
+"""Experimental roof from a face graph, outside the skeleton core.
 
-Call :func:`roof_from_face_graph` with one footprint and a face graph —
-which walls share a face, including one face over several walls. It
-returns a :class:`~krovlab.roof.Roof` or a :class:`~krovlab.roof.Failure`.
-It does not take a pitch. The skeleton entry point :func:`krovlab.roof.roof`
-is unchanged. This module is not imported by ``import krovlab``.
+Call :func:`roof_from_face_graph` with one footprint and an optional
+face graph — which walls share a face, including one face over several
+walls. When the graph is omitted, the shipped checkpoint predicts which
+faces share a boundary, then this module lifts that graph. It returns a
+:class:`~krovlab.roof.Roof` or a :class:`~krovlab.roof.Failure`. It does
+not take a pitch and it does not train. The skeleton entry point
+:func:`krovlab.roof.roof` is unchanged. This module is not imported by
+``import krovlab``. PyTorch loads only when a checkpoint predicts a graph.
 
 One vertex height is fixed at :data:`FIXED_HEIGHT` so the flat roof is
 not the minimiser, as in Ren et al. 2021 section 4.
@@ -14,6 +17,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from pathlib import Path
 
 from krovlab._input import check_footprint
 from krovlab._offset import apply_overhang
@@ -36,8 +40,14 @@ type FaceGraph = Sequence[Sequence[int]]
 FIXED_HEIGHT = 1.0
 """Metres. One roof height is fixed so a flat roof is not the lift."""
 
+DEFAULT_CHECKPOINT = (
+    Path(__file__).resolve().parents[2] / "models" / "ren2021-face-adjacency.pt"
+)
+"""Shipped face-adjacency weights. Used when no face graph is supplied."""
+
 _HEIGHT_TOL = 1e-9
 _COLLINEAR_SIN = 1e-9
+_MEET_THRESHOLD = 0.5
 
 
 def roof_from_face_graph(
@@ -46,6 +56,7 @@ def roof_from_face_graph(
     *,
     overhang: float = 0.0,
     eave_height: float = 0.0,
+    checkpoint: Path | str | None = DEFAULT_CHECKPOINT,
 ) -> Roof | Failure:
     """Lift a face graph over one footprint into a roof.
 
@@ -54,28 +65,28 @@ def roof_from_face_graph(
     footprint
         Plan vertices ``(x, y)`` in metres.
     face_graph
-        Which walls share a face: a partition of wall indices. ``None`` is
-        Failure ``no_face_graph``.
+        Which walls share a face: a partition of wall indices. ``None``
+        asks the checkpoint to predict the graph.
     overhang
         Eaves projection in metres, applied by offsetting the footprint
         first. Zero is the same as omitting the argument.
     eave_height
         Metres above datum, added to every node after the roof exists.
+    checkpoint
+        Weights that predict which faces share a boundary when
+        ``face_graph`` is omitted. The shipped path is the default.
+        ``None``, or a path that is not a file, is Failure
+        ``no_face_graph``. Ignored when a face graph is supplied.
 
     Returns
     -------
     Roof
         Faces, arcs, nodes, quantities, and a validity result.
     Failure
-        ``no_face_graph`` when no graph is supplied. ``unliftable`` when
-        the graph cannot be lifted. Footprint refusals use the same kinds
-        as :func:`krovlab.roof.roof`.
+        ``no_face_graph`` when neither a graph nor a checkpoint is
+        available. ``unliftable`` when the graph cannot be lifted.
+        Footprint refusals use the same kinds as :func:`krovlab.roof.roof`.
     """
-    if face_graph is None:
-        return Failure(
-            kind="no_face_graph",
-            reason="the experimental method needs a face graph, or a checkpoint",
-        )
     cleaned = check_footprint(footprint)
     if isinstance(cleaned, Failure):
         return cleaned
@@ -104,6 +115,11 @@ def roof_from_face_graph(
         return expanded
     cleaned, _holes = expanded
     n = len(cleaned)
+    if face_graph is None:
+        predicted = _predict_face_graph(cleaned, checkpoint)
+        if isinstance(predicted, Failure):
+            return predicted
+        face_graph = predicted
     faces = _faces_from_graph(face_graph, n)
     if isinstance(faces, Failure):
         return faces
@@ -118,6 +134,62 @@ def roof_from_face_graph(
 
 def _unliftable(reason: str) -> Failure:
     return Failure(kind="unliftable", reason=reason)
+
+
+def _no_face_graph() -> Failure:
+    return Failure(
+        kind="no_face_graph",
+        reason="the experimental method needs a face graph, or a checkpoint",
+    )
+
+
+def _predict_face_graph(
+    vertices: list[Vertex], checkpoint: Path | str | None
+) -> list[list[int]] | Failure:
+    """Load the checkpoint, predict which faces meet, return a partition."""
+    if checkpoint is None:
+        return _no_face_graph()
+    path = Path(checkpoint)
+    if not path.is_file():
+        return _no_face_graph()
+    try:
+        from krovlab.ren_gnn import (
+            load_face_adjacency_net,
+            pairwise_meet_probability,
+        )
+    except ImportError:
+        return _no_face_graph()
+    model = load_face_adjacency_net(path)
+    probs = pairwise_meet_probability(vertices, model)
+    return _face_graph_from_meet_probability(probs)
+
+
+def _face_graph_from_meet_probability(
+    probs: Sequence[Sequence[float]],
+) -> list[list[int]]:
+    """Partition walls: consecutive walls that do not meet are one face."""
+    n = len(probs)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(n):
+        j = (i + 1) % n
+        if i != j and probs[i][j] < _MEET_THRESHOLD:
+            union(i, j)
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    return list(groups.values())
 
 
 def _faces_from_graph(face_graph: FaceGraph, n: int) -> list[list[int]] | Failure:

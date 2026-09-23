@@ -42,7 +42,6 @@ class Example:
     caption: str
     cells: tuple[Cell, ...]
     dormers: tuple[Dormer, ...] = field(default_factory=tuple)
-    face_graph: tuple[tuple[int, ...], ...] | None = None
 
 
 def load_examples() -> dict[str, Example]:
@@ -115,7 +114,6 @@ def load_examples() -> dict[str, Example]:
             group="Plan",
             caption="One cell, a valley from the inside corner.",
             cells=(Cell(L_SHAPE, 45.0),),
-            face_graph=((0,), (1,), (2, 3), (4,), (5,)),
         ),
         Example(
             slug="courtyard",

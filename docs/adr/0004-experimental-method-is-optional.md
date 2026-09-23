@@ -23,9 +23,10 @@ it is not a replacement for the skeleton.
 The skeleton remains the default and the only core. `roof` and `project`
 keep their arguments and their results. The experimental method is a second
 entry point, outside that core: one footprint, an optional overhang, an
-optional eave height, and a face graph. It returns a Roof or a Failure. It
-does not take a pitch. Overhang and eave height keep the meanings they have
-on the skeleton.
+optional eave height, and an optional face graph. When the graph is
+omitted, the shipped checkpoint predicts which faces share a boundary.
+It returns a Roof or a Failure. It does not take a pitch. Overhang and
+eave height keep the meanings they have on the skeleton.
 
 The page offers the choice above the example catalog. Opening the page
 selects the skeleton. The experimental path is opt-in. Gable, knee,

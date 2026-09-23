@@ -102,7 +102,6 @@ def create_app(
                 edit_coordinates=False,
                 agent_enabled=agent_enabled,
                 method="skeleton",
-                face_graph=_face_graph_fields(example.face_graph),
             )
         slug = request.form.get("example") or DEFAULT_EXAMPLE
         example = examples.get(slug, examples[DEFAULT_EXAMPLE])
@@ -238,9 +237,6 @@ def _render_post(
         edit_coordinates=edit_coordinates,
         agent_enabled=agent_enabled,
         method=method,
-        face_graph=_face_graph_fields(
-            tuple(tuple(group) for group in face_graph) if face_graph else None
-        ),
     )
 
 
@@ -255,7 +251,6 @@ def _render(
     edit_coordinates: bool,
     agent_enabled: bool,
     method: str = "skeleton",
-    face_graph: list[str] | None = None,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -295,7 +290,6 @@ def _render(
         wall_hints=WALL_HINTS,
         agent_enabled=agent_enabled,
         method=method,
-        face_graph=face_graph or [],
     )
 
 
@@ -326,14 +320,6 @@ def _posted_method(form: Mapping[str, str]) -> str:
     if raw == "experimental":
         return "experimental"
     return "skeleton"
-
-
-def _face_graph_fields(
-    graph: tuple[tuple[int, ...], ...] | None,
-) -> list[str]:
-    if graph is None:
-        return []
-    return [",".join(str(wall) for wall in group) for group in graph]
 
 
 def _posted_face_graph(form: Mapping[str, str]) -> list[list[int]] | None:
