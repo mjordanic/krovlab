@@ -6,7 +6,7 @@ The notebook walks four examples. The same footprint is roofed both ways. One ex
 
 **Blocked by:** 03: Let the checkpoint choose the face graph
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 22, 23, 24, 25, 26, 27
 
@@ -14,9 +14,9 @@ The notebook walks four examples. The same footprint is roofed both ways. One ex
 
 **Artifact homes:** README section in `README.md` (tracked). Notebook at `notebooks/experimental-gnn.ipynb` (tracked; `notebooks/` is not ignored).
 
-- [ ] The README section matches the voice of the existing sections and covers inputs, the Roof-or-Failure return, when to prefer which method, the training command, and CC BY-NC 4.0 including commercial use
-- [ ] The README cites the held-out score in `models/ren2021-face-adjacency.md`
-- [ ] The notebook roofs one footprint with the skeleton and with the experimental method
-- [ ] The notebook shows an experimental face that covers several non-collinear walls
-- [ ] The notebook says to keep the skeleton when pitches differ per wall
-- [ ] The notebook shows a named Failure with its kind and reason
+- [x] The README section matches the voice of the existing sections and covers inputs, the Roof-or-Failure return, when to prefer which method, the training command, and CC BY-NC 4.0 including commercial use
+- [x] The README cites the held-out score in `models/ren2021-face-adjacency.md`
+- [x] The notebook roofs one footprint with the skeleton and with the experimental method
+- [x] The notebook shows an experimental face that covers several non-collinear walls
+- [x] The notebook says to keep the skeleton when pitches differ per wall
+- [x] The notebook shows a named Failure with its kind and reason
