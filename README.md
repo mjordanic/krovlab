@@ -318,6 +318,17 @@ the example already uses them. Changing the example goes to
 after edits. Draw on the building plan: add a detached cell, or add a cell on a
 selected wall. There is no ring to close. Submit is still one form POST.
 
+Upload a DXF as the selected cell's footprint: one closed straight polyline
+in model space. Choose millimetres, centimetres, or metres — millimetres is
+the default; the file header is ignored.
+[`notebooks/hip-rectangle-mm.dxf`](notebooks/hip-rectangle-mm.dxf) is the
+10 × 6 m rectangle already on the page, drawn in millimetres. Arcs, text,
+dimensions, hatches, paper space, and block inserts are ignored. If the
+file is only a block insert, explode it in CAD and upload again. Choosing
+a file fills the form and leaves the drawings as they were; **Update roof**
+rebuilds, the same as after drawing. When the 3D solid is on the page,
+download it as `roof.obj` and `roof.glb`.
+
 ### Help agent
 
 If `GEMINI_API_KEY` is set, a **Need help?** box appears beside the form.
@@ -385,7 +396,8 @@ Step-through examples after `uv sync --extra notebooks`:
   call `roof`, read quantities, gables, holes, overhang, eave height,
   a project of two cells, concatenated gables and a valley, knee
   (gablet), gambrel, a dormer on a host face, those same examples
-  on the web demo, and the views.
+  on the web demo, a DXF of the 10 × 6 m rectangle and mesh downloads,
+  and the views.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, the dormer exception (not a terrain, 3D
   still draws), inherent method limits, and how to read `validity`.

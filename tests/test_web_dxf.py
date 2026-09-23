@@ -7,12 +7,16 @@ describe block, and drawing branch — not CSS, templates, or group codes.
 
 from __future__ import annotations
 
+import struct
 from collections.abc import Callable
+from html.parser import HTMLParser
 from io import BytesIO, StringIO
+from pathlib import Path
 from typing import Any
 
 import ezdxf
 from flask.testing import FlaskClient
+from pygltflib import GLTF2  # type: ignore[import-untyped]
 from web.app import create_app
 from web.examples import (
     DORMER_RING,
@@ -449,3 +453,115 @@ def _describe_block(page: str) -> str:
     start = page.find("<pre>")
     end = page.find("</pre>")
     return page[start:end] if start != -1 and end != -1 else ""
+
+
+def _obj_vertices(body: str) -> list[tuple[float, float, float]]:
+    points: list[tuple[float, float, float]] = []
+    for line in body.splitlines():
+        if not line.startswith("v "):
+            continue
+        parts = line.split()
+        points.append((float(parts[1]), float(parts[2]), float(parts[3])))
+    return points
+
+
+def _has_point(
+    points: list[tuple[float, float, float]],
+    expected: tuple[float, float, float],
+) -> bool:
+    return any(
+        abs(x - expected[0]) < 1e-6
+        and abs(y - expected[1]) < 1e-6
+        and abs(z - expected[2]) < 1e-6
+        for x, y, z in points
+    )
+
+
+def _glb_positions(gltf: GLTF2) -> list[tuple[float, float, float]]:
+    primitive = gltf.meshes[0].primitives[0]
+    index = primitive.attributes.POSITION
+    assert index is not None
+    accessor = gltf.accessors[index]
+    view = gltf.bufferViews[accessor.bufferView]
+    blob = gltf.binary_blob()
+    assert blob is not None
+    offset = (view.byteOffset or 0) + (accessor.byteOffset or 0)
+    points: list[tuple[float, float, float]] = []
+    for i in range(accessor.count):
+        x, y, z = struct.unpack_from("<fff", blob, offset + i * 12)
+        points.append((x, y, z))
+    return points
+
+
+class _WorkspaceFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fields: dict[str, str] = {}
+        self._in = False
+        self._select: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        mapping = {key: (value or "") for key, value in attrs}
+        names = {key for key, _ in attrs}
+        if tag == "form":
+            self._in = "workspace" in mapping.get("class", "").split()
+            return
+        if not self._in:
+            return
+        if tag == "select":
+            self._select = mapping.get("name") or None
+            return
+        if tag == "option" and self._select and "selected" in names:
+            self.fields[self._select] = mapping.get("value") or ""
+            return
+        if tag != "input":
+            return
+        name = mapping.get("name")
+        if not name or name == "upload_dxf":
+            return
+        itype = mapping.get("type") or "text"
+        if itype == "file":
+            return
+        if itype in {"radio", "checkbox"} and "checked" not in names:
+            return
+        self.fields[name] = mapping.get("value") or "on"
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self._in = False
+        if tag == "select":
+            self._select = None
+
+
+def _workspace_fields(page: str) -> dict[str, str]:
+    parser = _WorkspaceFormParser()
+    parser.feed(page)
+    assert parser.fields
+    return parser.fields
+
+
+def test_committed_millimetre_dxf_then_update_roof_downloads_the_ridge() -> None:
+    dxf = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "hip-rectangle-mm.dxf"
+    ).read_bytes()
+    client = _client()
+    form = {"example": "hip-rectangle", "set_pitch": "45"}
+    form.update(_ring_fields([(0.0, 0.0), (8.0, 0.0), (8.0, 4.0), (0.0, 4.0)]))
+    page = _upload(client, dxf, form, units="mm")
+    _assert_metre_rectangle(page)
+    fields = _workspace_fields(page)
+    rebuilt = client.post("/", data=fields)
+    assert rebuilt.status_code == 200
+    assert "<h2>3D solid</h2>" in rebuilt.get_data(as_text=True)
+    obj = client.post("/roof.obj", data=fields)
+    assert obj.status_code == 200
+    points = _obj_vertices(obj.get_data(as_text=True))
+    assert _has_point(points, (3.0, 3.0, 3.0))
+    assert _has_point(points, (7.0, 3.0, 3.0))
+    glb = client.post("/roof.glb", data=fields)
+    assert glb.status_code == 200
+    loaded = GLTF2.load_from_bytes(glb.get_data())
+    assert loaded is not None
+    glb_points = _glb_positions(loaded)
+    assert _has_point(glb_points, (3.0, 3.0, -3.0))
+    assert _has_point(glb_points, (7.0, 3.0, -3.0))

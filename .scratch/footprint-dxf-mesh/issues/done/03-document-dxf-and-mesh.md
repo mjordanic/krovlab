@@ -23,7 +23,7 @@ from `(3, 3, 3)` to `(7, 3, 3)`.
 
 **Blocked by:** 01-upload-dxf-footprint, 02-download-roof-mesh
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 40, 41, 42, 43, 44, 45
 
@@ -35,8 +35,8 @@ capabilities". Worked numbers: 10 × 6 m at 45°, ridge from `(3, 3, 3)` to
 coordinates. Artifact homes: `README.md`, `notebooks/getting-started.ipynb`,
 `notebooks/hip-rectangle-mm.dxf`. None of these paths is gitignored.
 
-- [ ] `notebooks/hip-rectangle-mm.dxf` is the millimetre 10 × 6 m rectangle, one closed straight polyline in model space
-- [ ] README Web demo explains upload, units, what is ignored, the explode hint, **Update roof**, and both downloads, and links that file
-- [ ] README Notebooks list mentions the walkthrough; the Python Examples heading grows no file-format example
-- [ ] Getting-started gains one markdown section and lists it up front; the notebook still runs without the web extra
-- [ ] Uploading that file at millimetres, then **Update roof** at 45°, offers both downloads of the ridge from `(3, 3, 3)` to `(7, 3, 3)`
+- [x] `notebooks/hip-rectangle-mm.dxf` is the millimetre 10 × 6 m rectangle, one closed straight polyline in model space
+- [x] README Web demo explains upload, units, what is ignored, the explode hint, **Update roof**, and both downloads, and links that file
+- [x] README Notebooks list mentions the walkthrough; the Python Examples heading grows no file-format example
+- [x] Getting-started gains one markdown section and lists it up front; the notebook still runs without the web extra
+- [x] Uploading that file at millimetres, then **Update roof** at 45°, offers both downloads of the ridge from `(3, 3, 3)` to `(7, 3, 3)`

@@ -386,6 +386,63 @@ def test_readme_documents_one_local_command() -> None:
     assert "Need help?" in text
 
 
+def test_readme_web_demo_explains_dxf_and_mesh() -> None:
+    from pathlib import Path
+
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    web_demo = text.split("## Web demo", 1)[1].split("## Worked numbers", 1)[0]
+    notebooks = text.split("## Notebooks", 1)[1].split("## Tests", 1)[0]
+    examples = text.split("## Examples", 1)[1].split("## Web demo", 1)[0]
+    assert "notebooks/hip-rectangle-mm.dxf" in web_demo
+    assert "millimetres" in web_demo
+    assert "centimetres" in web_demo
+    assert "metres" in web_demo
+    assert "explode" in web_demo.lower()
+    assert "Update roof" in web_demo
+    assert "roof.obj" in web_demo
+    assert "roof.glb" in web_demo
+    lowered = web_demo.lower()
+    assert "arc" in lowered
+    assert "text" in lowered
+    assert "hatch" in lowered
+    assert "paper space" in lowered or "paperspace" in lowered
+    assert "insert" in lowered or "block" in lowered
+    assert "hip-rectangle-mm.dxf" in notebooks or "DXF" in notebooks
+    assert "mesh" in notebooks.lower() or "download" in notebooks.lower()
+    assert "hip-rectangle-mm.dxf" not in examples
+    assert "ezdxf" not in examples
+    assert "roof.obj" not in examples
+
+
+def test_getting_started_covers_dxf_without_the_web_extra() -> None:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "notebooks" / "getting-started.ipynb"
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+    markdown: list[str] = []
+    banned = ("ezdxf", "flask", "from web", "import web")
+    for cell in notebook["cells"]:
+        source = "".join(cell.get("source", []))
+        if cell.get("cell_type") == "markdown":
+            markdown.append(source)
+        elif cell.get("cell_type") == "code":
+            lowered = source.lower()
+            for name in banned:
+                assert name not in lowered, f"code cell imports {name}"
+    opening = markdown[0]
+    assert "DXF" in opening or "dxf" in opening
+    body = "\n\n".join(markdown)
+    assert "hip-rectangle-mm.dxf" in body
+    assert "Update roof" in body
+    assert "roof.obj" in body
+    assert "roof.glb" in body
+    assert any(
+        source.lstrip().startswith("##") and "DXF" in source for source in markdown
+    )
+
+
 def test_posting_edited_vertices_builds_that_footprint() -> None:
     short = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)]
     built = roof(short, 45.0)
