@@ -10,7 +10,7 @@ The downloaded pairs stay out of git. `import krovlab` still pulls in no third-p
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 28, 29, 30, 31, 32
 
@@ -18,10 +18,10 @@ The downloaded pairs stay out of git. `import krovlab` still pulls in no third-p
 
 **Artifact homes:** Checkpoint `models/ren2021-face-adjacency.pt` (tracked). Held-out intersection-over-union, learning rate, batch size, and epoch count in `models/ren2021-face-adjacency.md` (tracked). Pairs under `data/ren2021/`, which this ticket gitignores. Neither model path is ignored today.
 
-- [ ] One command fetches the pairs and trains the supplement's face-adjacency network
-- [ ] The pairs under `data/ren2021/` are gitignored and are not committed
-- [ ] `models/ren2021-face-adjacency.pt` is the committed checkpoint
-- [ ] `models/ren2021-face-adjacency.md` records the held-out intersection-over-union and the learning rate, batch size, and epoch count that produced it
-- [ ] The held-out count is 239 footprints by sorted name, then 4-vertex footprints dropped
-- [ ] A synthetic labelled footprint can be memorised, and the probability that edge i meets edge j equals the probability that j meets i
-- [ ] `import krovlab` still imports no third-party package
+- [x] One command fetches the pairs and trains the supplement's face-adjacency network
+- [x] The pairs under `data/ren2021/` are gitignored and are not committed
+- [x] `models/ren2021-face-adjacency.pt` is the committed checkpoint
+- [x] `models/ren2021-face-adjacency.md` records the held-out intersection-over-union and the learning rate, batch size, and epoch count that produced it
+- [x] The held-out count is 239 footprints by sorted name, then 4-vertex footprints dropped
+- [x] A synthetic labelled footprint can be memorised, and the probability that edge i meets edge j equals the probability that j meets i
+- [x] `import krovlab` still imports no third-party package
