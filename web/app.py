@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
+from krovlab.experimental import roof_from_face_graph
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
 from web.agent.rate_limit import RateLimiter
@@ -100,19 +101,17 @@ def create_app(
                 set_pitch=_default_set_pitch(example.cells[0]),
                 edit_coordinates=False,
                 agent_enabled=agent_enabled,
+                method="skeleton",
+                face_graph=_face_graph_fields(example.face_graph),
             )
         slug = request.form.get("example") or DEFAULT_EXAMPLE
         example = examples.get(slug, examples[DEFAULT_EXAMPLE])
-        return _render_post(
-            request.form, example, groups, agent_enabled=agent_enabled
-        )
+        return _render_post(request.form, example, groups, agent_enabled=agent_enabled)
 
     @app.post("/agent")
     def agent_turn() -> Any:
         if help_model is None:
-            return jsonify(
-                error="Help is not configured on this server."
-            ), 503
+            return jsonify(error="Help is not configured on this server."), 503
         if not help_limiter.allow(request.remote_addr or "unknown"):
             return jsonify(
                 error="Too many help requests from this address. Try later."
@@ -216,10 +215,14 @@ def _render_post(
 ) -> str:
     set_pitch = form.get("set_pitch") or "45"
     edit_coordinates = bool(form.get("edit_coordinates"))
+    method = _posted_method(form)
     views, parsed = _posted_cells(form, set_pitch)
     dormer_views, parsed_dormers = _posted_dormers(form)
+    face_graph = _posted_face_graph(form)
     result: Roof | Project | Failure
-    if isinstance(parsed, Failure):
+    if method == "experimental":
+        result = _run_experimental_from_form(form, face_graph)
+    elif isinstance(parsed, Failure):
         result = parsed
     elif isinstance(parsed_dormers, Failure):
         result = parsed_dormers
@@ -234,6 +237,10 @@ def _render_post(
         set_pitch=set_pitch,
         edit_coordinates=edit_coordinates,
         agent_enabled=agent_enabled,
+        method=method,
+        face_graph=_face_graph_fields(
+            tuple(tuple(group) for group in face_graph) if face_graph else None
+        ),
     )
 
 
@@ -247,15 +254,19 @@ def _render(
     set_pitch: str,
     edit_coordinates: bool,
     agent_enabled: bool,
+    method: str = "skeleton",
+    face_graph: list[str] | None = None,
 ) -> str:
-    extra_footprints = [cell.footprint for cell in cells[1:]]
+    extra_footprints = (
+        [cell.footprint for cell in cells[1:]] if method != "experimental" else []
+    )
     first = cells[0] if cells else None
     holes: list[list[tuple[Any, Any]]] | None = None
     draw_overhang = 0.0
     draw_footprint: list[tuple[Any, Any]] = []
     if first is not None:
         draw_footprint = first.footprint
-        if first.use_hole and first.hole:
+        if method != "experimental" and first.use_hole and first.hole:
             holes = [first.hole]
         if first.use_overhang:
             try:
@@ -283,6 +294,8 @@ def _render(
         footprint_html=footprint_html,
         wall_hints=WALL_HINTS,
         agent_enabled=agent_enabled,
+        method=method,
+        face_graph=face_graph or [],
     )
 
 
@@ -306,6 +319,69 @@ def _run_cells(
             gambrel=cell.gambrel,
         )
     return project(cells)
+
+
+def _posted_method(form: Mapping[str, str]) -> str:
+    raw = (form.get("method") or "skeleton").strip().lower()
+    if raw == "experimental":
+        return "experimental"
+    return "skeleton"
+
+
+def _face_graph_fields(
+    graph: tuple[tuple[int, ...], ...] | None,
+) -> list[str]:
+    if graph is None:
+        return []
+    return [",".join(str(wall) for wall in group) for group in graph]
+
+
+def _posted_face_graph(form: Mapping[str, str]) -> list[list[int]] | None:
+    groups: list[list[int]] = []
+    index = 0
+    while True:
+        raw = form.get(f"face-{index}")
+        if raw is None:
+            break
+        text = raw.strip()
+        if text:
+            try:
+                walls = [int(part.strip()) for part in text.split(",") if part.strip()]
+                groups.append(walls)
+            except ValueError:
+                return []
+        index += 1
+    return groups or None
+
+
+def _run_experimental_from_form(
+    form: Mapping[str, str],
+    face_graph: list[list[int]] | None,
+) -> Roof | Failure:
+    posted_outer = _posted_ring(form, "outer")
+    if posted_outer is None:
+        return Failure(kind="degenerate", reason="a footprint needs an outer ring")
+    parsed_outer = _as_xy_ring(posted_outer, "footprint")
+    if isinstance(parsed_outer, Failure):
+        return parsed_outer
+    if form.get("use_overhang"):
+        overhang = _posted_overhang(form, 0.0)
+        if isinstance(overhang, Failure):
+            return overhang
+    else:
+        overhang = 0.0
+    if form.get("use_eave_height"):
+        eave_height = _posted_eave_height(form)
+        if isinstance(eave_height, Failure):
+            return eave_height
+    else:
+        eave_height = 0.0
+    return roof_from_face_graph(
+        parsed_outer,
+        face_graph,
+        overhang=overhang,
+        eave_height=eave_height,
+    )
 
 
 def _default_set_pitch(cell: Cell) -> str:
@@ -989,5 +1065,3 @@ def _embed(fig: Any, *, include_js: bool) -> str:
     js: bool | str = "cdn" if include_js else False
     html: str = fig.to_html(full_html=False, include_plotlyjs=js)
     return html
-
-

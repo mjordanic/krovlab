@@ -12,7 +12,7 @@ The glossary gains one sentence: a face of the skeleton rises from one wall; an 
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 15, 17, 18, 19, 33, 34
 
@@ -20,17 +20,17 @@ The glossary gains one sentence: a face of the skeleton rises from one wall; an 
 
 **Artifact homes:** Glossary sentence in `CONTEXT.md`. ADR at `docs/adr/0004-experimental-method-is-optional.md`. Both are tracked paths.
 
-- [ ] Opening the page has the skeleton selected, and the choice sits above the example catalog
-- [ ] The two labels are the standard skeleton and an experimental graph network
-- [ ] A skeleton POST still matches today's roof, plan, 3D solid, and Failure, including pitch, gable, knee, gambrel, overhang, eave height, a hole, several cells, and a dormer
-- [ ] The experimental path says pitch is not an input, and gable, knee, gambrel, holes, dormers, and extra cells are visibly excluded
-- [ ] The experimental entry point does not take a pitch. It takes a footprint, an optional overhang, an optional eave height, and a face graph, and returns a Roof or a Failure
-- [ ] An L-shaped footprint whose supplied face graph covers two non-collinear walls with one face returns a Roof of that face structure, with plan and 3D on the page
-- [ ] The skeleton on that same L still has one face per wall
-- [ ] A terrain experimental roof reports validity, plan area, sloped area, and arc lengths by kind under the same definitions as `roof`
-- [ ] Overhang puts the eaves outside the walls. Eave height shifts the roof by that height
-- [ ] A graph that cannot be lifted is Failure `unliftable`. A footprint with no face graph is Failure `no_face_graph`
-- [ ] Switching back to the skeleton and submitting restores the skeleton roof
-- [ ] `CONTEXT.md` states that an experimental face may span several walls, and the skeleton's one-wall rule stays
-- [ ] ADR 0004 records that the skeleton remains the default core and this method is optional and unpitched
-- [ ] `import krovlab` still imports no third-party package. The help agent is unchanged
+- [x] Opening the page has the skeleton selected, and the choice sits above the example catalog
+- [x] The two labels are the standard skeleton and an experimental graph network
+- [x] A skeleton POST still matches today's roof, plan, 3D solid, and Failure, including pitch, gable, knee, gambrel, overhang, eave height, a hole, several cells, and a dormer
+- [x] The experimental path says pitch is not an input, and gable, knee, gambrel, holes, dormers, and extra cells are visibly excluded
+- [x] The experimental entry point does not take a pitch. It takes a footprint, an optional overhang, an optional eave height, and a face graph, and returns a Roof or a Failure
+- [x] An L-shaped footprint whose supplied face graph covers two non-collinear walls with one face returns a Roof of that face structure, with plan and 3D on the page
+- [x] The skeleton on that same L still has one face per wall
+- [x] A terrain experimental roof reports validity, plan area, sloped area, and arc lengths by kind under the same definitions as `roof`
+- [x] Overhang puts the eaves outside the walls. Eave height shifts the roof by that height
+- [x] A graph that cannot be lifted is Failure `unliftable`. A footprint with no face graph is Failure `no_face_graph`
+- [x] Switching back to the skeleton and submitting restores the skeleton roof
+- [x] `CONTEXT.md` states that an experimental face may span several walls, and the skeleton's one-wall rule stays
+- [x] ADR 0004 records that the skeleton remains the default core and this method is optional and unpitched
+- [x] `import krovlab` still imports no third-party package. The help agent is unchanged
