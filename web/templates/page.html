@@ -206,6 +206,7 @@
         <li>Edit a dormer that is already on the example (move it on the plan; hip or gable and pitch per dormer wall).</li>
         <li>When <strong>Need help?</strong> is on the page: ask about this roof, or have the box fill those same wall and cell knobs. It does not add cells or dormers. Click <strong>Update roof</strong> after it writes the form.</li>
         <li>Upload a DXF with one closed straight polyline in model space (and courtyard holes inside it). Choose millimetres, centimetres, or metres — millimetres is the default. Then click <strong>Update roof</strong> to rebuild the drawings.</li>
+        <li>When a three-dimensional roof is on the page, download it as <code>roof.obj</code> and <code>roof.glb</code> — one triangle mesh of the roof faces, in metres.</li>
       </ul>
       <p>
         The Python library, Failure kinds, and what this roof family cannot
@@ -455,6 +456,10 @@
       {% if solid_html %}
       <h2>3D solid</h2>
       {{ solid_html | safe }}
+      <p>
+        <button type="submit" form="mesh-download" formaction="/roof.obj">roof.obj</button>
+        <button type="submit" form="mesh-download" formaction="/roof.glb">roof.glb</button>
+      </p>
       {% endif %}
       {% if footprint_html %}
       <h2>Input footprint</h2>
@@ -462,6 +467,13 @@
       {% endif %}
     </main>
   </form>
+  {% if mesh_fields %}
+  <form id="mesh-download" method="post">
+    {% for name, value in mesh_fields.items() %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
+  </form>
+  {% endif %}
   <script>
     window.KROVLAB_HINTS = {{ wall_hints | tojson }};
   </script>

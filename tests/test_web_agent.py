@@ -253,5 +253,5 @@ def test_json_api_is_only_the_agent_route() -> None:
     rules = sorted(
         rule.rule for rule in app.url_map.iter_rules() if rule.endpoint != "static"
     )
-    assert rules == ["/", "/agent"]
+    assert rules == ["/", "/agent", "/roof.glb", "/roof.obj"]
     assert app.test_client().get("/api/roofs").status_code == 404

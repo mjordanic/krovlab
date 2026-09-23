@@ -362,7 +362,7 @@ def test_core_does_not_import_flask_or_the_web_app() -> None:
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "src" / "krovlab"
-    banned = ("flask", "web", "ezdxf")
+    banned = ("flask", "web", "ezdxf", "pygltflib")
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):

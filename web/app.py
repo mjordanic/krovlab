@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
@@ -19,6 +19,7 @@ from web.agent.rate_limit import RateLimiter
 from web.dxf import DxfFootprint, rings_from_dxf
 from web.examples import DEFAULT_EXAMPLE, WALL_HINTS, Example, load_examples
 from web.figures import input_footprint
+from web.mesh import glb_bytes, obj_bytes
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,45 @@ def create_app(
             return jsonify(error=_public_model_error(exc)), _model_status(exc)
         return jsonify(reply=reply.reply, fields=reply.fields)
 
+    @app.post("/roof.obj")
+    def download_obj() -> Response:
+        return _mesh_response(request.form, "obj")
+
+    @app.post("/roof.glb")
+    def download_glb() -> Response:
+        return _mesh_response(request.form, "glb")
+
     return app
+
+
+def _mesh_response(form: Mapping[str, str], kind: str) -> Response:
+    result = _result_from_form(form)
+    if isinstance(result, Failure) or not _shows_solid(result):
+        return Response("No 3D solid to download.", status=404)
+    if kind == "obj":
+        body = obj_bytes(result)
+        return Response(
+            body,
+            mimetype="text/plain",
+            headers={"Content-Disposition": 'attachment; filename="roof.obj"'},
+        )
+    body = glb_bytes(result)
+    return Response(
+        body,
+        mimetype="model/gltf-binary",
+        headers={"Content-Disposition": 'attachment; filename="roof.glb"'},
+    )
+
+
+def _result_from_form(form: Mapping[str, str]) -> Roof | Project | Failure:
+    set_pitch = form.get("set_pitch") or "45"
+    _, parsed = _posted_cells(form, set_pitch)
+    _, parsed_dormers = _posted_dormers(form)
+    if isinstance(parsed, Failure):
+        return parsed
+    if isinstance(parsed_dormers, Failure):
+        return parsed_dormers
+    return _run_cells(parsed, parsed_dormers)
 
 
 def _live_model() -> HelpModel | None:
@@ -238,6 +277,8 @@ def _render_post(
     dxf_message = ""
     needs_update = False
     selected_cell = form.get("selected_cell") or ""
+    shown_cells = views
+    shown_dormers = dormer_views
     if is_upload:
         loaded = _load_dxf(files, dxf_units)
         if isinstance(loaded, str):
@@ -260,6 +301,8 @@ def _render_post(
         dxf_message=dxf_message,
         needs_update=needs_update,
         selected_cell=selected_cell,
+        mesh_cells=shown_cells,
+        mesh_dormers=shown_dormers,
     )
 
 
@@ -337,6 +380,8 @@ def _render(
     dxf_message: str = "",
     needs_update: bool = False,
     selected_cell: str = "",
+    mesh_cells: list[CellView] | None = None,
+    mesh_dormers: list[DormerView] | None = None,
 ) -> str:
     extra_footprints = [cell.footprint for cell in cells[1:]]
     first = cells[0] if cells else None
@@ -359,6 +404,13 @@ def _render(
         draw_overhang,
         extra_footprints,
     )
+    mesh_fields: dict[str, str] = {}
+    if solid_html is not None:
+        mesh_fields = _mesh_fields(
+            mesh_cells if mesh_cells is not None else cells,
+            mesh_dormers if mesh_dormers is not None else dormers,
+            set_pitch,
+        )
     return render_template(
         "page.html",
         example=example,
@@ -377,6 +429,7 @@ def _render(
         dxf_message=dxf_message,
         needs_update=needs_update,
         selected_cell=selected_cell,
+        mesh_fields=mesh_fields,
     )
 
 
@@ -1080,6 +1133,54 @@ def _describe(result: Roof | Project | Failure) -> str:
         lines.append("validity.reasons:")
         lines.extend(result.validity.reasons)
     return "\n".join(lines)
+
+
+def _mesh_fields(
+    cells: list[CellView],
+    dormers: list[DormerView],
+    set_pitch: str,
+) -> dict[str, str]:
+    """Form fields that rebuild the solid currently drawn on the page."""
+    fields: dict[str, str] = {"set_pitch": set_pitch}
+    for cell in cells:
+        prefix = cell.prefix
+        for i, (x, y) in enumerate(cell.footprint):
+            fields[f"{prefix}outer-x-{i}"] = str(x)
+            fields[f"{prefix}outer-y-{i}"] = str(y)
+        if cell.use_hole:
+            fields[f"{prefix}use_hole"] = "on"
+            for i, (x, y) in enumerate(cell.hole):
+                fields[f"{prefix}hole-x-{i}"] = str(x)
+                fields[f"{prefix}hole-y-{i}"] = str(y)
+            for n, ring in enumerate(cell.extra_holes, start=1):
+                for i, (x, y) in enumerate(ring):
+                    fields[f"{prefix}hole-{n}-x-{i}"] = str(x)
+                    fields[f"{prefix}hole-{n}-y-{i}"] = str(y)
+        if cell.use_overhang:
+            fields[f"{prefix}use_overhang"] = "on"
+            fields[f"{prefix}overhang"] = cell.overhang
+        if cell.use_eave:
+            fields[f"{prefix}use_eave_height"] = "on"
+            fields[f"{prefix}eave_height"] = cell.eave_height
+        for wall in cell.walls:
+            fields[wall.type_name] = wall.kind
+            fields[wall.pitch_name] = wall.pitch
+            if wall.kind == "knee":
+                fields[wall.knee_name] = wall.knee
+            elif wall.kind == "gambrel":
+                fields[wall.shallow_name] = wall.shallow
+                fields[wall.break_name] = wall.break_height
+    for dormer in dormers:
+        fields[f"dormer-{dormer.index}-cell"] = str(dormer.cell_index)
+        for i, (x, y) in enumerate(dormer.footprint):
+            fields[f"dormer-{dormer.index}-x-{i}"] = str(x)
+            fields[f"dormer-{dormer.index}-y-{i}"] = str(y)
+        for j, (kind, pitch) in enumerate(
+            zip(dormer.kinds, dormer.pitches, strict=True)
+        ):
+            fields[f"dormer-{dormer.index}-type-{j}"] = kind
+            fields[f"dormer-{dormer.index}-pitch-{j}"] = pitch
+    return fields
 
 
 def _shows_solid(result: Roof | Project) -> bool:

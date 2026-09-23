@@ -23,6 +23,7 @@ web = [
     "google-genai>=1.16",
     "python-dotenv>=1.2.3",
     "ezdxf>=1.4.4",
+    "pygltflib>=1.16",
 ]
 
 [dependency-groups]
@@ -41,6 +42,7 @@ dev = [
     "google-genai>=1.16",
     "python-dotenv>=1.2.3",
     "ezdxf>=1.4.4",
+    "pygltflib>=1.16",
 ]
 
 [build-system]

@@ -21,7 +21,7 @@ upload-then-download round trip are ticket 03.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 25 (download bullet), 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39
 
@@ -33,12 +33,12 @@ example). Worked numbers: 10 × 6 m at 45°, ridge from `(3, 3, 3)` to
 `(7, 3, 3)`. Web demo HTTP tests for the Failure page (bowtie) and a
 non-terrain page (plus-shape).
 
-- [ ] The default terrain page offers `roof.obj` and `roof.glb`; a Failure page and a non-terrain page offer neither
-- [ ] The dormer example whose 3D is shown offers both, and the mesh is that solid's triangles
-- [ ] OBJ contains the ridge endpoints `(3, 3, 3)` and `(7, 3, 3)` and the eave corners at height 0, and has no `mtllib`
-- [ ] The glTF is one `.glb` mesh; the ridge point `(7, 3, 3)` is stored as `(7, 3, −3)`; the material is one flat grey and double-sided
-- [ ] The download posts the inputs that produced the shown solid, so a coordinate edited after **Update roof** is not the ring in the file
-- [ ] A multi-cell project downloads as one mesh of roof faces, with no arc linework and no wall solid
-- [ ] The header instructions mention the two downloads
-- [ ] The core package does not import the glTF writer
-- [ ] Flask test client covers these cases; nothing asserts on CSS
+- [x] The default terrain page offers `roof.obj` and `roof.glb`; a Failure page and a non-terrain page offer neither
+- [x] The dormer example whose 3D is shown offers both, and the mesh is that solid's triangles
+- [x] OBJ contains the ridge endpoints `(3, 3, 3)` and `(7, 3, 3)` and the eave corners at height 0, and has no `mtllib`
+- [x] The glTF is one `.glb` mesh; the ridge point `(7, 3, 3)` is stored as `(7, 3, −3)`; the material is one flat grey and double-sided
+- [x] The download posts the inputs that produced the shown solid, so a coordinate edited after **Update roof** is not the ring in the file
+- [x] A multi-cell project downloads as one mesh of roof faces, with no arc linework and no wall solid
+- [x] The header instructions mention the two downloads
+- [x] The core package does not import the glTF writer
+- [x] Flask test client covers these cases; nothing asserts on CSS
