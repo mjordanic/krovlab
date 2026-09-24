@@ -417,7 +417,10 @@ docker run --rm -p 8080:8080 -e GEMINI_API_KEY krovlab
 ```
 
 To give it a URL, deploy that image to Cloud Run: region `europe-west1`,
-min instances 0, unauthenticated. No custom domain. Do not run this from
+min instances 0, unauthenticated. The image installs the `gnn` extra and
+copies the face-adjacency checkpoint, so the experimental method can run
+there. PyTorch does not fit in Cloud Run's default 512Mi, so the service
+is given 2Gi. No custom domain. Do not run this from
 CI — there is no live Google Cloud project in the test suite. Store the
 Gemini key as a secret; set a **project spend cap** of $10 in Google AI
 Studio so a leaked URL cannot run past that fuse.
@@ -426,6 +429,7 @@ Studio so a leaked URL cannot run past that fuse.
 gcloud run deploy krovlab \
   --source . \
   --region europe-west1 \
+  --memory 2Gi \
   --min-instances 0 \
   --allow-unauthenticated \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest

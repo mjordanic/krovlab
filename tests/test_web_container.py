@@ -89,6 +89,8 @@ def test_dockerfile_starts_the_same_app_on_python_313() -> None:
     assert '"python", "-m", "web"' in text
     assert "CONTEXT.md" in text
     assert "docs/limitations.md" in text
+    assert "--extra gnn" in text
+    assert "models/ren2021-face-adjacency.pt" in text
 
 
 def test_readme_documents_localhost_and_cloud_run_flags() -> None:
@@ -96,6 +98,7 @@ def test_readme_documents_localhost_and_cloud_run_flags() -> None:
     assert "uv run --extra web python -m web" in text
     assert "europe-west1" in text
     assert "--min-instances 0" in text
+    assert "--memory 2Gi" in text
     assert "--allow-unauthenticated" in text
     assert "GEMINI_API_KEY" in text
     assert "--set-secrets=GEMINI_API_KEY" in text
