@@ -46,6 +46,24 @@
       background: var(--panel);
       border-bottom: 1px solid var(--line);
     }
+    .method-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      align-items: flex-start;
+      padding: 1rem 1.5rem 0;
+      background: var(--panel);
+    }
+    .method-bar fieldset {
+      border: 0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+    }
+    .method-bar legend { font-weight: 600; padding: 0; margin-right: 0.5rem; }
+    .method-bar label { font-weight: 400; }
     .example-bar label { font-weight: 600; }
     .example-bar select { font: inherit; padding: 0.3rem 0.4rem; min-width: 16rem; }
     .caption { margin: 0; color: var(--muted); max-width: 40rem; }
@@ -198,6 +216,10 @@
         or 100%).
       </p>
       <ul>
+        {% if method == "experimental" %}
+        <li>Load an example this method can roof: a rectangle, an L, one face over two walls, an overhang, an eave height, or a plan that crosses itself.</li>
+        <li>Roof height, overhang, and eave height still apply. Pitch, gable, knee, gambrel, holes, dormers, and extra cells do not.</li>
+        {% else %}
         <li>Load a catalog example (hip, gable, shed, mixed pitches, knee, gambrel, L-shape, courtyard, overhang, two cells, a dormer, a named failure).</li>
         <li>Select a wall or corner on the plan, drag vertices, add a detached cell, add a cell on a selected wall, split a wall with a vertex, or delete a cell.</li>
         <li>Set each wall to hip, gable, knee (with height), or gambrel (shallow pitch and break).</li>
@@ -207,6 +229,7 @@
         <li>When <strong>Need help?</strong> is on the page: ask about this roof, or have the box fill those same wall and cell knobs. It does not add cells or dormers. Click <strong>Update roof</strong> after it writes the form.</li>
         <li>Upload a DXF with one closed straight polyline in model space (and courtyard holes inside it). Choose millimetres, centimetres, or metres — millimetres is the default. Then click <strong>Update roof</strong> to rebuild the drawings.</li>
         <li>When a three-dimensional roof is on the page, download it as <code>roof.obj</code> and <code>roof.glb</code> — one triangle mesh of the roof faces, in metres.</li>
+        {% endif %}
       </ul>
       <p>
         The Python library, Failure kinds, and what this roof family cannot
@@ -215,7 +238,28 @@
       </p>
     </div>
   </header>
+  <div class="method-bar">
+    <fieldset>
+      <legend>Method</legend>
+      <label>
+        <input form="roof-form" type="radio" name="method" value="skeleton"{% if method != "experimental" %} checked{% endif %}>
+        Standard skeleton
+      </label>
+      <label>
+        <input form="roof-form" type="radio" name="method" value="experimental"{% if method == "experimental" %} checked{% endif %}>
+        Experimental graph network
+      </label>
+    </fieldset>
+    <p class="caption" id="experimental-copy"{% if method != "experimental" %} hidden{% endif %}>
+      A network chooses which faces share a boundary. A planarity step then
+      makes those faces planar. Pitch is not an input. Use this method for a
+      face over several walls or for another ridge layout. Keep the skeleton
+      when each wall has a pitch. Gable, knee, gambrel, holes, dormers, and
+      extra cells are not part of this method.
+    </p>
+  </div>
   <form class="example-bar" method="get" action="/">
+    <input type="hidden" name="method" value="{{ method }}">
     <label>
       Example
       <select name="example" onchange="this.form.submit()">
@@ -230,7 +274,7 @@
     </label>
     <p class="caption">{{ example.caption }}</p>
   </form>
-  <form method="post" class="workspace" enctype="multipart/form-data">
+  <form method="post" class="workspace" id="roof-form" enctype="multipart/form-data">
     <input type="hidden" name="example" value="{{ example.slug }}">
     <input type="hidden" name="selected_cell" value="{{ selected_cell }}">
     <aside class="settings">
@@ -263,7 +307,7 @@
         </label>
         <div id="help-panel" hidden>
           <p class="hint">
-            Ask about this roof, or change a wall the same way the knobs do.
+            Ask which method fits this roof, or change a knob the form still shows.
             Then click Update roof.
           </p>
           <div class="help-log" id="help-log" aria-live="polite"></div>
@@ -274,14 +318,14 @@
         </div>
       </div>
       {% endif %}
-      <div class="toolbar">
+      <div class="toolbar skeleton-only"{% if method == "experimental" %} hidden{% endif %}>
         <button type="button" id="add-detached-cell">Add detached cell</button>
         <button type="button" id="add-cell-on-wall" disabled>Add cell on selected wall</button>
         <button type="button" id="add-vertex" disabled>Add vertex on selected wall</button>
         <button type="button" id="delete-cell">Delete cell</button>
       </div>
-      <p class="hint" id="wall-action-hint">Select a wall on the building plan to attach a cell or split a vertex.</p>
-      <p class="pitch-all">
+      <p class="hint skeleton-only" id="wall-action-hint"{% if method == "experimental" %} hidden{% endif %}>Select a wall on the building plan to attach a cell or split a vertex.</p>
+      <p class="pitch-all skeleton-only"{% if method == "experimental" %} hidden{% endif %}>
         <label>
           Set pitch on all sloping walls
           <input name="set_pitch" value="{{ set_pitch }}">
@@ -290,7 +334,7 @@
       </p>
       <div id="cells-root">
         {% for cell in cells %}
-        <section class="cell-card" data-cell="{{ cell.index }}">
+        <section class="cell-card{% if cell.index > 0 %} skeleton-only{% endif %}" data-cell="{{ cell.index }}"{% if cell.index > 0 and method == "experimental" %} hidden{% endif %}>
           <h3>{{ cell.title }}</h3>
           <div class="cell-extras">
             <label>
@@ -301,7 +345,7 @@
               <input type="checkbox" name="{{ cell.prefix }}use_eave_height"{% if cell.use_eave %} checked{% endif %} data-extra="eave">
               Eave height
             </label>
-            <label>
+            <label class="skeleton-only"{% if method == "experimental" %} hidden{% endif %}>
               <input type="checkbox" name="{{ cell.prefix }}use_hole"{% if cell.use_hole %} checked{% endif %} data-extra="hole">
               Courtyard / hole
             </label>
@@ -320,10 +364,19 @@
               m above datum
             </label>
           </p>
+          {% if method == "experimental" and cell.index == 0 %}
+          <p class="wall-extra">
+            <label>
+              Roof height
+              <input name="roof_height" value="{{ roof_height }}">
+              m above the eaves
+            </label>
+          </p>
+          {% endif %}
           {% for wall in cell.walls %}
           <div class="wall" data-cell="{{ cell.index }}" data-wall="{{ wall.index }}">
             <div class="wall-head"><span>Wall {{ wall.number }}</span></div>
-            <div class="wall-types" role="radiogroup" aria-label="Wall {{ wall.number }} type">
+            <div class="wall-types skeleton-only" role="radiogroup" aria-label="Wall {{ wall.number }} type"{% if method == "experimental" %} hidden{% endif %}>
               {% for kind, label in [("hip", "Hip"), ("gable", "Gable"), ("knee", "Knee"), ("gambrel", "Gambrel")] %}
               <label>
                 <input type="radio" name="{{ wall.type_name }}" value="{{ kind }}"{% if wall.kind == kind %} checked{% endif %}>
@@ -331,21 +384,21 @@
               </label>
               {% endfor %}
             </div>
-            <p class="hint wall-hint">{{ wall.hint }}</p>
-            <p class="wall-extra js-pitch"{% if wall.kind == "gable" %} hidden{% endif %}>
+            <p class="hint wall-hint skeleton-only"{% if method == "experimental" %} hidden{% endif %}>{{ wall.hint }}</p>
+            <p class="wall-extra js-pitch skeleton-only"{% if wall.kind == "gable" or method == "experimental" %} hidden{% endif %}>
               <label>
                 Pitch
                 <input name="{{ wall.pitch_name }}" value="{{ wall.pitch }}"{% if wall.kind == "gable" %} disabled{% endif %}>
               </label>
             </p>
-            <p class="wall-extra js-knee"{% if wall.kind != "knee" %} hidden{% endif %}>
+            <p class="wall-extra js-knee skeleton-only"{% if wall.kind != "knee" or method == "experimental" %} hidden{% endif %}>
               <label>
                 Knee height
                 <input name="{{ wall.knee_name }}" value="{{ wall.knee }}">
                 m
               </label>
             </p>
-            <p class="wall-extra js-gambrel"{% if wall.kind != "gambrel" %} hidden{% endif %}>
+            <p class="wall-extra js-gambrel skeleton-only"{% if wall.kind != "gambrel" or method == "experimental" %} hidden{% endif %}>
               <label>
                 Shallow pitch
                 <input name="{{ wall.shallow_name }}" value="{{ wall.shallow }}">
@@ -361,7 +414,7 @@
         </section>
         {% endfor %}
       </div>
-      <div id="dormer-tables">
+      <div id="dormer-tables" class="skeleton-only"{% if method == "experimental" %} hidden{% endif %}>
         {% for dormer in dormers %}
         <section class="cell-card" data-dormer="{{ dormer.index }}">
           <h3>Dormer {{ dormer.index + 1 }}</h3>
@@ -410,8 +463,8 @@
             {% endfor %}
           </tbody>
         </table>
-        <p class="js-extra" data-kind="hole"{% if not cell.use_hole %} hidden{% endif %}>{{ cell.title }} courtyard vertices (m)</p>
-        <table class="js-extra" data-kind="hole"{% if not cell.use_hole %} hidden{% endif %}>
+        <p class="js-extra skeleton-only" data-kind="hole"{% if not cell.use_hole or method == "experimental" %} hidden{% endif %}>{{ cell.title }} courtyard vertices (m)</p>
+        <table class="js-extra skeleton-only" data-kind="hole"{% if not cell.use_hole or method == "experimental" %} hidden{% endif %}>
           <thead><tr><th>x</th><th>y</th></tr></thead>
           <tbody id="{{ cell.prefix }}hole-vertices">
             {% for x, y in cell.hole %}
@@ -486,6 +539,15 @@
       document.getElementById("plan-editor"),
       document.querySelector("form[method='post']")
     );
+    (function () {
+      var radios = document.querySelectorAll('input[name="method"]');
+      radios.forEach(function (radio) {
+        radio.addEventListener("change", function () {
+          if (!radio.checked) return;
+          window.location = "/?method=" + encodeURIComponent(radio.value);
+        });
+      });
+    })();
     {% if agent_enabled %}
     if (window.KrovlabHelp) {
       KrovlabHelp.mount(

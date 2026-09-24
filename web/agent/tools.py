@@ -35,7 +35,17 @@ def inspect_project(form: dict[str, str]) -> dict[str, Any]:
         if parsed is None:
             break
         cells.append(parsed)
-    return {"cells": cells}
+    return {
+        "method": _method(form),
+        "roof_height_m": form.get("roof_height") or "",
+        "cells": cells,
+    }
+
+
+def _method(form: dict[str, str]) -> str:
+    if form.get("method") == "experimental":
+        return "experimental"
+    return "skeleton"
 
 
 def set_wall(
@@ -51,6 +61,15 @@ def set_wall(
     gambrel_break: float | None = None,
 ) -> ToolResult:
     """Patch one wall's type and pitches. ``wall`` is the page's 1-based number."""
+    if _method(form) == "experimental":
+        return ToolResult(
+            ok=False,
+            note=(
+                "pitch, gable, knee, and gambrel are not inputs of the "
+                "experimental graph network. Select Standard skeleton when "
+                "each wall has a pitch. Roof height is metres above the eaves."
+            ),
+        )
     snapshot = _cell(form, cell)
     if snapshot is None:
         return ToolResult(ok=False, note=f"there is no Cell {cell} on the form")
@@ -180,15 +199,29 @@ def set_cell(
     cell: int = 1,
     overhang: float | None = None,
     eave_height: float | None = None,
+    roof_height: float | None = None,
 ) -> ToolResult:
-    """Patch overhang or eave height on one cell. Geometry stays as drawn."""
+    """Patch overhang, eave height, or experimental roof height."""
     snapshot = _cell(form, cell)
     if snapshot is None:
         return ToolResult(ok=False, note=f"there is no Cell {cell} on the form")
-    if overhang is None and eave_height is None:
+    if overhang is None and eave_height is None and roof_height is None:
         return ToolResult(
             ok=False,
-            note="set overhang metres, eave_height metres, or both",
+            note="set overhang metres, eave_height metres, or roof_height metres",
+        )
+    if roof_height is not None and _method(form) != "experimental":
+        return ToolResult(
+            ok=False,
+            note=(
+                "roof height is only on the experimental graph network. "
+                "On the skeleton, pitch sets how steep the roof is."
+            ),
+        )
+    if roof_height is not None and roof_height <= 0:
+        return ToolResult(
+            ok=False,
+            note="roof height must be metres above the eaves, greater than zero",
         )
     prefix = _prefix(cell)
     patches: dict[str, str] = {}
@@ -214,6 +247,9 @@ def set_cell(
         else:
             patches[f"{prefix}use_eave_height"] = "on"
             bits.append(f"eave height {patches[f'{prefix}eave_height']} m")
+    if roof_height is not None:
+        patches["roof_height"] = _fmt_metres(roof_height)
+        bits.append(f"roof height {patches['roof_height']} m above the eaves")
     return ToolResult(
         ok=True,
         fields=patches,

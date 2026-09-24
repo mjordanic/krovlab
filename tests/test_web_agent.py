@@ -141,6 +141,48 @@ class EchoModel:
         return ModelTurn(text="Ridge height is 3 m on the takeoff already on the page.")
 
 
+def test_help_prefers_the_skeleton_and_knows_the_graph_network() -> None:
+    text = system_prompt().lower()
+    assert "prefer" in text and "standard skeleton" in text
+    assert "experimental graph network" in text
+    assert "roof height" in text
+    assert "face over several" in text
+    assert "unliftable" in text
+    assert "does not take a pitch" in text or "pitch is not an input" in text
+
+
+def test_set_cell_roof_height_patches_the_experimental_form() -> None:
+    form = dict(_rect())
+    form["method"] = "experimental"
+    result = set_cell(form, cell=1, roof_height=2.0)
+    assert result.ok
+    assert result.fields["roof_height"] == "2"
+    assert "Update roof" in result.note
+
+
+def test_set_wall_refuses_while_the_graph_network_is_selected() -> None:
+    form = dict(_rect())
+    form["method"] = "experimental"
+    result = set_wall(form, cell=1, wall=3, pitch_delta=5)
+    assert not result.ok
+    assert "skeleton" in result.note.lower()
+
+
+def test_roof_height_is_not_a_skeleton_knob() -> None:
+    result = set_cell(_rect(), cell=1, roof_height=2.0)
+    assert not result.ok
+    assert "experimental" in result.note.lower()
+
+
+def test_inspect_reports_the_method_and_roof_height() -> None:
+    form = dict(_rect())
+    form["method"] = "experimental"
+    form["roof_height"] = "3"
+    snapshot = inspect_project(form)
+    assert snapshot["method"] == "experimental"
+    assert snapshot["roof_height_m"] == "3"
+
+
 def test_system_prompt_carries_glossary_limits_and_readme() -> None:
     text = system_prompt()
     assert "sloped area" in text
@@ -177,6 +219,29 @@ def test_agent_increases_side_3_through_json() -> None:
     assert body is not None
     assert body["fields"]["pitch-2"] == "50"
     assert "Update roof" in body["reply"]
+
+
+def test_agent_sets_roof_height_on_the_experimental_form() -> None:
+    model = ScriptedModel(
+        [
+            ModelTurn(tool_calls=[ToolCall("set_cell", {"cell": 1, "roof_height": 2})]),
+            ModelTurn(text="Roof height is 2 m above the eaves."),
+        ]
+    )
+    fields = dict(_rect())
+    fields["method"] = "experimental"
+    client = create_app(model=model).test_client()
+    response = client.post(
+        "/agent",
+        json={
+            "messages": [{"role": "user", "content": "make the roof 2 m above the eaves"}],
+            "fields": fields,
+        },
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body is not None
+    assert body["fields"]["roof_height"] == "2"
 
 
 def test_agent_answers_from_the_page_takeoff() -> None:

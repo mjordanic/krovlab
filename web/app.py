@@ -13,11 +13,19 @@ from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
+from krovlab.experimental import roof_from_face_graph
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
 from web.agent.rate_limit import RateLimiter
 from web.dxf import DxfFootprint, rings_from_dxf
-from web.examples import DEFAULT_EXAMPLE, WALL_HINTS, Example, load_examples
+from web.examples import (
+    DEFAULT_EXAMPLE,
+    DEFAULT_EXPERIMENTAL_EXAMPLE,
+    WALL_HINTS,
+    Example,
+    load_examples,
+    load_experimental_examples,
+)
 from web.figures import input_footprint
 from web.mesh import glb_bytes, obj_bytes
 
@@ -84,7 +92,7 @@ def create_app(
     if os.environ.get("PORT"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # type: ignore[method-assign]
     examples = load_examples()
-    groups = _example_groups(examples)
+    experimental_examples = load_experimental_examples()
     help_model = model if model is not None else _live_model()
     help_limiter = limiter if limiter is not None else RateLimiter()
     agent_enabled = help_model is not None
@@ -92,24 +100,36 @@ def create_app(
     @app.route("/", methods=["GET", "POST"])
     def index() -> str:
         if request.method != "POST":
-            slug = request.args.get("example") or DEFAULT_EXAMPLE
-            example = examples.get(slug, examples[DEFAULT_EXAMPLE])
+            method = _posted_method(request.args)
+            catalog = _catalog(method, examples, experimental_examples)
+            default = _default_example(method)
+            slug = request.args.get("example") or default
+            example = catalog.get(slug, catalog[default])
+            result: Roof | Project | Failure
+            if method == "experimental":
+                result = _run_experimental_example(example)
+            else:
+                result = _run_cells(list(example.cells), list(example.dormers))
             return _render(
                 example,
-                groups,
+                _example_groups(catalog),
                 cells=_cell_views_from_cells(example.cells),
                 dormers=_dormer_views_from_items(example.dormers),
-                result=_run_cells(list(example.cells), list(example.dormers)),
+                result=result,
                 set_pitch=_default_set_pitch(example.cells[0]),
                 edit_coordinates=False,
                 agent_enabled=agent_enabled,
+                method=method,
             )
-        slug = request.form.get("example") or DEFAULT_EXAMPLE
-        example = examples.get(slug, examples[DEFAULT_EXAMPLE])
+        method = _posted_method(request.form)
+        catalog = _catalog(method, examples, experimental_examples)
+        default = _default_example(method)
+        slug = request.form.get("example") or default
+        example = catalog.get(slug, catalog[default])
         return _render_post(
             request.form,
             example,
-            groups,
+            _example_groups(catalog),
             agent_enabled=agent_enabled,
             files=request.files,
             is_upload="upload_dxf" in request.form,
@@ -262,10 +282,14 @@ def _render_post(
 ) -> str:
     set_pitch = form.get("set_pitch") or "45"
     edit_coordinates = bool(form.get("edit_coordinates"))
+    method = _posted_method(form)
     views, parsed = _posted_cells(form, set_pitch)
     dormer_views, parsed_dormers = _posted_dormers(form)
+    face_graph = _posted_face_graph(form)
     result: Roof | Project | Failure
-    if isinstance(parsed, Failure):
+    if method == "experimental":
+        result = _run_experimental_from_form(form, face_graph, example)
+    elif isinstance(parsed, Failure):
         result = parsed
     elif isinstance(parsed_dormers, Failure):
         result = parsed_dormers
@@ -297,6 +321,7 @@ def _render_post(
         set_pitch=set_pitch,
         edit_coordinates=edit_coordinates,
         agent_enabled=agent_enabled,
+        method=method,
         dxf_units=dxf_units,
         dxf_message=dxf_message,
         needs_update=needs_update,
@@ -376,6 +401,7 @@ def _render(
     set_pitch: str,
     edit_coordinates: bool,
     agent_enabled: bool,
+    method: str = "skeleton",
     dxf_units: str = "mm",
     dxf_message: str = "",
     needs_update: bool = False,
@@ -383,14 +409,16 @@ def _render(
     mesh_cells: list[CellView] | None = None,
     mesh_dormers: list[DormerView] | None = None,
 ) -> str:
-    extra_footprints = [cell.footprint for cell in cells[1:]]
+    extra_footprints = (
+        [cell.footprint for cell in cells[1:]] if method != "experimental" else []
+    )
     first = cells[0] if cells else None
     holes: list[list[tuple[Any, Any]]] | None = None
     draw_overhang = 0.0
     draw_footprint: list[tuple[Any, Any]] = []
     if first is not None:
         draw_footprint = first.footprint
-        if first.use_hole and first.hole:
+        if method != "experimental" and first.use_hole and first.hole:
             holes = [first.hole]
         if first.use_overhang:
             try:
@@ -425,6 +453,8 @@ def _render(
         footprint_html=footprint_html,
         wall_hints=WALL_HINTS,
         agent_enabled=agent_enabled,
+        method=method,
+        roof_height=_shown_roof_height(method, cells, result),
         dxf_units=dxf_units,
         dxf_message=dxf_message,
         needs_update=needs_update,
@@ -453,6 +483,131 @@ def _run_cells(
             gambrel=cell.gambrel,
         )
     return project(cells)
+
+
+def _posted_method(form: Mapping[str, str]) -> str:
+    raw = (form.get("method") or "skeleton").strip().lower()
+    if raw == "experimental":
+        return "experimental"
+    return "skeleton"
+
+
+def _posted_face_graph(form: Mapping[str, str]) -> list[list[int]] | None:
+    groups: list[list[int]] = []
+    index = 0
+    while True:
+        raw = form.get(f"face-{index}")
+        if raw is None:
+            break
+        text = raw.strip()
+        if text:
+            try:
+                walls = [int(part.strip()) for part in text.split(",") if part.strip()]
+                groups.append(walls)
+            except ValueError:
+                return []
+        index += 1
+    return groups or None
+
+
+def _catalog(
+    method: str,
+    examples: dict[str, Example],
+    experimental_examples: dict[str, Example],
+) -> dict[str, Example]:
+    if method == "experimental":
+        return experimental_examples
+    return examples
+
+
+def _default_example(method: str) -> str:
+    if method == "experimental":
+        return DEFAULT_EXPERIMENTAL_EXAMPLE
+    return DEFAULT_EXAMPLE
+
+
+def _run_experimental_example(example: Example) -> Roof | Failure:
+    cell = example.cells[0]
+    graph = _example_face_graph(example)
+    return roof_from_face_graph(
+        list(cell.footprint),
+        graph,
+        overhang=cell.overhang,
+        eave_height=cell.eave_height,
+    )
+
+
+def _shown_roof_height(
+    method: str,
+    cells: list[CellView],
+    result: Roof | Project | Failure,
+) -> str:
+    if method != "experimental" or not isinstance(result, Roof):
+        return ""
+    eave = 0.0
+    first = cells[0] if cells else None
+    if first is not None and first.use_eave:
+        try:
+            eave = float(first.eave_height)
+        except ValueError:
+            eave = 0.0
+    rise = result.ridge_height - eave
+    return f"{rise:g}"
+
+
+def _example_face_graph(example: Example) -> list[list[int]] | None:
+    if example.face_graph is None:
+        return None
+    return [list(group) for group in example.face_graph]
+
+
+def _run_experimental_from_form(
+    form: Mapping[str, str],
+    face_graph: list[list[int]] | None,
+    example: Example,
+) -> Roof | Failure:
+    posted_outer = _posted_ring(form, "outer")
+    if posted_outer is None:
+        return Failure(kind="degenerate", reason="a footprint needs an outer ring")
+    parsed_outer = _as_xy_ring(posted_outer, "footprint")
+    if isinstance(parsed_outer, Failure):
+        return parsed_outer
+    if form.get("use_overhang"):
+        overhang = _posted_overhang(form, 0.0)
+        if isinstance(overhang, Failure):
+            return overhang
+    else:
+        overhang = 0.0
+    if form.get("use_eave_height"):
+        eave_height = _posted_eave_height(form)
+        if isinstance(eave_height, Failure):
+            return eave_height
+    else:
+        eave_height = 0.0
+    roof_height = _posted_roof_height(form)
+    if isinstance(roof_height, Failure):
+        return roof_height
+    graph = face_graph if face_graph is not None else _example_face_graph(example)
+    return roof_from_face_graph(
+        parsed_outer,
+        graph,
+        overhang=overhang,
+        eave_height=eave_height,
+        roof_height=roof_height,
+    )
+
+
+def _posted_roof_height(form: Mapping[str, str]) -> float | None | Failure:
+    raw = form.get("roof_height")
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return Failure(
+            kind="degenerate",
+            reason="roof height must be a finite number of metres above the eaves",
+        )
 
 
 def _default_set_pitch(cell: Cell) -> str:

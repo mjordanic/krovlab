@@ -13,7 +13,7 @@ Read `.agents/skills/implement-issues/references/isolation.md` when isolation is
 
 Required keys from the orchestrator (handover.md dispatch envelope): `repo_root`, `feature_path`, `report_path`, `base_branch`, `wave`, `cap`, `issue_ids`, `feature_slug`, `harness`, `isolation`, `implementer_models`. Optional `resume_agent_ids`.
 
-`implementer_models` values are **already harness slugs**. Pass each as the Task/Agent `model` parameter. Never substitute a different model.
+`implementer_models` values are **already harness slugs**. Pass each unchanged as the Task/Agent `model` parameter. Any slug is valid. Never substitute a different model. If this nested Task tool rejects the slug because its enum is only `composer-2.5-fast`, do not block the issue and do not pick another model: return `firewall: degraded` immediately so the orchestrator passes that same slug on its own `issue-implementer` call.
 
 ## Workflow
 

@@ -1,7 +1,6 @@
 ---
 name: "issue-implementer"
 description: "Implements one pre-selected ready-for-agent issue by following the /implement skill inside an assigned workspace (repo root, git worktree, or Cursor cloud checkout). Use when /implement-issues or a wave-runner assigns an issue id and workspace."
-model: cursor-grok-4.6-xhigh
 color: green
 ---
 
@@ -17,6 +16,7 @@ The implementation loop is **`/implement`**. Read `.agents/skills/implement/SKIL
 - **isolation:** `inplace` | `worktree` | `cloud`.
 - **implement_skill:** `.agents/skills/implement/SKILL.md`
 - **pre_selected:** true
+- **model:** the Task/Agent `model` argument on this dispatch. This file does not pin a model. Whatever slug the caller passes is the model that runs `/implement`.
 
 If `workspace` is omitted, the current working directory is the workspace.
 

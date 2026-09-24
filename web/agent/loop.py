@@ -200,6 +200,8 @@ def _cell_kwargs(args: dict[str, Any]) -> dict[str, Any]:
         out["overhang"] = float(args["overhang"])
     if args.get("eave_height") not in (None, ""):
         out["eave_height"] = float(args["eave_height"])
+    if args.get("roof_height") not in (None, ""):
+        out["roof_height"] = float(args["roof_height"])
     return out
 
 

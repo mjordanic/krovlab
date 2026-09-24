@@ -40,6 +40,9 @@ skills-lock.json
 .env.local
 .env.*.local
 
+# Ren et al. 2021 RoofSynthesis pairs (CC BY-NC 4.0). Fetched when training.
+data/ren2021/
+
 # os / editor
 .DS_Store
 *.local

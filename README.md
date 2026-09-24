@@ -28,6 +28,7 @@ Optional extras:
 uv sync --extra viz         # Plotly, for plan / 3D / wavefront views
 uv sync --extra notebooks   # ipykernel + Plotly, to run the notebooks
 uv sync --extra web         # Flask form server wrapping roof
+uv sync --extra gnn         # PyTorch, for the face-adjacency checkpoint
 ```
 
 ## Quick start
@@ -298,6 +299,66 @@ the checks — treat it as unusable, except a project whose only reason is
 dormers: the host has a hole, covering numbers still add up, and 3D
 still draws. Units on a valid roof are metres and degrees.
 
+## Experimental graph network
+
+A second way to roof one footprint, beside the skeleton. It takes a
+footprint, an optional overhang, an optional eave height, and an
+optional roof height in metres above the eaves. It does
+not take a pitch. It returns a `Roof` or a `Failure`. Import it from
+`krovlab.experimental`; `import krovlab` does not load it.
+
+Use it when the wanted roof is a face over several walls, or another
+ridge layout on the same footprint. Keep the skeleton when each wall
+has a pitch. Gable, knee, gambrel, holes, dormers, and extra cells are
+not inputs of this method.
+
+```python
+from krovlab import Failure, Roof, roof
+from krovlab.experimental import roof_from_face_graph
+
+l_shape = [(0, 0), (10, 0), (10, 6), (3, 6), (3, 10), (0, 10)]
+
+skeleton = roof(l_shape, 45)
+experimental = roof_from_face_graph(l_shape)
+# Same walls. The network predicts which faces share a boundary; a
+# planarity step then lifts that graph. Pitch is not an input.
+
+if isinstance(experimental, Failure):
+    print(experimental.kind, experimental.reason)
+    # unliftable — the graph could not be lifted into a roof
+    # no_face_graph — neither a face graph nor a checkpoint was given
+else:
+    print(experimental.validity.is_terrain)
+```
+
+A supplied face graph is a partition of wall indices. One group may
+name several walls: those walls become one face.
+
+```python
+spanning = roof_from_face_graph(l_shape, [[0], [1], [2, 3], [4], [5]])
+# Walls 2 and 3 (the inner corner) are one plane. The skeleton cannot
+# represent that: it puts one face per wall.
+
+eaves = roof_from_face_graph(l_shape, overhang=0.5)
+lifted = roof_from_face_graph(l_shape, eave_height=7)
+# Overhang and eave height keep the meanings they have on the skeleton.
+```
+
+When the graph is omitted, the shipped checkpoint predicts it. The
+web demo and the notebook load that checkpoint; they do not train.
+Shipping the checkpoint is what makes those run without the published
+pairs and without a GPU. To rebuild it from the pairs:
+
+```bash
+uv run --extra gnn python -m krovlab.ren_gnn
+```
+
+The pairs are CC BY-NC 4.0. The checkpoint is a derivative of that
+dataset, also CC BY-NC 4.0. Commercial use of those pairs or of the
+checkpoint needs the authors' permission. The held-out
+intersection-over-union is recorded beside the checkpoint in
+[`models/ren2021-face-adjacency.md`](models/ren2021-face-adjacency.md).
+
 ## Web demo
 
 A demo that wraps `roof` / `project` and the existing plan and 3D views. From the
@@ -398,6 +459,10 @@ Step-through examples after `uv sync --extra notebooks`:
   (gablet), gambrel, a dormer on a host face, those same examples
   on the web demo, a DXF of the 10 × 6 m rectangle and mesh downloads,
   and the views.
+- [`notebooks/experimental-gnn.ipynb`](notebooks/experimental-gnn.ipynb) —
+  the same footprint through the skeleton and through
+  `roof_from_face_graph`, a face over several walls, when to keep the
+  skeleton, and a named Failure. Needs `--extra gnn` as well.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
   that fail the terrain check, the dormer exception (not a terrain, 3D
   still draws), inherent method limits, and how to read `validity`.

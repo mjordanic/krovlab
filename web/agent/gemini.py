@@ -73,7 +73,11 @@ _FUNCTION_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="set_cell",
-        description="Set overhang (metres past the walls) or eave height on one cell.",
+        description=(
+            "Set overhang, eave height, or experimental roof height "
+            "(metres above the eaves) on one cell. Roof height is only "
+            "for the experimental graph network."
+        ),
         parameters_json_schema={
             "type": "object",
             "properties": {
@@ -88,6 +92,13 @@ _FUNCTION_DECLARATIONS = [
                 "eave_height": {
                     "type": "number",
                     "description": "Metres above datum. 0 is the eave plane at datum.",
+                },
+                "roof_height": {
+                    "type": "number",
+                    "description": (
+                        "Metres the experimental roof rises above the eaves. "
+                        "Not a pitch. Greater than zero."
+                    ),
                 },
             },
         },

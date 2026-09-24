@@ -340,3 +340,10 @@ def test_hole_vertices_round_trip_in_fields() -> None:
     assert (fields["hole-x-0"], fields["hole-y-0"]) == ("3", "3")
     assert (fields["hole-x-2"], fields["hole-y-2"]) == ("7", "7")
     assert fields["type-4"] == "hip"
+
+
+def test_roof_height_round_trips_in_fields() -> None:
+    result = _run_editor(
+        f"editor.loadFields({json.dumps({**RECT, 'roof_height': '2'})});"
+    )
+    assert result["fields"]["roof_height"] == "2"
