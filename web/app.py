@@ -120,6 +120,9 @@ def create_app(
                 edit_coordinates=False,
                 agent_enabled=agent_enabled,
                 method=method,
+                mesh_face_graph=(
+                    _example_face_graph(example) if method == "experimental" else None
+                ),
             )
         method = _posted_method(request.form)
         catalog = _catalog(method, examples, experimental_examples)
@@ -200,6 +203,11 @@ def _mesh_response(form: Mapping[str, str], kind: str) -> Response:
 
 
 def _result_from_form(form: Mapping[str, str]) -> Roof | Project | Failure:
+    if _posted_method(form) == "experimental":
+        catalog = load_experimental_examples()
+        slug = form.get("example") or DEFAULT_EXPERIMENTAL_EXAMPLE
+        example = catalog.get(slug, catalog[DEFAULT_EXPERIMENTAL_EXAMPLE])
+        return _run_experimental_from_form(form, _posted_face_graph(form), example)
     set_pitch = form.get("set_pitch") or "45"
     _, parsed = _posted_cells(form, set_pitch)
     _, parsed_dormers = _posted_dormers(form)
@@ -303,6 +311,17 @@ def _render_post(
     selected_cell = form.get("selected_cell") or ""
     shown_cells = views
     shown_dormers = dormer_views
+    used_graph = (
+        face_graph
+        if face_graph is not None
+        else _example_face_graph(example)
+    )
+    posted_height = form.get("roof_height")
+    mesh_roof_height = (
+        posted_height.strip()
+        if method == "experimental" and posted_height and posted_height.strip()
+        else None
+    )
     if is_upload:
         loaded = _load_dxf(files, dxf_units)
         if isinstance(loaded, str):
@@ -328,6 +347,8 @@ def _render_post(
         selected_cell=selected_cell,
         mesh_cells=shown_cells,
         mesh_dormers=shown_dormers,
+        mesh_face_graph=used_graph if method == "experimental" else None,
+        mesh_roof_height=mesh_roof_height,
     )
 
 
@@ -408,6 +429,8 @@ def _render(
     selected_cell: str = "",
     mesh_cells: list[CellView] | None = None,
     mesh_dormers: list[DormerView] | None = None,
+    mesh_face_graph: list[list[int]] | None = None,
+    mesh_roof_height: str | None = None,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -438,6 +461,10 @@ def _render(
             mesh_cells if mesh_cells is not None else cells,
             mesh_dormers if mesh_dormers is not None else dormers,
             set_pitch,
+            method=method,
+            example=example.slug,
+            roof_height=mesh_roof_height,
+            face_graph=mesh_face_graph,
         )
     return render_template(
         "page.html",
@@ -1294,9 +1321,21 @@ def _mesh_fields(
     cells: list[CellView],
     dormers: list[DormerView],
     set_pitch: str,
+    *,
+    method: str = "skeleton",
+    example: str = "",
+    roof_height: str | None = None,
+    face_graph: list[list[int]] | None = None,
 ) -> dict[str, str]:
     """Form fields that rebuild the solid currently drawn on the page."""
-    fields: dict[str, str] = {"set_pitch": set_pitch}
+    fields: dict[str, str] = {"set_pitch": set_pitch, "method": method}
+    if example:
+        fields["example"] = example
+    if method == "experimental" and roof_height:
+        fields["roof_height"] = roof_height
+    if method == "experimental" and face_graph:
+        for index, group in enumerate(face_graph):
+            fields[f"face-{index}"] = ",".join(str(wall) for wall in group)
     for cell in cells:
         prefix = cell.prefix
         for i, (x, y) in enumerate(cell.footprint):

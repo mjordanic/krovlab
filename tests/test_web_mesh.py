@@ -14,9 +14,11 @@ from html.parser import HTMLParser
 from flask.testing import FlaskClient
 from pygltflib import GLTF2  # type: ignore[import-untyped]
 from web.app import create_app
-from web.examples import DORMER_RING, GABLE_DORMER, GARAGE, HOUSE, RECTANGLE
+from web.examples import DORMER_RING, GABLE_DORMER, GARAGE, HOUSE, L_SHAPE, RECTANGLE
 
-from krovlab import Cell, Dormer, Project, project
+from krovlab import Cell, Dormer, Project, Roof, project, roof
+from krovlab.experimental import roof_from_face_graph
+from krovlab.viz import solid_view
 
 _Point = tuple[float, float, float]
 _Triangle = tuple[_Point, _Point, _Point]
@@ -210,6 +212,40 @@ def test_failure_and_non_terrain_downloads_are_not_files() -> None:
         assert _client().post(path, data=plus).status_code == 404
 
 
+ONE_FACE = ((0,), (1,), (2, 3), (4,), (5,))
+
+
+def test_experimental_download_is_the_shown_solid() -> None:
+    built = roof_from_face_graph(L_SHAPE, ONE_FACE)
+    skeleton = roof(L_SHAPE, 45.0)
+    assert isinstance(built, Roof)
+    assert isinstance(skeleton, Roof)
+    page = _client().get("/?method=experimental&example=l-one-face").get_data(
+        as_text=True
+    )
+    snapshot = _mesh_snapshot(page)
+    response = _client().post("/roof.obj", data=snapshot)
+    assert response.status_code == 200
+    downloaded = _triangle_set(_obj_triangles(response.get_data(as_text=True)))
+    assert downloaded == _solid_triangles(built)
+    assert downloaded != _solid_triangles(skeleton)
+
+
+def test_experimental_download_keeps_the_posted_roof_height() -> None:
+    built = roof_from_face_graph(RECTANGLE, roof_height=2.0)
+    skeleton = roof(RECTANGLE, 45.0)
+    assert isinstance(built, Roof)
+    assert isinstance(skeleton, Roof)
+    data = {**_rect_post(), "method": "experimental", "roof_height": "2"}
+    page = _client().post("/", data=data).get_data(as_text=True)
+    snapshot = _mesh_snapshot(page)
+    response = _client().post("/roof.obj", data=snapshot)
+    assert response.status_code == 200
+    downloaded = _triangle_set(_obj_triangles(response.get_data(as_text=True)))
+    assert downloaded == _solid_triangles(built)
+    assert downloaded != _solid_triangles(skeleton)
+
+
 def test_dormer_mesh_is_the_shown_solid_triangles() -> None:
     built = project([Cell(RECTANGLE, 45.0)], [Dormer(0, DORMER_RING, GABLE_DORMER)])
     assert isinstance(built, Project)
@@ -306,6 +342,22 @@ def _obj_triangles(body: str) -> list[_Triangle]:
         idxs = [int(part.split("/")[0]) - 1 for part in line.split()[1:]]
         triangles.append((verts[idxs[0]], verts[idxs[1]], verts[idxs[2]]))
     return triangles
+
+
+def _solid_triangles(solid: Roof | Project) -> set[frozenset[_Point]]:
+    mesh = next(trace for trace in solid_view(solid).data if trace.type == "mesh3d")
+    xs = [float(x) for x in mesh.x]
+    ys = [float(y) for y in mesh.y]
+    zs = [float(z) for z in mesh.z]
+    drawn = [
+        (
+            (xs[i], ys[i], zs[i]),
+            (xs[j], ys[j], zs[j]),
+            (xs[k], ys[k], zs[k]),
+        )
+        for i, j, k in zip(mesh.i, mesh.j, mesh.k, strict=True)
+    ]
+    return _triangle_set(drawn)
 
 
 def _triangle_set(triangles: list[_Triangle]) -> set[frozenset[_Point]]:
