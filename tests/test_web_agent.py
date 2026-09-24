@@ -149,6 +149,8 @@ def test_help_prefers_the_skeleton_and_knows_the_graph_network() -> None:
     assert "face over several" in text
     assert "unliftable" in text
     assert "does not take a pitch" in text or "pitch is not an input" in text
+    assert "load dxf" in text
+    assert "roof.obj" in text and "roof.glb" in text
 
 
 def test_set_cell_roof_height_patches_the_experimental_form() -> None:

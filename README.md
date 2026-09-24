@@ -395,9 +395,11 @@ download it as `roof.obj` and `roof.glb`.
 If `GEMINI_API_KEY` is set, a **Need help?** box appears beside the form.
 Ask about the current project (takeoff, why a Failure, what a hip or gable
 is) or have it fill the same knobs the form already has: wall type (hip,
-gable, knee, gambrel), pitch, overhang, and eave height. It does not add
-cells, draw a new footprint, or place a dormer. Click **Update roof** after
-it writes the form so the plan and 3D refresh.
+gable, knee, gambrel), pitch, overhang, and eave height. It can point at
+**Load DXF** and at the **roof.obj** / **roof.glb** downloads. It does not
+attach a file, fetch the mesh, add cells, draw a new footprint, or place a
+dormer. Click **Update roof** after it writes the form so the plan and 3D
+refresh.
 
 The model is Gemini 3.6 Flash. The key stays on the server. Copy
 [`.env_sample`](.env_sample) to `.env` and paste the key.
