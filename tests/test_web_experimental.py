@@ -149,6 +149,70 @@ def test_experimental_post_does_not_use_pitch() -> None:
     assert expected in high
 
 
+def test_experimental_page_sets_roof_height_in_metres() -> None:
+    experimental = _client().get("/?method=experimental").get_data(as_text=True)
+    skeleton = _client().get("/").get_data(as_text=True)
+    assert 'name="roof_height"' in experimental
+    assert 'value="3"' in experimental or 'value="3.0"' in experimental
+    assert "Roof height" in experimental
+    assert 'name="roof_height"' not in skeleton
+    posted = _client().post(
+        "/",
+        data={
+            "example": "hip-rectangle",
+            "method": "experimental",
+            "roof_height": "2",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "0",
+            "outer-y-3": "6",
+        },
+    ).get_data(as_text=True)
+    assert "ridge height: 2.000 m" in posted
+
+
+def test_experimental_dropdown_lists_footprints_the_method_can_roof() -> None:
+    page = _client().get("/?method=experimental").get_data(as_text=True)
+    assert 'value="experimental" checked' in page or (
+        'value="experimental"' in page and "checked" in page
+    )
+    for slug in (
+        "hip-rectangle",
+        "l-shape",
+        "l-one-face",
+        "eaves-overhang",
+        "eave-height",
+        "self-intersecting",
+    ):
+        assert f'value="{slug}"' in page
+    for slug in (
+        "gable-ends",
+        "shed",
+        "mixed-pitches",
+        "knee",
+        "gambrel",
+        "courtyard",
+        "house-and-garage",
+        "party-wall-gables",
+        "dormer",
+    ):
+        assert f'<option value="{slug}"' not in page
+    assert "Load a catalog example (hip, gable" not in page
+    one_face = _client().get("/?method=experimental&example=l-one-face").get_data(
+        as_text=True
+    )
+    assert "two inner walls" in one_face
+    assert one_face.count("edge ") == 5
+    refused = _client().get(
+        "/?method=experimental&example=self-intersecting"
+    ).get_data(as_text=True)
+    assert "kind: self_intersection" in refused
+
+
 def test_catalog_example_roofs_under_either_method() -> None:
     skeleton = roof(RECTANGLE, 45.0)
     experimental = roof_from_face_graph(RECTANGLE)

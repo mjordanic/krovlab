@@ -36,6 +36,27 @@ U_SHAPE = [
 ]
 
 
+def test_omitted_roof_height_rises_like_a_45_degree_hip_on_the_10_by_6() -> None:
+    result = roof_from_face_graph(RECTANGLE)
+    assert isinstance(result, Roof)
+    assert result.ridge_height == pytest.approx(3.0)
+
+
+def test_roof_height_sets_the_rise_above_the_eaves() -> None:
+    result = roof_from_face_graph(RECTANGLE, roof_height=2.0)
+    assert isinstance(result, Roof)
+    assert result.ridge_height == pytest.approx(2.0)
+
+
+def test_roof_height_must_be_above_the_eaves() -> None:
+    result = roof_from_face_graph(RECTANGLE, roof_height=0.0)
+    assert isinstance(result, Failure)
+    assert result.kind == "degenerate"
+    negative = roof_from_face_graph(RECTANGLE, roof_height=-1.0)
+    assert isinstance(negative, Failure)
+    assert negative.kind == "degenerate"
+
+
 def test_omitted_graph_roofs_from_the_committed_checkpoint() -> None:
     result = roof_from_face_graph(L_SHAPE)
     assert isinstance(result, Roof)

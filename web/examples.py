@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from krovlab import Cell, Dormer, Pitch
 
 DEFAULT_EXAMPLE = "hip-rectangle"
+DEFAULT_EXPERIMENTAL_EXAMPLE = "hip-rectangle"
 
 RECTANGLE = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
@@ -42,6 +43,7 @@ class Example:
     caption: str
     cells: tuple[Cell, ...]
     dormers: tuple[Dormer, ...] = field(default_factory=tuple)
+    face_graph: tuple[tuple[int, ...], ...] | None = None
 
 
 def load_examples() -> dict[str, Example]:
@@ -159,6 +161,62 @@ def load_examples() -> dict[str, Example]:
             ),
             cells=(Cell(RECTANGLE, 45.0),),
             dormers=(Dormer(0, DORMER_RING, GABLE_DORMER),),
+        ),
+        Example(
+            slug="self-intersecting",
+            label="Self-intersecting",
+            group="Refused",
+            caption=(
+                "This plan crosses itself. The library returns a named "
+                "Failure, not a roof."
+            ),
+            cells=(Cell(BOWTIE, 45.0),),
+        ),
+    )
+    return {item.slug: item for item in items}
+
+
+def load_experimental_examples() -> dict[str, Example]:
+    """Footprints this method can roof. Skeleton-only demos are absent."""
+    items = (
+        Example(
+            slug="hip-rectangle",
+            label="Rectangle 10x6",
+            group="Footprint",
+            caption=(
+                "A 10x6 m footprint. The network chooses which faces meet. "
+                "Pitch is not an input."
+            ),
+            cells=(Cell(RECTANGLE, 45.0),),
+        ),
+        Example(
+            slug="l-shape",
+            label="L-shape",
+            group="Footprint",
+            caption="One L-shaped footprint. The network chooses which faces meet.",
+            cells=(Cell(L_SHAPE, 45.0),),
+        ),
+        Example(
+            slug="l-one-face",
+            label="One face over two walls",
+            group="Face graph",
+            caption="The same L, with the two inner walls named as one face.",
+            cells=(Cell(L_SHAPE, 45.0),),
+            face_graph=((0,), (1,), (2, 3), (4,), (5,)),
+        ),
+        Example(
+            slug="eaves-overhang",
+            label="Eaves overhang",
+            group="Footprint",
+            caption="The roof projects 0.5 m past the walls.",
+            cells=(Cell(RECTANGLE, 45.0, overhang=0.5),),
+        ),
+        Example(
+            slug="eave-height",
+            label="Eave height",
+            group="Footprint",
+            caption="Every node is lifted 3 m. Pitch is still not an input.",
+            cells=(Cell(RECTANGLE, 45.0, eave_height=3.0),),
         ),
         Example(
             slug="self-intersecting",

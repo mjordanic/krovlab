@@ -9,8 +9,9 @@ not take a pitch and it does not train. The skeleton entry point
 :func:`krovlab.roof.roof` is unchanged. This module is not imported by
 ``import krovlab``. PyTorch loads only when a checkpoint predicts a graph.
 
-One vertex height is fixed at :data:`FIXED_HEIGHT` so the flat roof is
-not the minimiser, as in Ren et al. 2021 section 4.
+The eaves stay at zero while the roof is lifted. ``roof_height`` is how
+many metres the roof rises above them. Omitting it uses the distance from
+an interior point to the nearest wall.
 """
 
 from __future__ import annotations
@@ -37,9 +38,6 @@ from krovlab.roof import (
 type Vertex = tuple[float, float]
 type FaceGraph = Sequence[Sequence[int]]
 
-FIXED_HEIGHT = 1.0
-"""Metres. One roof height is fixed so a flat roof is not the lift."""
-
 DEFAULT_CHECKPOINT = (
     Path(__file__).resolve().parents[2] / "models" / "ren2021-face-adjacency.pt"
 )
@@ -56,6 +54,7 @@ def roof_from_face_graph(
     *,
     overhang: float = 0.0,
     eave_height: float = 0.0,
+    roof_height: float | None = None,
     checkpoint: Path | str | None = DEFAULT_CHECKPOINT,
 ) -> Roof | Failure:
     """Lift a face graph over one footprint into a roof.
@@ -72,6 +71,10 @@ def roof_from_face_graph(
         first. Zero is the same as omitting the argument.
     eave_height
         Metres above datum, added to every node after the roof exists.
+    roof_height
+        Metres the roof rises above the eaves. ``None`` uses the distance
+        from an interior point to the nearest wall, the rise of a 45° hip
+        on that span. On a 10 × 6 m rectangle that distance is 3 m.
     checkpoint
         Weights that predict which faces share a boundary when
         ``face_graph`` is omitted. The shipped path is the default.
@@ -110,10 +113,29 @@ def roof_from_face_graph(
             kind="degenerate",
             reason="eave height must be a finite number of metres above datum",
         )
+    if roof_height is not None and (
+        isinstance(roof_height, bool) or not isinstance(roof_height, (int, float))
+    ):
+        return Failure(
+            kind="degenerate",
+            reason="roof height must be a finite number of metres above the eaves",
+        )
+    if roof_height is not None and (
+        not math.isfinite(roof_height) or roof_height <= 0.0
+    ):
+        return Failure(
+            kind="degenerate",
+            reason="roof height must be a finite number of metres above the eaves",
+        )
     expanded = apply_overhang(cleaned, [], float(overhang))
     if isinstance(expanded, Failure):
         return expanded
     cleaned, _holes = expanded
+    rise = (
+        float(roof_height)
+        if roof_height is not None
+        else _default_roof_height(cleaned)
+    )
     n = len(cleaned)
     if face_graph is None:
         predicted = _predict_face_graph(cleaned, checkpoint)
@@ -128,7 +150,7 @@ def roof_from_face_graph(
     oriented = []
     for group in faces:
         oriented.append(sorted((caller_to_ring[w] for w in group), key=lambda w: w))
-    lifted = _lift(ring, oriented, edge_map, cleaned, float(eave_height))
+    lifted = _lift(ring, oriented, edge_map, cleaned, float(eave_height), rise)
     return lifted
 
 
@@ -225,10 +247,13 @@ def _lift(
     edge_map: list[int],
     footprint: list[Vertex],
     eave_height: float,
+    roof_height: float,
 ) -> Roof | Failure:
     if len(faces) == 1:
-        return _lift_one_plane(ring, faces[0], edge_map, footprint, eave_height)
-    return _lift_fan(ring, faces, edge_map, footprint, eave_height)
+        return _lift_one_plane(
+            ring, faces[0], edge_map, footprint, eave_height, roof_height
+        )
+    return _lift_fan(ring, faces, edge_map, footprint, eave_height, roof_height)
 
 
 def _walls_collinear(ring: list[Vertex], walls: list[int]) -> bool:
@@ -257,6 +282,7 @@ def _lift_one_plane(
     edge_map: list[int],
     footprint: list[Vertex],
     eave_height: float,
+    roof_height: float,
 ) -> Roof | Failure:
     n = len(ring)
     eave_wall = walls[0]
@@ -265,7 +291,7 @@ def _lift_one_plane(
     max_dist = max(distances)
     if max_dist <= _HEIGHT_TOL:
         return _unliftable("the face graph lifts only to a flat roof")
-    slope = FIXED_HEIGHT / max_dist
+    slope = roof_height / max_dist
     nodes = tuple(
         Node(pt[0], pt[1], slope * dist)
         for pt, dist in zip(ring, distances, strict=True)
@@ -342,6 +368,7 @@ def _lift_fan(
     edge_map: list[int],
     footprint: list[Vertex],
     eave_height: float,
+    roof_height: float,
 ) -> Roof | Failure:
     apex_xy = _kernel_point(ring)
     if apex_xy is None:
@@ -360,7 +387,9 @@ def _lift_fan(
         start_i = chain[0]
         end_i = (chain[-1] + 1) % n
         for mid in chain[1:]:
-            lifted = _height_on_plane(ring[mid], ring[start_i], ring[end_i], apex_xy)
+            lifted = _height_on_plane(
+                ring[mid], ring[start_i], ring[end_i], apex_xy, roof_height
+            )
             if lifted is None:
                 return _unliftable("a face over several walls could not be made planar")
             if lifted < -_HEIGHT_TOL:
@@ -370,7 +399,7 @@ def _lift_fan(
             heights[mid] = lifted
     nodes = (
         *tuple(Node(ring[i][0], ring[i][1], heights[i]) for i in range(n)),
-        Node(apex_xy[0], apex_xy[1], FIXED_HEIGHT),
+        Node(apex_xy[0], apex_xy[1], roof_height),
     )
     apex = n
     built_faces: list[Face] = []
@@ -419,10 +448,12 @@ def _lift_fan(
     return built
 
 
-def _height_on_plane(point: Vertex, a: Vertex, b: Vertex, apex: Vertex) -> float | None:
+def _height_on_plane(
+    point: Vertex, a: Vertex, b: Vertex, apex: Vertex, roof_height: float
+) -> float | None:
     """Height of ``point`` on the plane through ``a``, ``b`` at z=0 and apex."""
     ux, uy, uz = b[0] - a[0], b[1] - a[1], 0.0
-    vx, vy, vz = apex[0] - a[0], apex[1] - a[1], FIXED_HEIGHT
+    vx, vy, vz = apex[0] - a[0], apex[1] - a[1], roof_height
     nx = uy * vz - uz * vy
     ny = uz * vx - ux * vz
     nz = ux * vy - uy * vx
@@ -516,7 +547,45 @@ def _kernel_point(ring: list[Vertex]) -> Vertex | None:
             if clearance > best_clearance:
                 best_clearance = clearance
                 best = pt
-    return best
+    if best is None:
+        return None
+    return _refine_kernel(best, ring)
+
+
+def _default_roof_height(ring: list[Vertex]) -> float:
+    """Rise of a 45° hip from an interior point to the nearest wall."""
+    apex = _kernel_point(ring)
+    if apex is None:
+        xs = [point[0] for point in ring]
+        ys = [point[1] for point in ring]
+        return 0.5 * min(max(xs) - min(xs), max(ys) - min(ys))
+    return _clearance(apex, ring)
+
+
+def _clearance(pt: Vertex, ring: list[Vertex]) -> float:
+    n = len(ring)
+    return min(_signed_left(pt, ring[k], ring[(k + 1) % n]) for k in range(n))
+
+
+def _refine_kernel(pt: Vertex, ring: list[Vertex]) -> Vertex:
+    xs = [point[0] for point in ring]
+    ys = [point[1] for point in ring]
+    step = max(max(xs) - min(xs), max(ys) - min(ys)) / 32.0
+    for _ in range(24):
+        best = pt
+        best_clearance = _clearance(pt, ring)
+        for ix in (-1, 0, 1):
+            for iy in (-1, 0, 1):
+                nxt = (pt[0] + ix * step, pt[1] + iy * step)
+                if not _in_ring(nxt, ring):
+                    continue
+                clearance = _clearance(nxt, ring)
+                if clearance > best_clearance:
+                    best = nxt
+                    best_clearance = clearance
+        pt = best
+        step *= 0.5
+    return pt
 
 
 def _visible_from(pt: Vertex, ring: list[Vertex]) -> bool:

@@ -302,7 +302,8 @@ still draws. Units on a valid roof are metres and degrees.
 ## Experimental graph network
 
 A second way to roof one footprint, beside the skeleton. It takes a
-footprint, an optional overhang, and an optional eave height. It does
+footprint, an optional overhang, an optional eave height, and an
+optional roof height in metres above the eaves. It does
 not take a pitch. It returns a `Roof` or a `Failure`. Import it from
 `krovlab.experimental`; `import krovlab` does not load it.
 

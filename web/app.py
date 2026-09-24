@@ -17,7 +17,14 @@ from krovlab.experimental import roof_from_face_graph
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
 from web.agent.rate_limit import RateLimiter
-from web.examples import DEFAULT_EXAMPLE, WALL_HINTS, Example, load_examples
+from web.examples import (
+    DEFAULT_EXAMPLE,
+    DEFAULT_EXPERIMENTAL_EXAMPLE,
+    WALL_HINTS,
+    Example,
+    load_examples,
+    load_experimental_examples,
+)
 from web.figures import input_footprint
 
 
@@ -82,7 +89,7 @@ def create_app(
     if os.environ.get("PORT"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)  # type: ignore[method-assign]
     examples = load_examples()
-    groups = _example_groups(examples)
+    experimental_examples = load_experimental_examples()
     help_model = model if model is not None else _live_model()
     help_limiter = limiter if limiter is not None else RateLimiter()
     agent_enabled = help_model is not None
@@ -90,22 +97,38 @@ def create_app(
     @app.route("/", methods=["GET", "POST"])
     def index() -> str:
         if request.method != "POST":
-            slug = request.args.get("example") or DEFAULT_EXAMPLE
-            example = examples.get(slug, examples[DEFAULT_EXAMPLE])
+            method = _posted_method(request.args)
+            catalog = _catalog(method, examples, experimental_examples)
+            default = _default_example(method)
+            slug = request.args.get("example") or default
+            example = catalog.get(slug, catalog[default])
+            result: Roof | Project | Failure
+            if method == "experimental":
+                result = _run_experimental_example(example)
+            else:
+                result = _run_cells(list(example.cells), list(example.dormers))
             return _render(
                 example,
-                groups,
+                _example_groups(catalog),
                 cells=_cell_views_from_cells(example.cells),
                 dormers=_dormer_views_from_items(example.dormers),
-                result=_run_cells(list(example.cells), list(example.dormers)),
+                result=result,
                 set_pitch=_default_set_pitch(example.cells[0]),
                 edit_coordinates=False,
                 agent_enabled=agent_enabled,
-                method="skeleton",
+                method=method,
             )
-        slug = request.form.get("example") or DEFAULT_EXAMPLE
-        example = examples.get(slug, examples[DEFAULT_EXAMPLE])
-        return _render_post(request.form, example, groups, agent_enabled=agent_enabled)
+        method = _posted_method(request.form)
+        catalog = _catalog(method, examples, experimental_examples)
+        default = _default_example(method)
+        slug = request.form.get("example") or default
+        example = catalog.get(slug, catalog[default])
+        return _render_post(
+            request.form,
+            example,
+            _example_groups(catalog),
+            agent_enabled=agent_enabled,
+        )
 
     @app.post("/agent")
     def agent_turn() -> Any:
@@ -220,7 +243,7 @@ def _render_post(
     face_graph = _posted_face_graph(form)
     result: Roof | Project | Failure
     if method == "experimental":
-        result = _run_experimental_from_form(form, face_graph)
+        result = _run_experimental_from_form(form, face_graph, example)
     elif isinstance(parsed, Failure):
         result = parsed
     elif isinstance(parsed_dormers, Failure):
@@ -290,6 +313,7 @@ def _render(
         wall_hints=WALL_HINTS,
         agent_enabled=agent_enabled,
         method=method,
+        roof_height=_shown_roof_height(method, cells, result),
     )
 
 
@@ -340,9 +364,61 @@ def _posted_face_graph(form: Mapping[str, str]) -> list[list[int]] | None:
     return groups or None
 
 
+def _catalog(
+    method: str,
+    examples: dict[str, Example],
+    experimental_examples: dict[str, Example],
+) -> dict[str, Example]:
+    if method == "experimental":
+        return experimental_examples
+    return examples
+
+
+def _default_example(method: str) -> str:
+    if method == "experimental":
+        return DEFAULT_EXPERIMENTAL_EXAMPLE
+    return DEFAULT_EXAMPLE
+
+
+def _run_experimental_example(example: Example) -> Roof | Failure:
+    cell = example.cells[0]
+    graph = _example_face_graph(example)
+    return roof_from_face_graph(
+        list(cell.footprint),
+        graph,
+        overhang=cell.overhang,
+        eave_height=cell.eave_height,
+    )
+
+
+def _shown_roof_height(
+    method: str,
+    cells: list[CellView],
+    result: Roof | Project | Failure,
+) -> str:
+    if method != "experimental" or not isinstance(result, Roof):
+        return ""
+    eave = 0.0
+    first = cells[0] if cells else None
+    if first is not None and first.use_eave:
+        try:
+            eave = float(first.eave_height)
+        except ValueError:
+            eave = 0.0
+    rise = result.ridge_height - eave
+    return f"{rise:g}"
+
+
+def _example_face_graph(example: Example) -> list[list[int]] | None:
+    if example.face_graph is None:
+        return None
+    return [list(group) for group in example.face_graph]
+
+
 def _run_experimental_from_form(
     form: Mapping[str, str],
     face_graph: list[list[int]] | None,
+    example: Example,
 ) -> Roof | Failure:
     posted_outer = _posted_ring(form, "outer")
     if posted_outer is None:
@@ -362,12 +438,30 @@ def _run_experimental_from_form(
             return eave_height
     else:
         eave_height = 0.0
+    roof_height = _posted_roof_height(form)
+    if isinstance(roof_height, Failure):
+        return roof_height
+    graph = face_graph if face_graph is not None else _example_face_graph(example)
     return roof_from_face_graph(
         parsed_outer,
-        face_graph,
+        graph,
         overhang=overhang,
         eave_height=eave_height,
+        roof_height=roof_height,
     )
+
+
+def _posted_roof_height(form: Mapping[str, str]) -> float | None | Failure:
+    raw = form.get("roof_height")
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return Failure(
+            kind="degenerate",
+            reason="roof height must be a finite number of metres above the eaves",
+        )
 
 
 def _default_set_pitch(cell: Cell) -> str:

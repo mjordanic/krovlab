@@ -216,6 +216,10 @@
         or 100%).
       </p>
       <ul>
+        {% if method == "experimental" %}
+        <li>Load an example this method can roof: a rectangle, an L, one face over two walls, an overhang, an eave height, or a plan that crosses itself.</li>
+        <li>Roof height, overhang, and eave height still apply. Pitch, gable, knee, gambrel, holes, dormers, and extra cells do not.</li>
+        {% else %}
         <li>Load a catalog example (hip, gable, shed, mixed pitches, knee, gambrel, L-shape, courtyard, overhang, two cells, a dormer, a named failure).</li>
         <li>Select a wall or corner on the plan, drag vertices, add a detached cell, add a cell on a selected wall, split a wall with a vertex, or delete a cell.</li>
         <li>Set each wall to hip, gable, knee (with height), or gambrel (shallow pitch and break).</li>
@@ -223,6 +227,7 @@
         <li>Apply one pitch to all sloping walls, or type coordinates in the table.</li>
         <li>Edit a dormer that is already on the example (move it on the plan; hip or gable and pitch per dormer wall).</li>
         <li>When <strong>Need help?</strong> is on the page: ask about this roof, or have the box fill those same wall and cell knobs. It does not add cells or dormers. Click <strong>Update roof</strong> after it writes the form.</li>
+        {% endif %}
       </ul>
       <p>
         The Python library, Failure kinds, and what this roof family cannot
@@ -252,6 +257,7 @@
     </p>
   </div>
   <form class="example-bar" method="get" action="/">
+    <input type="hidden" name="method" value="{{ method }}">
     <label>
       Example
       <select name="example" onchange="this.form.submit()">
@@ -337,6 +343,15 @@
               m above datum
             </label>
           </p>
+          {% if method == "experimental" and cell.index == 0 %}
+          <p class="wall-extra">
+            <label>
+              Roof height
+              <input name="roof_height" value="{{ roof_height }}">
+              m above the eaves
+            </label>
+          </p>
+          {% endif %}
           {% for wall in cell.walls %}
           <div class="wall" data-cell="{{ cell.index }}" data-wall="{{ wall.index }}">
             <div class="wall-head"><span>Wall {{ wall.number }}</span></div>
@@ -479,20 +494,11 @@
     );
     (function () {
       var radios = document.querySelectorAll('input[name="method"]');
-      var copy = document.getElementById("experimental-copy");
-      function experimentalOn() {
-        var checked = document.querySelector('input[name="method"]:checked');
-        return checked && checked.value === "experimental";
-      }
-      function syncMethod() {
-        var on = experimentalOn();
-        document.querySelectorAll(".skeleton-only").forEach(function (node) {
-          node.hidden = on;
-        });
-        if (copy) copy.hidden = !on;
-      }
       radios.forEach(function (radio) {
-        radio.addEventListener("change", syncMethod);
+        radio.addEventListener("change", function () {
+          if (!radio.checked) return;
+          window.location = "/?method=" + encodeURIComponent(radio.value);
+        });
       });
     })();
     {% if agent_enabled %}
