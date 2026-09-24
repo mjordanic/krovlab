@@ -6,13 +6,13 @@ disable-model-invocation: true
 
 # Implement Issues
 
-Orchestrate dependency-ordered implementation of `ready-for-agent` issues in a `.scratch/<feature>/` folder. Builds a wave plan, dispatches one fresh `wave-runner` subagent per wave (each runs the wave end-to-end and returns a small summary), and maintains a resumable `implementation_report.md` so a killed session, dropped connection, or expired subagent can pick up on the next invocation.
+Orchestrate dependency-ordered implementation of `ready-for-agent` issues in a `.scratch/<feature>/` folder. Builds a wave plan, dispatches each issue to `issue-implementer` with the resolved model slug, and maintains a resumable `implementation_report.md` so a killed session, dropped connection, or expired subagent can pick up on the next invocation. On Cursor the orchestrator makes that Task call itself so any model reaches `/implement`. On Claude Code a `wave-runner` makes it.
 
 Each issue is implemented by an `issue-implementer` that **reads and follows** `.agents/skills/implement/SKILL.md` (the `/implement` skill). That skill is the implementation loop. This skill only plans, isolates, hands off, integrates, and resumes.
 
 **Question window**: the user is available only during Phases 0–1 (preflight + planning). The moment Phase 2 starts, the run is fully unattended — anomalies go into the report and the run continues. Surface ambiguity in planning so dispatch can run cleanly.
 
-**Context firewall**: per-wave git activity, isolation, and implementer transcripts stay inside the wave-runner. The orchestrator only sees a small return summary per wave.
+**Context firewall**: on Claude Code, per-wave git activity, isolation, and implementer transcripts stay inside the wave-runner. On Cursor the orchestrator runs that workflow in-process, because a nested Task call cannot pass an arbitrary model.
 
 **Harness**: Cursor is first-class (Task tool, optional cloud VMs). Claude Code still works. Detect the harness in Phase 0 and pass harness-native model slugs and isolation flags. Do not send Claude Code `opus`/`sonnet`/`haiku` into Cursor's Task `model` parameter, and do not send Cursor slugs into Claude Code's Agent `model` parameter.
 
@@ -41,7 +41,7 @@ Run FIRST, every invocation. **This is one of the two phases where you may ask t
 7. **PRD exists** — `<feature>/PRD.md` is present. If not, ask.
 8. **Isolation** — resolve `--isolation` vs the cap/harness default vs a resume header. `cloud` on Claude Code is a preflight failure (ask to drop to `worktree`). For `cloud` on Cursor, follow the cloud preflight in [references/isolation.md](references/isolation.md) until BASE_BRANCH is on the remote at HEAD or the user aborts.
 9. **Permission audit** — Claude Code only. Follow [references/permissions.md](references/permissions.md). Cursor: skip the Claude settings file; local worktrees use the Shell sandbox plus explicit `git worktree` checkouts; `cloud` uses Cursor's VM. If Cursor will need `git_write` / worktree commands, say so once during the Phase 1 plan prompt so the user expects the approval card — then never block the unattended run on a prompt you can front-load.
-10. **Model resolution (global tier).** Resolve `runner-model` (final here) and the global `implementer-model` override using [references/models.md](references/models.md). Unknown alias or a slug the current harness cannot pass → preflight failure; ask. Never silently downgrade.
+10. **Model resolution (global tier).** Resolve `runner-model` (final here) and the global `implementer-model` override using [references/models.md](references/models.md). Unknown alias → preflight failure; ask. A raw slug is passed through. Never silently downgrade because a nested tool's model list is shorter than the orchestrator's.
 
 Record `BASE_BRANCH`, harness, isolation, started-at, parallelism cap, and resolved `runner-model` / `implementer-model` in the report header.
 
@@ -82,17 +82,17 @@ Done when every wave with pending issues has a `summary` fence merged into runni
 For each wave with at least one pending issue, sequentially:
 
 1. Persist `in-progress` rows for this wave's issues (timestamp, isolation, worktree path or `cloud` placeholder) **before** launching. That write is the resume handle if the connection drops mid-dispatch.
-2. Dispatch ONE `wave-runner` with the harness Task/Agent tool:
-   - Cursor `Task`: `subagent_type: "wave-runner"`, `environment: "local"` (the runner never goes to the cloud), `model` as resolved for the runner, prompt = handover.md dispatch envelope (repo root, feature path, report path, `BASE_BRANCH`, wave number, cap, pending issue IDs, feature slug, isolation, per-issue implementer slugs, harness).
-   - Claude Code `Agent`: `wave-runner` subagent, same envelope, translated model slug.
-   Wave-runner stays **local** even when isolation is `cloud` (it cherry-picks onto `BASE_BRANCH` in this checkout). The moment the tool returns an agent id, write it onto the wave's report rows.
-3. Wait for the return summary. Foreground Task returns the result; background Task completion is delivered to this conversation. If the session would die waiting, stop after the agent-id write and tell the user to re-invoke; Phase 2 resumes.
+2. Dispatch the implementer with the resolved model slug. On Cursor the orchestrator makes that Task call itself: nested `wave-runner` Task only accepts `composer-2.5-fast`, so any other model never reaches `/implement`.
+   - Cursor: `subagent_type: "issue-implementer"`, `environment: "local"` unless isolation is `cloud`, `model`: that issue's resolved slug (any slug from [references/models.md](references/models.md), including a raw slug). Prompt = handover.md implementer envelope. Set header `firewall: degraded` and run this wave's runner workflow in-process (isolation, integration, report). Do not spawn `wave-runner` to pass the model.
+   - Claude Code: dispatch ONE `wave-runner` Agent with the same envelope and the translated model slug. The runner then spawns `issue-implementer` and passes each slug as `model`.
+   The moment the tool returns an agent id, write it onto that issue's report row.
+3. Wait for the return summary (Claude Code: the wave-runner fence; Cursor: the implementer fence, then integrate as handover.md). Foreground Task returns the result; background Task completion is delivered to this conversation. If the session would die waiting, stop after the agent-id write and tell the user to re-invoke; Phase 2 resumes.
 4. Merge counts into running totals.
 5. **Continue to the next wave regardless of failures inside this one.**
 
-If the harness refuses nested Task (wave-runner cannot spawn implementers), the wave-runner returns `blocked` with that diagnostic. Execute that wave's runner workflow yourself, append `firewall: degraded` to the activity log, and continue. Read handover.md for the degraded path.
+If a Claude Code wave-runner cannot spawn `issue-implementer`, it returns `blocked` with that diagnostic. Execute that wave's runner workflow yourself, append `firewall: degraded` to the activity log, and pass the same model slug on your own implementer dispatch. Read handover.md for the degraded path.
 
-The wave-runner owns: isolation setup, dispatching `issue-implementer` subagents, integration onto `BASE_BRANCH`, per-wave report updates, cleanup. You only do dispatch + summary aggregation.
+On Claude Code the wave-runner owns isolation, implementer dispatch, integration, and per-wave report updates. On Cursor you own that workflow so the model parameter is the one you pass.
 
 ## Phase 4 — Report schema
 

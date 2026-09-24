@@ -106,7 +106,8 @@
       eaveHeight: "0",
       useEave: false,
       hole: [],
-      useHole: false
+      useHole: false,
+      roofHeight: ""
     };
   }
 
@@ -575,7 +576,8 @@
         eaveHeight: map[pfx + "eave_height"] || "0",
         useEave: map[pfx + "use_eave_height"] === "on",
         hole: holePts,
-        useHole: map[pfx + "use_hole"] === "on"
+        useHole: map[pfx + "use_hole"] === "on",
+        roofHeight: pfx === "" ? (map.roof_height || "") : ""
       };
     }
 
@@ -669,6 +671,9 @@
         out[p + "eave_height"] = cell.eaveHeight;
         if (cell.useEave) {
           out[p + "use_eave_height"] = "on";
+        }
+        if (index === 0 && cell.roofHeight) {
+          out.roof_height = String(cell.roofHeight);
         }
         if (cell.useHole) {
           out[p + "use_hole"] = "on";
@@ -897,11 +902,25 @@
     svg.innerHTML = html;
   }
 
+  function experimentalSelected() {
+    if (typeof document === "undefined") {
+      return false;
+    }
+    var checked = document.querySelector("input[name=\"method\"]:checked");
+    return !!(checked && checked.value === "experimental");
+  }
+
   function wallRowHtml(pfx, cell, i, cellIndex) {
     var kind = cell.types[i] || "hip";
     var hints = (typeof window !== "undefined" && window.KROVLAB_HINTS) ? window.KROVLAB_HINTS : HINTS;
     var html = "<div class=\"wall\" data-cell=\"" + cellIndex + "\" data-wall=\"" + i + "\">";
     html += "<div class=\"wall-head\"><span>Wall " + (i + 1) + "</span></div>";
+    if (experimentalSelected()) {
+      html += "<input type=\"hidden\" name=\"" + pfx + "type-" + i + "\" value=\"" + esc(kind) + "\">";
+      html += "<input type=\"hidden\" name=\"" + pfx + "pitch-" + i + "\" value=\"" +
+        esc(cell.pitches[i] || "45") + "\"></div>";
+      return html;
+    }
     html += "<div class=\"wall-types\" role=\"radiogroup\">";
     ["hip", "gable", "knee", "gambrel"].forEach(function (k) {
       var label = k.charAt(0).toUpperCase() + k.slice(1);
@@ -940,13 +959,20 @@
         " data-extra=\"overhang\"> Overhang</label>";
       html += "<label><input type=\"checkbox\" name=\"" + p + "use_eave_height\"" + (cell.useEave ? " checked" : "") +
         " data-extra=\"eave\"> Eave height</label>";
-      html += "<label><input type=\"checkbox\" name=\"" + p + "use_hole\"" + (cell.useHole ? " checked" : "") +
-        " data-extra=\"hole\"> Courtyard / hole</label></div>";
+      if (!experimentalSelected()) {
+        html += "<label><input type=\"checkbox\" name=\"" + p + "use_hole\"" + (cell.useHole ? " checked" : "") +
+          " data-extra=\"hole\"> Courtyard / hole</label>";
+      }
+      html += "</div>";
       html += "<p class=\"wall-extra js-extra\" data-kind=\"overhang\"" + (cell.useOverhang ? "" : " hidden") +
         "><label>Overhang <input name=\"" + p + "overhang\" value=\"" + esc(cell.overhang) + "\"> m past the walls</label></p>";
       html += "<p class=\"wall-extra js-extra\" data-kind=\"eave\"" + (cell.useEave ? "" : " hidden") +
         "><label>Eave height <input name=\"" + p + "eave_height\" value=\"" + esc(cell.eaveHeight) +
         "\"> m above datum</label></p>";
+      if (index === 0 && experimentalSelected() && cell.roofHeight) {
+        html += "<p class=\"wall-extra\"><label>Roof height <input name=\"roof_height\" value=\"" +
+          esc(cell.roofHeight) + "\"> m above the eaves</label></p>";
+      }
       var wallCount = cell.vertices.length + ((cell.useHole && cell.hole) ? cell.hole.length : 0);
       var w;
       for (w = 0; w < wallCount; w += 1) {

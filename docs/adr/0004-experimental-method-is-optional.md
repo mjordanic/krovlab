@@ -37,7 +37,10 @@ This method may depend on PyTorch when a checkpoint predicts the graph. The
 core does not import PyTorch. `import krovlab` does not import the
 experimental module.
 
-The help agent is unchanged. It still fills the skeleton's knobs.
+The help agent prefers the skeleton. It can explain the experimental
+method, including that pitch is not an input and that a graph may be
+unliftable. On that path it sets roof height, overhang, and eave height.
+It does not fill pitch or wall type while that method is selected.
 
 ## Consequences
 

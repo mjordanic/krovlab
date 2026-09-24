@@ -130,9 +130,9 @@ For each `in-progress` / `blocked` row with a `bc-` Agent ID:
 
 ## Degraded firewall
 
-If `wave-runner` cannot spawn `issue-implementer` (nested Task limit, tool policy), the runner returns `blocked` for the whole wave with that reason and **must not** implement issues itself.
+If `wave-runner` cannot spawn `issue-implementer`, or its Task tool rejects the envelope model (nested enum is only `composer-2.5-fast`), the runner returns `firewall: degraded` and **must not** implement issues itself or substitute a model.
 
-The orchestrator then runs the wave-runner workflow in-process for that wave only: same isolation, same envelopes, same serial cherry-pick, same report ownership. Append `firewall: degraded` to the header and activity log. Context will grow; that is the cost of the fallback.
+On Cursor this is the normal path: the orchestrator dispatches `issue-implementer` itself and passes the resolved slug as `model`, then runs the wave-runner workflow in-process (same isolation, same envelopes, same serial integration, same report ownership). Append `firewall: degraded` to the header and activity log. Context will grow; that is how an arbitrary model reaches `/implement`.
 
 ## Integration (serial)
 

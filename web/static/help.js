@@ -16,6 +16,10 @@
         map[el.name] = el.value;
       }
     });
+    var method = document.querySelector("input[name=\"method\"]:checked");
+    if (method) {
+      map.method = method.value;
+    }
     return map;
   }
 
