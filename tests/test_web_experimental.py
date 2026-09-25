@@ -476,6 +476,42 @@ def test_single_plane_and_failure_hide_placement_controls() -> None:
     assert "Place at the center" not in refused
 
 
+def test_snap_starts_on_survives_update_and_returns_for_a_new_building() -> None:
+    fresh = _client().get("/?method=experimental").get_data(as_text=True)
+    assert 'name="snap" value="on" checked' in fresh
+    assert 'name="mid_x" value="5"' in fresh
+    assert 'name="mid_y" value="3"' in fresh
+    assert 'name="axis-0"' in fresh and 'name="axis-1"' in fresh
+    updated = _client().post(
+        "/", data=_rect_post(snap="off", offset_x="1", offset_y="0")
+    ).get_data(as_text=True)
+    assert 'name="snap" value="on" checked' not in updated
+    assert 'name="snap" value="off"' in updated
+    assert _value(updated, "offset_x") == "1"
+    other = _client().get("/?method=experimental&example=l-shape").get_data(
+        as_text=True
+    )
+    assert 'name="snap" value="on" checked' in other
+    doc = ezdxf.new("R2010")  # type: ignore[attr-defined]
+    doc.modelspace().add_lwpolyline(
+        [(0, 0), (8000, 0), (8000, 4000), (0, 4000)],
+        close=True,
+    )
+    buf = StringIO()
+    doc.write(buf)
+    payload = buf.getvalue().encode("utf-8")
+    data: dict[str, object] = {
+        **_rect_post(snap="off", offset_x="1", offset_y="0"),
+        "dxf_units": "mm",
+        "upload_dxf": "1",
+        "dxf": (BytesIO(payload), "plan.dxf"),
+    }
+    replaced = _client().post(
+        "/", data=data, content_type="multipart/form-data"
+    ).get_data(as_text=True)
+    assert 'name="snap" value="on" checked' in replaced
+
+
 def test_a_dxf_resets_the_offset_to_zero() -> None:
     doc = ezdxf.new("R2010")  # type: ignore[attr-defined]
     doc.modelspace().add_lwpolyline(

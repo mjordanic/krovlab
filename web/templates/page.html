@@ -157,6 +157,7 @@
       vector-effect: non-scaling-stroke;
     }
     #plan-editor circle.is-dormer { stroke: #1d4ed8; }
+    #plan-editor circle.is-apex { fill: var(--accent); stroke: var(--ink); }
     #plan-editor circle.is-selected { fill: var(--selected); }
     #plan-editor text {
       fill: var(--ink);
@@ -377,6 +378,18 @@
           {% if show_placement and cell.index == 0 %}
           <fieldset>
             <legend>Apex</legend>
+            <input type="hidden" name="mid_x" value="{{ mid_x }}">
+            <input type="hidden" name="mid_y" value="{{ mid_y }}">
+            {% for axis in axes %}
+            <input type="hidden" name="axis-{{ loop.index0 }}" value="{{ axis }}">
+            {% endfor %}
+            <p>
+              <label>
+                <input type="checkbox" name="snap" value="on"{% if snap_on %} checked{% endif %}>
+                Snap to 0.5 m
+              </label>
+              <input type="hidden" name="snap" value="off">
+            </p>
             <p>
               <label>
                 Offset x

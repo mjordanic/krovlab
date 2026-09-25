@@ -6,7 +6,7 @@ Snap to a 0.5 m grid is on for a newly loaded example. The grid is measured from
 
 **Blocked by:** 01: Centered apex and a typed offset
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48
 
@@ -14,9 +14,9 @@ Snap to a 0.5 m grid is on for a newly loaded example. The grid is measured from
 
 **Artifact homes:** No new file. The handle and the snap control live in the existing plan editor. Snap is a field of the existing form.
 
-- [ ] Dragging the interior handle writes the offset and leaves the footprint corners where they are
-- [ ] Dragging a corner writes the corner and leaves the offset fields as they are
-- [ ] While the pointer is down, the handle and the offset numbers follow it. Pointer-up submits the form
-- [ ] With snap on, a release within 0.25 m of the midpoint writes (0, 0), and a release elsewhere writes a 0.5 m grid point measured from the plan origin
-- [ ] With snap off, the release writes the pointer's metres, including through the midpoint
-- [ ] Snap is on for a newly loaded example, survives Update, and turns on again when the example or the footprint is replaced
+- [x] Dragging the interior handle writes the offset and leaves the footprint corners where they are
+- [x] Dragging a corner writes the corner and leaves the offset fields as they are
+- [x] While the pointer is down, the handle and the offset numbers follow it. Pointer-up submits the form
+- [x] With snap on, a release within 0.25 m of the midpoint writes (0, 0), and a release elsewhere writes a 0.5 m grid point measured from the plan origin
+- [x] With snap off, the release writes the pointer's metres, including through the midpoint
+- [x] Snap is on for a newly loaded example, survives Update, and turns on again when the example or the footprint is replaced

@@ -150,6 +150,14 @@
     var selectedVertex = null;
     var selectedDormer = -1;
     var selectedDormerVertex = null;
+    var offsetX = 0;
+    var offsetY = 0;
+    var snapOn = true;
+    var midX = null;
+    var midY = null;
+    var axes = [];
+    var placementOn = false;
+    var dragging = null;
 
     function allRings(cell) {
       var rings = [cell.vertices];
@@ -627,6 +635,153 @@
       selectedVertex = null;
       selectedDormer = -1;
       selectedDormerVertex = null;
+      readPlacement(map);
+    }
+
+    function readNumber(map, key) {
+      if (!Object.prototype.hasOwnProperty.call(map, key)) {
+        return null;
+      }
+      var n = parseFloat(String(map[key]));
+      return Number.isNaN(n) ? null : n;
+    }
+
+    function readPlacement(map) {
+      midX = readNumber(map, "mid_x");
+      midY = readNumber(map, "mid_y");
+      placementOn = midX !== null && midY !== null;
+      offsetX = readNumber(map, "offset_x") || 0;
+      offsetY = readNumber(map, "offset_y") || 0;
+      snapOn = map.snap !== "off";
+      axes = [];
+      var i = 0;
+      while (Object.prototype.hasOwnProperty.call(map, "axis-" + i)) {
+        var parts = String(map["axis-" + i]).split(",");
+        if (parts.length === 3) {
+          axes.push({
+            nx: parseFloat(parts[0]),
+            ny: parseFloat(parts[1]),
+            c: parseFloat(parts[2])
+          });
+        }
+        i += 1;
+      }
+      dragging = null;
+    }
+
+    function gridHalf(n) {
+      return Math.round(n / 0.5) * 0.5;
+    }
+
+    function cleanMetres(n) {
+      return Math.round(n * 1e9) / 1e9;
+    }
+
+    function projectToAxis(x, y, axis) {
+      var signed = axis.nx * x + axis.ny * y - axis.c;
+      return {
+        x: cleanMetres(x - axis.nx * signed),
+        y: cleanMetres(y - axis.ny * signed)
+      };
+    }
+
+    function snapApexPoint(x, y) {
+      if (!snapOn || !placementOn) {
+        return { x: cleanMetres(x), y: cleanMetres(y) };
+      }
+      if (Math.hypot(x - midX, y - midY) <= 0.25) {
+        return { x: midX, y: midY };
+      }
+      var nearest = null;
+      var nearestDist = 0.25;
+      axes.forEach(function (axis) {
+        var dist = Math.abs(axis.nx * x + axis.ny * y - axis.c);
+        if (dist <= nearestDist) {
+          nearest = axis;
+          nearestDist = dist;
+        }
+      });
+      if (nearest) {
+        return projectToAxis(x, y, nearest);
+      }
+      return { x: gridHalf(x), y: gridHalf(y) };
+    }
+
+    function placeApex(x, y) {
+      if (!placementOn) {
+        return;
+      }
+      var placed = snapApexPoint(x, y);
+      offsetX = cleanMetres(placed.x - midX);
+      offsetY = cleanMetres(placed.y - midY);
+    }
+
+    function apexPoint() {
+      if (!placementOn) {
+        return null;
+      }
+      return [cleanMetres(midX + offsetX), cleanMetres(midY + offsetY)];
+    }
+
+    function hitApex(x, y) {
+      if (!placementOn) {
+        return false;
+      }
+      var at = apexPoint();
+      return Math.hypot(x - at[0], y - at[1]) <= 0.25;
+    }
+
+    function pointerDown(x, y) {
+      if (hitApex(x, y)) {
+        var vert = hitVertex(x, y);
+        var apexDist = Math.hypot(x - apexPoint()[0], y - apexPoint()[1]);
+        var ringPt = null;
+        if (vert && cells[vert.cell]) {
+          var cell = cells[vert.cell];
+          if (vert.vertex < cell.vertices.length) {
+            ringPt = cell.vertices[vert.vertex];
+          } else if (cell.hole) {
+            ringPt = cell.hole[vert.vertex - cell.vertices.length] || null;
+          }
+        }
+        var vertDist = ringPt ? Math.hypot(x - ringPt.x, y - ringPt.y) : Infinity;
+        if (apexDist <= vertDist) {
+          dragging = { kind: "apex" };
+          selectedVertex = null;
+          selectedEdge = null;
+          placeApex(x, y);
+          return;
+        }
+      }
+      clickPlan(x, y);
+      if (selectedDormer >= 0 && selectedDormerVertex !== null) {
+        dragging = { kind: "dormer", dormer: selectedDormer, vertex: selectedDormerVertex };
+      } else if (selectedVertex !== null) {
+        dragging = { kind: "vertex", cell: selectedCell, vertex: selectedVertex };
+      } else {
+        dragging = null;
+      }
+    }
+
+    function pointerMove(x, y) {
+      if (!dragging) {
+        return;
+      }
+      if (dragging.kind === "apex") {
+        placeApex(x, y);
+        return;
+      }
+      if (dragging.kind === "dormer") {
+        moveDormerVertex(dragging.dormer, dragging.vertex, x, y);
+        return;
+      }
+      moveVertex(dragging.cell, dragging.vertex, x, y);
+    }
+
+    function pointerUp() {
+      var submit = !!(dragging && dragging.kind === "apex");
+      dragging = null;
+      return submit;
     }
 
     function readDormers(map) {
@@ -698,6 +853,16 @@
         if (index === 0 && cell.roofHeight) {
           out.roof_height = String(cell.roofHeight);
         }
+        if (index === 0 && placementOn) {
+          out.offset_x = String(cleanMetres(offsetX));
+          out.offset_y = String(cleanMetres(offsetY));
+          out.snap = snapOn ? "on" : "off";
+          out.mid_x = String(midX);
+          out.mid_y = String(midY);
+          axes.forEach(function (axis, axisIndex) {
+            out["axis-" + axisIndex] = axis.nx + "," + axis.ny + "," + axis.c;
+          });
+        }
         if (cell.useHole) {
           out[p + "use_hole"] = "on";
           (cell.hole || []).forEach(function (pt, i) {
@@ -740,6 +905,14 @@
     function formMap(form) {
       var map = {};
       Array.prototype.forEach.call(form.querySelectorAll("[name]"), function (el) {
+        if (el.name === "snap") {
+          if (el.type === "checkbox") {
+            map.snap = el.checked ? "on" : "off";
+          } else if (!Object.prototype.hasOwnProperty.call(map, "snap")) {
+            map.snap = el.value;
+          }
+          return;
+        }
         if (el.type === "checkbox") {
           if (el.checked) {
             map[el.name] = "on";
@@ -783,6 +956,12 @@
       setPitchOnSloping: setPitchOnSloping,
       moveVertex: moveVertex,
       moveDormerVertex: moveDormerVertex,
+      pointerDown: pointerDown,
+      pointerMove: pointerMove,
+      pointerUp: pointerUp,
+      draggingKind: function () { return dragging ? dragging.kind : null; },
+      apex: apexPoint,
+      setSnap: function (on) { snapOn = !!on; },
       applySettings: applySettings,
       applyForm: function (formEl) { applySettings(formMap(formEl)); },
       loadFields: loadFields,
@@ -834,6 +1013,11 @@
   }
 
   function metresFromEvent(svg, event) {
+    var loc = metresExact(svg, event);
+    return { x: snap(loc.x), y: snap(loc.y) };
+  }
+
+  function metresExact(svg, event) {
     var group = svg.querySelector("#plan-metres") || svg;
     var ctm = group.getScreenCTM();
     if (!ctm) {
@@ -843,7 +1027,16 @@
     pt.x = event.clientX;
     pt.y = event.clientY;
     var loc = pt.matrixTransform(ctm.inverse());
-    return { x: snap(loc.x), y: snap(loc.y) };
+    return { x: loc.x, y: loc.y };
+  }
+
+  function writeOffset(form, editor) {
+    var posted = editor.fields();
+    ["offset_x", "offset_y"].forEach(function (name) {
+      if (posted[name] == null) { return; }
+      var input = form.querySelector("[name='" + name + "']");
+      if (input) { input.value = posted[name]; }
+    });
   }
 
   function collectPoints(editor) {
@@ -860,6 +1053,10 @@
     editor.dormers().forEach(function (d) {
       d.vertices.forEach(function (pt) { pts.push([pt.x, pt.y]); });
     });
+    if (typeof editor.apex === "function") {
+      var apex = editor.apex();
+      if (apex) { pts.push(apex); }
+    }
     return pts;
   }
 
@@ -939,6 +1136,11 @@
           "\" r=\"0.18\" data-dormer=\"" + dIndex + "\" data-vertex=\"" + i + "\"></circle>";
       });
     });
+    var apexAt = typeof editor.apex === "function" ? editor.apex() : null;
+    if (apexAt) {
+      html += "<circle class=\"is-apex\" cx=\"" + apexAt[0] + "\" cy=\"" + apexAt[1] +
+        "\" r=\"0.22\" data-apex=\"1\"></circle>";
+    }
     html += "</g>";
     svg.innerHTML = html;
   }
@@ -1013,6 +1215,27 @@
       if (index === 0 && experimentalSelected() && cell.roofHeight) {
         html += "<p class=\"wall-extra\"><label>Roof height <input name=\"roof_height\" value=\"" +
           esc(cell.roofHeight) + "\"> m above the eaves</label></p>";
+      }
+      if (index === 0 && editor.fields().offset_x != null) {
+        var posted = editor.fields();
+        html += "<fieldset><legend>Apex</legend>";
+        if (posted.mid_x != null) {
+          html += "<input type=\"hidden\" name=\"mid_x\" value=\"" + esc(posted.mid_x) + "\">";
+          html += "<input type=\"hidden\" name=\"mid_y\" value=\"" + esc(posted.mid_y) + "\">";
+        }
+        var axisIndex = 0;
+        while (posted["axis-" + axisIndex] != null) {
+          html += "<input type=\"hidden\" name=\"axis-" + axisIndex + "\" value=\"" +
+            esc(posted["axis-" + axisIndex]) + "\">";
+          axisIndex += 1;
+        }
+        html += "<p><label><input type=\"checkbox\" name=\"snap\" value=\"on\"" +
+          (posted.snap === "off" ? "" : " checked") + "> Snap to 0.5 m</label>";
+        html += "<input type=\"hidden\" name=\"snap\" value=\"off\"></p>";
+        html += "<p><label>Offset x <input name=\"offset_x\" value=\"" + esc(posted.offset_x) +
+          "\"> m from the middle</label> ";
+        html += "<label>Offset y <input name=\"offset_y\" value=\"" + esc(posted.offset_y) +
+          "\"> m from the middle</label></p></fieldset>";
       }
       var extraLen = 0;
       (cell.extraHoles || []).forEach(function (ring) { extraLen += ring.length; });
@@ -1141,37 +1364,45 @@
     var dragging = null;
 
     svg.addEventListener("pointerdown", function (event) {
-      var metres = metresFromEvent(svg, event);
-      editor.clickPlan(metres.x, metres.y);
-      if (editor.selectedDormer() >= 0 && editor.selectedDormerVertex() !== null) {
-        dragging = { dormer: editor.selectedDormer(), vertex: editor.selectedDormerVertex() };
+      var raw = metresFromEvent(svg, event);
+      editor.pointerDown(raw.x, raw.y);
+      dragging = editor.draggingKind();
+      if (dragging) {
         svg.setPointerCapture(event.pointerId);
-      } else if (editor.selectedVertex() !== null) {
-        dragging = { cell: editor.selectedCell(), vertex: editor.selectedVertex() };
-        svg.setPointerCapture(event.pointerId);
+      }
+      if (dragging === "apex") {
+        writeOffset(form, editor);
       }
       commit(false);
     });
     svg.addEventListener("pointermove", function (event) {
       if (!dragging) { return; }
-      var metres = metresFromEvent(svg, event);
-      if (dragging.dormer !== undefined) {
-        editor.moveDormerVertex(dragging.dormer, dragging.vertex, metres.x, metres.y);
-        var dxName = "dormer-" + dragging.dormer + "-x-" + dragging.vertex;
-        var dyName = "dormer-" + dragging.dormer + "-y-" + dragging.vertex;
-        var dxIn = form.querySelector("[name='" + dxName + "']");
-        var dyIn = form.querySelector("[name='" + dyName + "']");
+      var raw = metresExact(svg, event);
+      if (dragging === "apex") {
+        editor.pointerMove(raw.x, raw.y);
+        writeOffset(form, editor);
+        drawSvg(svg, editor);
+        return;
+      }
+      var metres = { x: snap(raw.x), y: snap(raw.y) };
+      editor.pointerMove(metres.x, metres.y);
+      if (dragging === "dormer") {
+        var dormer = editor.selectedDormer();
+        var vertex = editor.selectedDormerVertex();
+        var dxIn = form.querySelector("[name='dormer-" + dormer + "-x-" + vertex + "']");
+        var dyIn = form.querySelector("[name='dormer-" + dormer + "-y-" + vertex + "']");
         if (dxIn) { dxIn.value = String(metres.x); }
         if (dyIn) { dyIn.value = String(metres.y); }
         drawSvg(svg, editor);
         return;
       }
-      editor.moveVertex(dragging.cell, dragging.vertex, metres.x, metres.y);
-      var p = prefixOf(dragging.cell);
-      var cell = editor.cells()[dragging.cell];
+      var cellIndex = editor.selectedCell();
+      var vertexIndex = editor.selectedVertex();
+      var p = prefixOf(cellIndex);
+      var cell = editor.cells()[cellIndex];
       var n = cell ? cell.vertices.length : 0;
-      var xName = dragging.vertex < n ? p + "outer-x-" + dragging.vertex : p + "hole-x-" + (dragging.vertex - n);
-      var yName = dragging.vertex < n ? p + "outer-y-" + dragging.vertex : p + "hole-y-" + (dragging.vertex - n);
+      var xName = vertexIndex < n ? p + "outer-x-" + vertexIndex : p + "hole-x-" + (vertexIndex - n);
+      var yName = vertexIndex < n ? p + "outer-y-" + vertexIndex : p + "hole-y-" + (vertexIndex - n);
       var xIn = form.querySelector("[name='" + xName + "']");
       var yIn = form.querySelector("[name='" + yName + "']");
       if (xIn) { xIn.value = String(metres.x); }
@@ -1179,7 +1410,11 @@
       drawSvg(svg, editor);
     });
     svg.addEventListener("pointerup", function () {
+      var submit = editor.pointerUp();
       dragging = null;
+      if (submit && typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      }
     });
 
     var addDetached = form.querySelector("#add-detached-cell");
@@ -1232,6 +1467,10 @@
     form.addEventListener("change", function (event) {
       var el = event.target;
       if (!el || !el.name) { return; }
+      if (el.name === "snap" && el.type === "checkbox") {
+        editor.setSnap(el.checked);
+        return;
+      }
       if (el.name.indexOf("type-") !== -1 && el.type === "radio" && el.checked) {
         var match = el.name.match(/^(?:cell-(\d+)-)?type-(\d+)$/);
         if (match) {

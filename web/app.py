@@ -17,6 +17,7 @@ from krovlab.experimental import (
     PlacedRoof,
     Placement,
     moved_toward_wall,
+    reflection_axes,
     roof_from_face_graph,
 )
 from krovlab.viz import plan_view, solid_view
@@ -131,6 +132,7 @@ def create_app(
                 offset_x="0",
                 offset_y="0",
                 show_placement=_has_interior(result) and method == "experimental",
+                snap_on=True,
             )
         method = _posted_method(request.form)
         catalog = _catalog(method, examples, experimental_examples)
@@ -384,6 +386,7 @@ def _render_post(
         offset_y=offset_y,
         show_placement=show_placement,
         keep_offset=method == "skeleton",
+        snap_on=_snap_on(form, reset=reset_offset),
     )
 
 
@@ -470,6 +473,7 @@ def _render(
     offset_y: str = "0",
     show_placement: bool = False,
     keep_offset: bool = False,
+    snap_on: bool = True,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -493,6 +497,9 @@ def _render(
         holes,
         draw_overhang,
         extra_footprints,
+    )
+    mid_x, mid_y, axes = _apex_frame(
+        result, draw_footprint if show_placement else []
     )
     mesh_fields: dict[str, str] = {}
     if solid_html is not None:
@@ -532,6 +539,10 @@ def _render(
         offset_y=offset_y,
         show_placement=show_placement,
         keep_offset=keep_offset,
+        snap_on=snap_on,
+        mid_x=mid_x,
+        mid_y=mid_y,
+        axes=axes,
     )
 
 
@@ -635,6 +646,39 @@ def _example_face_graph(example: Example) -> list[list[int]] | None:
 
 def _has_interior(result: Roof | Project | Failure) -> bool:
     return isinstance(result, Roof) and len(result.faces) > 1
+
+
+def _snap_on(form: Mapping[str, str], *, reset: bool) -> bool:
+    if reset:
+        return True
+    raw = form.get("snap")
+    if raw is None or raw.strip() == "" or raw.strip() == "on":
+        return True
+    return False
+
+
+def _apex_frame(
+    result: Roof | Project | Failure,
+    footprint: list[tuple[Any, Any]],
+) -> tuple[str, str, list[str]]:
+    if not isinstance(result, PlacedRoof) or not result.nodes:
+        return "", "", []
+    apex = result.nodes[-1]
+    points: list[tuple[float, float]] = []
+    for x, y in footprint:
+        try:
+            points.append((float(x), float(y)))
+        except (TypeError, ValueError):
+            continue
+    axes = [
+        f"{_fmt_offset(nx)},{_fmt_offset(ny)},{_fmt_offset(c)}"
+        for nx, ny, c in reflection_axes(points)
+    ]
+    return (
+        _fmt_offset(apex.x - result.used_dx),
+        _fmt_offset(apex.y - result.used_dy),
+        axes,
+    )
 
 
 def _fmt_offset(value: float) -> str:

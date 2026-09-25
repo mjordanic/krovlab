@@ -46,13 +46,16 @@ def _run_editor(body: str) -> dict[str, Any]:
 const {{ createEditor }} = require({json.dumps(str(EDITOR_JS))});
 const editor = createEditor({{ applyToAll: "45" }});
 editor.loadFields({json.dumps(RECT)});
+var extra = {{}};
 {body}
 process.stdout.write(JSON.stringify({{
   fields: editor.fields(),
   rings: editor.rings(),
   selectedCell: editor.selectedCell(),
   selectedEdge: editor.selectedEdge(),
-  selectedDormer: editor.selectedDormer()
+  selectedDormer: editor.selectedDormer(),
+  apex: typeof editor.apex === "function" ? editor.apex() : null,
+  extra: extra
 }}));
 """
     proc = subprocess.run(
@@ -340,6 +343,121 @@ def test_hole_vertices_round_trip_in_fields() -> None:
     assert (fields["hole-x-0"], fields["hole-y-0"]) == ("3", "3")
     assert (fields["hole-x-2"], fields["hole-y-2"]) == ("7", "7")
     assert fields["type-4"] == "hip"
+
+
+def _placement_rect(**overrides: str) -> dict[str, str]:
+    fields = {
+        **RECT,
+        "offset_x": "0",
+        "offset_y": "0",
+        "mid_x": "5",
+        "mid_y": "3",
+        "snap": "on",
+        "axis-0": "1,0,5",
+        "axis-1": "0,1,3",
+    }
+    fields.update(overrides)
+    return fields
+
+
+def test_dragging_the_interior_handle_writes_the_offset_and_leaves_the_corners() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect())});
+editor.pointerDown(5, 3);
+editor.pointerMove(7.2, 4.1);
+extra.releaseSubmits = editor.pointerUp();
+"""
+    )
+    assert _xy(result["fields"], "") == [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (0.0, 6.0),
+    ]
+    assert float(result["fields"]["offset_x"]) == 2.0
+    assert float(result["fields"]["offset_y"]) == 1.0
+    assert result["apex"] == [7, 4]
+    assert result["extra"]["releaseSubmits"] is True
+
+
+def test_dragging_a_corner_writes_the_corner_and_leaves_the_offset() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(offset_x="1", offset_y="-0.5"))});
+editor.pointerDown(10, 6);
+editor.pointerMove(10, 4);
+extra.releaseSubmits = editor.pointerUp();
+"""
+    )
+    assert _xy(result["fields"], "") == [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 4.0),
+        (0.0, 6.0),
+    ]
+    assert result["fields"]["offset_x"] == "1"
+    assert result["fields"]["offset_y"] == "-0.5"
+    assert result["apex"] == [6, 2.5]
+    assert result["extra"]["releaseSubmits"] is False
+
+
+def test_snap_on_prefers_the_midpoint_and_otherwise_a_half_metre_grid() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(mid_x="5.2", mid_y="3.2"))});
+editor.pointerDown(5.2, 3.2);
+editor.pointerMove(5.35, 3.3);
+extra.duringX = editor.fields().offset_x;
+extra.duringApex = editor.apex();
+editor.pointerUp();
+"""
+    )
+    assert float(result["fields"]["offset_x"]) == 0.0
+    assert float(result["fields"]["offset_y"]) == 0.0
+    assert result["extra"]["duringX"] == "0"
+    assert result["extra"]["duringApex"] == [5.2, 3.2]
+    grid = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect())});
+editor.pointerDown(5, 3);
+editor.pointerMove(6.2, 4.2);
+editor.pointerUp();
+"""
+    )
+    assert float(grid["fields"]["offset_x"]) == 1.0
+    assert float(grid["fields"]["offset_y"]) == 1.0
+    assert grid["apex"] == [6, 4]
+
+
+def test_snap_on_lets_a_symmetry_axis_win_inside_a_quarter_metre() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(**{"axis-1": "0,1,2.6", "mid_y": "2.6"}))});
+editor.pointerDown(5, 2.6);
+editor.pointerMove(6.2, 2.75);
+editor.pointerUp();
+"""
+    )
+    assert result["apex"] == [6.2, 2.6]
+    assert float(result["fields"]["offset_x"]) == pytest.approx(1.2)
+    assert float(result["fields"]["offset_y"]) == 0.0
+
+
+def test_snap_off_writes_the_pointer_including_through_the_midpoint() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(snap="off"))});
+editor.pointerDown(5, 3);
+editor.pointerMove(5.1, 3.2);
+extra.duringApex = editor.apex();
+editor.pointerUp();
+"""
+    )
+    assert float(result["fields"]["offset_x"]) == pytest.approx(0.1)
+    assert float(result["fields"]["offset_y"]) == pytest.approx(0.2)
+    assert result["extra"]["duringApex"] == [5.1, 3.2]
+    assert result["fields"]["snap"] == "off"
 
 
 def test_roof_height_round_trips_in_fields() -> None:

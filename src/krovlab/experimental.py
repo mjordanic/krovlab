@@ -778,6 +778,61 @@ def _segment_distance(pt: Vertex, a: Vertex, b: Vertex) -> float:
     return math.hypot(pt[0] - (a[0] + t * dx), pt[1] - (a[1] + t * dy))
 
 
+def reflection_axes(ring: Sequence[Vertex]) -> list[tuple[float, float, float]]:
+    """Lines ``nx x + ny y = c`` that reflect ``ring`` onto itself.
+
+    ``(nx, ny)`` is a unit normal. A rectangle has one axis through each
+    pair of opposite sides. An L has none.
+    """
+    points = [(float(x), float(y)) for x, y in ring]
+    count = len(points)
+    if count < 3:
+        return []
+    cx = sum(point[0] for point in points) / count
+    cy = sum(point[1] for point in points) / count
+    directions: list[tuple[float, float]] = []
+    for x, y in points:
+        directions.append((x - cx, y - cy))
+    for index, (x, y) in enumerate(points):
+        other = points[(index + 1) % count]
+        directions.append(((x + other[0]) / 2 - cx, (y + other[1]) / 2 - cy))
+    axes: list[tuple[float, float, float]] = []
+    seen: set[tuple[float, float, float]] = set()
+    for dx, dy in directions:
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            continue
+        nx, ny = -dy / length, dx / length
+        c = nx * cx + ny * cy
+        if nx < -1e-9 or (abs(nx) <= 1e-9 and ny < 0):
+            nx, ny, c = -nx, -ny, -c
+        if abs(nx) < 1e-9:
+            nx = 0.0
+        if abs(ny) < 1e-9:
+            ny = 0.0
+        key = (round(nx, 6), round(ny, 6), round(c, 6))
+        if key in seen:
+            continue
+        seen.add(key)
+        if _reflects_onto_itself(points, nx, ny, c):
+            axes.append((nx, ny, c))
+    return axes
+
+
+def _reflects_onto_itself(
+    points: list[Vertex], nx: float, ny: float, c: float
+) -> bool:
+    for x, y in points:
+        distance = nx * x + ny * y - c
+        image = (x - 2 * distance * nx, y - 2 * distance * ny)
+        if not any(
+            math.hypot(image[0] - other[0], image[1] - other[1]) < 1e-6
+            for other in points
+        ):
+            return False
+    return True
+
+
 def _signed_left(pt: Vertex, a: Vertex, b: Vertex) -> float:
     dx, dy = b[0] - a[0], b[1] - a[1]
     length = math.hypot(dx, dy)
