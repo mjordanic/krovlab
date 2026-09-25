@@ -783,14 +783,16 @@
 
     function releaseHolds() {
       if (interiorMode) {
-        holds = holds.map(function (_held, index) {
-          var axis = axes[index];
-          if (!axis) {
-            return false;
-          }
-          return interiors.every(function (item) {
-            var at = interiorPoint(item);
-            return Math.abs(axis.nx * at[0] + axis.ny * at[1] - axis.c) <= 1e-6;
+        interiors.forEach(function (item) {
+          var at = interiorPoint(item);
+          holds.forEach(function (held, index) {
+            var axis = axes[index];
+            if (!held || !axis) {
+              return;
+            }
+            if (Math.abs(axis.nx * at[0] + axis.ny * at[1] - axis.c) > 1e-6) {
+              holds[index] = false;
+            }
           });
         });
         return;
@@ -1271,6 +1273,38 @@
     return { x: loc.x, y: loc.y };
   }
 
+  function readHolds(form, editor) {
+    var index = 0;
+    var box = form.querySelector("input[type='checkbox'][name='hold-" + index + "']");
+    while (box) {
+      editor.setHold(index, box.checked);
+      index += 1;
+      box = form.querySelector("input[type='checkbox'][name='hold-" + index + "']");
+    }
+  }
+
+  function writeInteriors(form, editor) {
+    var posted = editor.fields();
+    Object.keys(posted).forEach(function (name) {
+      var interior = /^(apex|ridge)-\d+-/.test(name) && !/-height$/.test(name);
+      var hold = /^hold-\d+$/.test(name);
+      if (!interior && !hold) {
+        return;
+      }
+      var input = hold
+        ? form.querySelector("input[type='checkbox'][name='" + name + "']")
+        : form.querySelector("[name='" + name + "']");
+      if (!input) {
+        return;
+      }
+      if (input.type === "checkbox") {
+        input.checked = posted[name] === "on";
+      } else {
+        input.value = posted[name];
+      }
+    });
+  }
+
   function writeOffset(form, editor) {
     var posted = editor.fields();
     ["offset_x", "offset_y"].forEach(function (name) {
@@ -1510,7 +1544,7 @@
             esc(posted["axis-" + axisIndex]) + "\">";
           var held = posted["hold-" + axisIndex] === "on";
           html += "<p><label><input type=\"checkbox\" name=\"hold-" + axisIndex +
-            "\" value=\"on\"" + (held ? " checked" : "") + "> Hold this reflection</label>";
+            "\" value=\"on\"" + (held ? " checked" : "") + "> Mirror across this reflection</label>";
           html += "<input type=\"hidden\" name=\"hold-" + axisIndex + "\" value=\"off\"></p>";
           axisIndex += 1;
         }
@@ -1661,6 +1695,7 @@
 
     svg.addEventListener("pointerdown", function (event) {
       var raw = metresFromEvent(svg, event);
+      readHolds(form, editor);
       editor.pointerDown(raw.x, raw.y);
       dragging = editor.draggingKind();
       if (dragging) {
@@ -1668,6 +1703,9 @@
       }
       if (dragging === "apex") {
         writeOffset(form, editor);
+      }
+      if (dragging === "interior") {
+        writeInteriors(form, editor);
       }
       commit(false);
     });
@@ -1677,6 +1715,12 @@
       if (dragging === "apex") {
         editor.pointerMove(raw.x, raw.y);
         writeOffset(form, editor);
+        drawSvg(svg, editor);
+        return;
+      }
+      if (dragging === "interior") {
+        editor.pointerMove(raw.x, raw.y);
+        writeInteriors(form, editor);
         drawSvg(svg, editor);
         return;
       }
@@ -1706,6 +1750,9 @@
       drawSvg(svg, editor);
     });
     svg.addEventListener("pointerup", function () {
+      if (dragging === "interior") {
+        writeInteriors(form, editor);
+      }
       var submit = editor.pointerUp();
       dragging = null;
       if (submit && typeof form.requestSubmit === "function") {

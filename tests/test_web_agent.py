@@ -258,8 +258,11 @@ def test_helper_places_the_apex_the_ridge_snap_and_symmetry() -> None:
     )
     assert centered["apex-0-x"] == "0"
     assert centered["apex-0-y"] == "0"
-    ridge = _turn(_experimental_rect(), {"style": "ridge"}, "Choose the ridge.")
+    ridge = _turn(
+        _experimental_rect(roof_height="4"), {"style": "ridge"}, "Choose the ridge."
+    )
     assert ridge["ridge-0-x"] == "0"
+    assert ridge["ridge-0-height"] == "4"
     assert ridge["selected_interior"] == "ridge-0"
     pyramid = _turn(_experimental_rect(), {"style": "pyramid"}, "Pyramid.")
     assert pyramid["selected_interior"] == "apex-0"

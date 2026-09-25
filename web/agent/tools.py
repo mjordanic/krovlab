@@ -385,6 +385,9 @@ def _placement_patch(
         patches["ridge-0-y"] = "0"
         patches["ridge-0-direction"] = "0"
         patches["ridge-0-length"] = "2"
+        box = (form.get("roof_height") or "").strip()
+        if box:
+            patches["ridge-0-height"] = box
         patches["selected_interior"] = "ridge-0"
     elif style_word == "apex":
         patches["selected_interior"] = "apex-0"

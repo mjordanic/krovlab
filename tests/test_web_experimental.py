@@ -350,6 +350,177 @@ def test_the_rectangle_lists_apexes_and_ridges() -> None:
     assert _value(kept, "ridge-0-y") == "-0.5"
 
 
+def test_the_l_stays_editable_so_two_ridges_can_replace_the_apex() -> None:
+    client = _client()
+    fresh = client.get("/?method=experimental&example=l-shape").get_data(as_text=True)
+    alone = client.post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            built_method="experimental",
+            roof_height="3",
+            selected_interior="apex-0",
+            delete_interior="1",
+            **{
+                "apex-0-x": _value(fresh, "apex-0-x"),
+                "apex-0-y": _value(fresh, "apex-0-y"),
+            },
+        ),
+    ).get_data(as_text=True)
+    assert "Add another apex or ridge before deleting this one." in alone
+    assert "Apex 1" in alone
+    assert "<fieldset disabled>" not in alone
+    added = client.post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            built_method="experimental",
+            roof_height="3",
+            selected_interior="apex-0",
+            add_ridge="1",
+            **{
+                "apex-0-x": _value(fresh, "apex-0-x"),
+                "apex-0-y": _value(fresh, "apex-0-y"),
+            },
+        ),
+    ).get_data(as_text=True)
+    assert "Ridge 1" in added
+    assert "Apex 1" in added
+    assert "<fieldset disabled>" not in added
+    assert _value(added, "roof_height") == "3"
+    removed = client.post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            built_method="experimental",
+            roof_height="3",
+            selected_interior="apex-0",
+            delete_interior="1",
+            **{
+                "apex-0-x": _value(added, "apex-0-x"),
+                "apex-0-y": _value(added, "apex-0-y"),
+                "ridge-0-x": _value(added, "ridge-0-x"),
+                "ridge-0-y": _value(added, "ridge-0-y"),
+                "ridge-0-direction": _value(added, "ridge-0-direction"),
+                "ridge-0-length": _value(added, "ridge-0-length"),
+            },
+        ),
+    ).get_data(as_text=True)
+    assert "Apex 1" not in removed
+    assert "Ridge 1" in removed
+    assert "<fieldset disabled>" not in removed
+    roof = client.post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            built_method="experimental",
+            roof_height="3",
+            selected_interior="ridge-1",
+            **{
+                "ridge-0-x": "-1",
+                "ridge-0-y": "0",
+                "ridge-0-direction": "0",
+                "ridge-0-length": "4",
+                "ridge-1-x": "-3",
+                "ridge-1-y": "3",
+                "ridge-1-direction": "90",
+                "ridge-1-length": "6",
+            },
+        ),
+    ).get_data(as_text=True)
+    assert "terrain: True" in roof
+    assert "Apex 1" not in roof
+    assert "Ridge 1" in roof
+    assert "Ridge 2" in roof
+    assert _value(roof, "ridge-0-length") == "4"
+    assert _value(roof, "ridge-1-length") == "6"
+
+
+def test_the_l_form_keeps_a_different_height_on_each_ridge() -> None:
+    page = _client().post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            built_method="experimental",
+            roof_height="2",
+            selected_interior="ridge-1",
+            **{
+                "ridge-0-x": "0",
+                "ridge-0-y": "0",
+                "ridge-0-direction": "0",
+                "ridge-0-length": "4",
+                "ridge-0-height": "3",
+                "ridge-1-x": "-3.5",
+                "ridge-1-y": "3.5",
+                "ridge-1-direction": "90",
+                "ridge-1-length": "4",
+                "ridge-1-height": "1.5",
+            },
+        ),
+    ).get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "ridge height: 3.000 m" in page
+    assert _value(page, "ridge-0-height") == "3"
+    assert _value(page, "ridge-1-height") == "1.5"
+    assert "Apex 1" not in page
+
+
+def test_roof_height_box_keeps_rows_and_seeds_a_new_ridge() -> None:
+    kept = _client().post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            built_method="experimental",
+            roof_height="4",
+            selected_interior="ridge-0",
+            **{
+                "ridge-0-x": "0",
+                "ridge-0-y": "0",
+                "ridge-0-direction": "0",
+                "ridge-0-length": "4",
+                "ridge-0-height": "3",
+                "ridge-1-x": "-3.5",
+                "ridge-1-y": "3.5",
+                "ridge-1-direction": "90",
+                "ridge-1-length": "4",
+                "ridge-1-height": "1.5",
+            },
+        ),
+    ).get_data(as_text=True)
+    assert _value(kept, "roof_height") == "4"
+    assert _value(kept, "ridge-0-height") == "3"
+    assert _value(kept, "ridge-1-height") == "1.5"
+    assert "ridge height: 3.000 m" in kept
+    added = _client().post(
+        "/",
+        data=_rect_post(roof_height="4", add_ridge="1", **{"apex-0-height": "3"}),
+    ).get_data(as_text=True)
+    assert _value(added, "roof_height") == "4"
+    assert _value(added, "apex-0-height") == "3"
+    assert _value(added, "ridge-0-height") == "4"
+
+
+def test_a_blank_ridge_height_uses_the_roof_height_box() -> None:
+    data = _rect_post(roof_height="3", selected_interior="ridge-0")
+    del data["apex-0-x"]
+    del data["apex-0-y"]
+    data.update(
+        {
+            "ridge-0-x": "0",
+            "ridge-0-y": "0",
+            "ridge-0-direction": "0",
+            "ridge-0-length": "4",
+            "ridge-0-height": "",
+        }
+    )
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "terrain: True" in page
+    assert "ridge height: 3.000 m" in page
+    assert _value(page, "ridge-0-height") == "3"
+    for edge in range(4):
+        assert f"edge {edge}: pitch 45°" in page
+
+
 def test_the_l_keeps_the_same_interior_card() -> None:
     ell = _client().get("/?method=experimental&example=l-shape").get_data(as_text=True)
     assert "Add ridge" in ell
@@ -598,6 +769,35 @@ def test_the_rectangle_starts_with_both_reflections_checked() -> None:
     assert _checked(page, "hold-0")
     assert _checked(page, "hold-1")
     assert _value(page, "apex-0-x") == "0"
+
+
+def test_a_centered_ridge_can_leave_the_middle_with_symmetry_off() -> None:
+    data = _rect_post()
+    data.pop("apex-0-x")
+    data.pop("apex-0-y")
+    data.update(
+        {
+            "ridge-0-x": "1",
+            "ridge-0-y": "0.5",
+            "ridge-0-direction": "0",
+            "ridge-0-length": "2",
+            "was-ridge-0-x": "0",
+            "was-ridge-0-y": "0",
+            "was-ridge-0-direction": "0",
+            "was-ridge-0-length": "2",
+            "hold-0": "off",
+            "hold-1": "off",
+            "was-hold-0": "on",
+            "was-hold-1": "on",
+            "selected_interior": "ridge-0",
+        }
+    )
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert _value(page, "ridge-0-x") == "1"
+    assert _value(page, "ridge-0-y") == "0.5"
+    assert not _checked(page, "hold-0")
+    assert not _checked(page, "hold-1")
+    assert "terrain: True" in page
 
 
 def test_checking_one_reflection_adds_the_mirror_copy() -> None:

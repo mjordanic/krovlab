@@ -20,6 +20,7 @@ class InteriorRow:
     direction: str = "0"
     length: str = "2"
     selected: bool = False
+    height: str = ""
 
     @property
     def key(self) -> str:
@@ -62,6 +63,7 @@ def rows_from_form(form: Mapping[str, str]) -> list[InteriorRow]:
                 _num(form, f"apex-{index}-x"),
                 _num(form, f"apex-{index}-y"),
                 selected=selected == f"apex-{index}",
+                height=_height_field(form, f"apex-{index}-height"),
             )
         )
     for index in ridges:
@@ -74,6 +76,7 @@ def rows_from_form(form: Mapping[str, str]) -> list[InteriorRow]:
                 direction=_num(form, f"ridge-{index}-direction"),
                 length=_num(form, f"ridge-{index}-length", default="2"),
                 selected=selected == f"ridge-{index}",
+                height=_height_field(form, f"ridge-{index}-height"),
             )
         )
     if not any(row.selected for row in rows):
@@ -85,6 +88,7 @@ def rows_from_form(form: Mapping[str, str]) -> list[InteriorRow]:
             rows[0].direction,
             rows[0].length,
             selected=True,
+            height=rows[0].height,
         )
     return rows
 
@@ -95,13 +99,16 @@ def apply_interior_buttons(
     ring: Sequence[tuple[float, float]],
 ) -> tuple[list[InteriorRow], str]:
     """Add, delete, center, or mirror. The second value is a sentence, or empty."""
+    box = (form.get("roof_height") or "").strip()
     if form.get("add_apex"):
-        return _select(_append_apex(rows), f"apex-{_next_index(rows, 'apex')}"), ""
+        return _select(_append_apex(rows, box), f"apex-{_next_index(rows, 'apex')}"), ""
     if form.get("add_ridge"):
         return _select(
-            _append_ridge(rows, ring), f"ridge-{_next_index(rows, 'ridge')}"
+            _append_ridge(rows, ring, box), f"ridge-{_next_index(rows, 'ridge')}"
         ), ""
     if form.get("delete_interior"):
+        if len(rows) <= 1:
+            return rows, "Add another apex or ridge before deleting this one."
         return _delete(rows), ""
     if form.get("place_at_center"):
         rows = [_centered(row) if row.selected else row for row in rows]
@@ -113,7 +120,9 @@ def absolute_interiors(
 ) -> tuple[tuple[Apex, ...], tuple[Ridge, ...]]:
     mx, my = middle
     apexes = tuple(
-        Apex(mx + float(row.x), my + float(row.y)) for row in rows if row.kind == "apex"
+        Apex(mx + float(row.x), my + float(row.y), height=_optional_height(row))
+        for row in rows
+        if row.kind == "apex"
     )
     ridges = []
     for row in rows:
@@ -123,7 +132,9 @@ def absolute_interiors(
         half = float(row.length) / 2.0
         cx, cy = mx + float(row.x), my + float(row.y)
         dx, dy = math.cos(direction) * half, math.sin(direction) * half
-        ridges.append(Ridge(cx - dx, cy - dy, cx + dx, cy + dy))
+        ridges.append(
+            Ridge(cx - dx, cy - dy, cx + dx, cy + dy, height=_optional_height(row))
+        )
     return apexes, tuple(ridges)
 
 
@@ -144,6 +155,7 @@ def rows_from_used(
                 _fmt(apex.x - mx),
                 _fmt(apex.y - my),
                 selected=key == selected,
+                height="" if apex.height is None else _fmt(apex.height),
             )
         )
     for index, ridge in enumerate(ridges):
@@ -163,6 +175,7 @@ def rows_from_used(
                 direction=_fmt(angle),
                 length=_fmt(length),
                 selected=key == selected,
+                height="" if ridge.height is None else _fmt(ridge.height),
             )
         )
     if rows and not any(row.selected for row in rows):
@@ -175,23 +188,32 @@ def rows_from_used(
             first.direction,
             first.length,
             True,
+            height=first.height,
         )
     return rows
 
 
-def _append_apex(rows: list[InteriorRow]) -> list[InteriorRow]:
+def _append_apex(rows: list[InteriorRow], height: str) -> list[InteriorRow]:
     index = _next_index(rows, "apex")
-    return [*rows, InteriorRow("apex", index, "1", "0")]
+    return [*rows, InteriorRow("apex", index, "1", "0", height=height)]
 
 
 def _append_ridge(
-    rows: list[InteriorRow], ring: Sequence[tuple[float, float]]
+    rows: list[InteriorRow], ring: Sequence[tuple[float, float]], height: str
 ) -> list[InteriorRow]:
     index = _next_index(rows, "ridge")
     direction = _longest_wall_direction(ring)
     return [
         *rows,
-        InteriorRow("ridge", index, "0", "0", direction=_fmt(direction), length="2"),
+        InteriorRow(
+            "ridge",
+            index,
+            "0",
+            "0",
+            direction=_fmt(direction),
+            length="2",
+            height=height,
+        ),
     ]
 
 
@@ -205,7 +227,16 @@ def _delete(rows: list[InteriorRow]) -> list[InteriorRow]:
 
 
 def _centered(row: InteriorRow) -> InteriorRow:
-    return InteriorRow(row.kind, row.index, "0", "0", row.direction, row.length, True)
+    return InteriorRow(
+        row.kind,
+        row.index,
+        "0",
+        "0",
+        row.direction,
+        row.length,
+        True,
+        height=row.height,
+    )
 
 
 def _with_symmetry(
@@ -247,6 +278,7 @@ def _with_symmetry(
                     _fmt(image[1]),
                     _mirrored_direction(row, nx, ny),
                     row.length,
+                    height=row.height,
                 )
             )
         if not _images_inside(extra, points, point_inside):
@@ -298,7 +330,14 @@ def _mirrored_direction(row: InteriorRow, nx: float, ny: float) -> str:
 def _select(rows: list[InteriorRow], key: str) -> list[InteriorRow]:
     picked = [
         InteriorRow(
-            row.kind, row.index, row.x, row.y, row.direction, row.length, row.key == key
+            row.kind,
+            row.index,
+            row.x,
+            row.y,
+            row.direction,
+            row.length,
+            row.key == key,
+            height=row.height,
         )
         for row in rows
     ]
@@ -312,7 +351,16 @@ def _reindex(rows: list[InteriorRow]) -> list[InteriorRow]:
     out: list[InteriorRow] = []
     for row in rows:
         if row.kind == "apex":
-            out.append(InteriorRow("apex", apex, row.x, row.y, selected=row.selected))
+            out.append(
+                InteriorRow(
+                    "apex",
+                    apex,
+                    row.x,
+                    row.y,
+                    selected=row.selected,
+                    height=row.height,
+                )
+            )
             apex += 1
         else:
             out.append(
@@ -324,13 +372,21 @@ def _reindex(rows: list[InteriorRow]) -> list[InteriorRow]:
                     row.direction,
                     row.length,
                     row.selected,
+                    height=row.height,
                 )
             )
             ridge += 1
     if out and not any(row.selected for row in out):
         last = out[-1]
         out[-1] = InteriorRow(
-            last.kind, last.index, last.x, last.y, last.direction, last.length, True
+            last.kind,
+            last.index,
+            last.x,
+            last.y,
+            last.direction,
+            last.length,
+            True,
+            height=last.height,
         )
     return out
 
@@ -353,6 +409,19 @@ def _indexed(form: Mapping[str, str], kind: str) -> list[int]:
         except ValueError:
             continue
     return sorted(found)
+
+
+def _optional_height(row: InteriorRow) -> float | None:
+    if row.height.strip() == "":
+        return None
+    return float(row.height)
+
+
+def _height_field(form: Mapping[str, str], name: str) -> str:
+    raw = form.get(name)
+    if raw is None or raw.strip() == "":
+        return ""
+    return _num(form, name)
 
 
 def _num(form: Mapping[str, str], name: str, default: str = "0") -> str:

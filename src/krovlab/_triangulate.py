@@ -34,13 +34,62 @@ def triangulate(
     for index in range(n):
         required.append((index, (index + 1) % n))
     required = _split_through_points(points, required, n)
-    for edge in required:
-        step = _enforce(inserted, points, edge[0], edge[1])
-        if step is None:
-            return None
-        inserted = step
+    inserted = _split_edges_through_vertices(points, inserted)
+    for _ in range(4):
+        missing = [
+            edge for edge in required if not _has_edge(inserted, edge[0], edge[1])
+        ]
+        if not missing:
+            break
+        for edge in missing:
+            step = _enforce(inserted, points, edge[0], edge[1])
+            if step is None:
+                return None
+            inserted = _split_edges_through_vertices(points, step)
+    if any(not _has_edge(inserted, edge[0], edge[1]) for edge in required):
+        return None
     kept = [tri for tri in inserted if _positive_area(points, tri) > 1e-12]
     return kept or None
+
+
+def _split_edges_through_vertices(
+    points: list[Vertex], triangles: list[Triangle]
+) -> list[Triangle]:
+    """An edge that runs through another vertex is two edges."""
+    guard = 0
+    while guard < len(points) * len(points):
+        guard += 1
+        split_at: tuple[int, int, int] | None = None
+        seen: set[tuple[int, int]] = set()
+        for tri in triangles:
+            for start, end in _edges(tri):
+                key = (start, end) if start < end else (end, start)
+                if key in seen:
+                    continue
+                seen.add(key)
+                for index in range(len(points)):
+                    if index in (start, end):
+                        continue
+                    if _on_segment(points, index, start, end):
+                        split_at = (start, end, index)
+                        break
+                if split_at is not None:
+                    break
+            if split_at is not None:
+                break
+        if split_at is None:
+            return triangles
+        start, end, index = split_at
+        nxt: list[Triangle] = []
+        for tri in triangles:
+            if start in tri and end in tri and index not in tri:
+                third = next(vertex for vertex in tri if vertex not in (start, end))
+                nxt.append(_orient(points, (start, index, third)))
+                nxt.append(_orient(points, (index, end, third)))
+            elif not (start in tri and end in tri and index in tri):
+                nxt.append(tri)
+        triangles = nxt
+    return triangles
 
 
 def _split_through_points(

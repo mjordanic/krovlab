@@ -538,6 +538,7 @@ def test_dragging_an_apex_row_writes_its_offset() -> None:
     del fields["offset_y"]
     fields["apex-0-x"] = "0"
     fields["apex-0-y"] = "0"
+    fields["apex-0-height"] = "3"
     result = _run_editor(
         f"""
 editor.loadFields({json.dumps(fields)});
@@ -548,6 +549,7 @@ extra.releaseSubmits = editor.pointerUp();
     )
     assert float(result["fields"]["apex-0-x"]) == 2.0
     assert float(result["fields"]["apex-0-y"]) == 1.0
+    assert "apex-0-height" not in result["fields"]
     assert result["extra"]["releaseSubmits"] is True
 
 

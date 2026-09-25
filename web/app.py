@@ -352,6 +352,25 @@ def _form_after_method_switch(form: Mapping[str, str], method: str) -> dict[str,
     return out
 
 
+def _interior_card_disabled(
+    result: Roof | Project | Failure,
+    form: Mapping[str, str],
+    views: list[CellView],
+    method: str,
+) -> bool:
+    """Lock the card only when this footprint has nothing that can be placed.
+
+    A placement that does not roof stays editable, so the visitor can delete
+    the apex or move a ridge. A footprint that cannot be roofed at all stays
+    locked.
+    """
+    if not isinstance(result, Failure):
+        return False
+    if method != "experimental" or not views:
+        return True
+    return isinstance(_run_interiors(form, views, default_rows(), True), Failure)
+
+
 def _run_interiors(
     form: Mapping[str, str],
     views: list[CellView],
@@ -525,7 +544,8 @@ def _render_post(
         echo_snap=_echo_choice(form, "snap", {"on", "off"}),
         echo_holds=_echo_holds(form) if method == "skeleton" else [],
         interiors=interior_rows,
-        placement_disabled=isinstance(result, Failure),
+        placement_disabled=_interior_card_disabled(result, form, views, method),
+        fallback_roof_height=(form.get("roof_height") or "").strip(),
     )
 
 
@@ -621,6 +641,7 @@ def _render(
     echo_holds: list[tuple[int, str]] | None = None,
     interiors: list[InteriorRow] | None = None,
     placement_disabled: bool = False,
+    fallback_roof_height: str = "",
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -686,7 +707,7 @@ def _render(
         wall_hints=WALL_HINTS,
         agent_enabled=agent_enabled,
         method=method,
-        roof_height=_shown_roof_height(method, cells, result),
+        roof_height=fallback_roof_height or _shown_roof_height(method, cells, result),
         dxf_units=dxf_units,
         dxf_message=dxf_message,
         needs_update=needs_update,
@@ -1030,8 +1051,7 @@ def _symmetry_rows(
             continue
         nx, ny, c = parsed
         lies_on = abs(nx * (mx + dx) + ny * (my + dy) - c) <= 1e-5
-        at_center = abs(dx) <= 1e-6 and abs(dy) <= 1e-6
-        checked = holds is None or at_center or (index < len(holds) and holds[index])
+        checked = holds is None or (index < len(holds) and holds[index])
         rows.append({"index": index, "checked": checked, "lies_on": lies_on})
     return rows
 

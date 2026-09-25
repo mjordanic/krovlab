@@ -24,7 +24,13 @@ from pathlib import Path
 from krovlab._input import check_footprint
 from krovlab._offset import apply_overhang
 from krovlab._skeleton import skeleton as _straight_skeleton
-from krovlab._triangulate import point_inside, segments_cross, triangulate
+from krovlab._triangulate import (
+    _edges,
+    _flip,
+    point_inside,
+    segments_cross,
+    triangulate,
+)
 from krovlab.roof import (
     Arc,
     ArcKind,
@@ -1020,20 +1026,26 @@ def _reflects_onto_itself(points: list[Vertex], nx: float, ny: float, c: float) 
 
 @dataclass(frozen=True)
 class Apex:
-    """One interior point, in footprint metres."""
+    """One interior point, in footprint metres. ``height`` is above the eaves."""
 
     x: float
     y: float
+    height: float | None = None
 
 
 @dataclass(frozen=True)
 class Ridge:
-    """One interior segment, in footprint metres. Both ends sit at roof height."""
+    """One level interior segment, in footprint metres.
+
+    ``height`` is above the eaves. Both ends share it. ``None`` uses the
+    roof height passed to :func:`roof_from_interiors`.
+    """
 
     x0: float
     y0: float
     x1: float
     y1: float
+    height: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1123,6 +1135,7 @@ def _pull_interiors(
                 Apex(
                     (1 - t) * a.x + t * b.x,
                     (1 - t) * a.y + t * b.y,
+                    height=_blend_height(a.height, b.height, t, roof_height),
                 )
                 for a, b in zip(anchor_apexes, placed_apexes, strict=True)
             )
@@ -1134,6 +1147,7 @@ def _pull_interiors(
                     (1 - t) * a.y0 + t * b.y0,
                     (1 - t) * a.x1 + t * b.x1,
                     (1 - t) * a.y1 + t * b.y1,
+                    height=_blend_height(a.height, b.height, t, roof_height),
                 )
                 for a, b in zip(anchor_ridges, placed_ridges, strict=True)
             )
@@ -1190,27 +1204,47 @@ def _build_interiors(
 ) -> InteriorRoof | Failure:
     n = len(ring)
     apex_points = [(apex.x, apex.y) for apex in apexes]
+    apex_heights = [_placed_height(apex.height, roof_height) for apex in apexes]
     ridge_points: list[Vertex] = []
+    ridge_heights: list[float] = []
     constraints: list[tuple[int, int]] = []
     snapped: list[Ridge] = []
     for ridge in ridges:
+        ridge_height = _placed_height(ridge.height, roof_height)
+        earlier = len(ridge_points)
         ends: list[int] = []
         for x, y in ((ridge.x0, ridge.y0), (ridge.x1, ridge.y1)):
             joined = _joined_apex(apex_points, x, y)
             if joined is not None:
+                if abs(apex_heights[joined] - ridge_height) > 1e-6:
+                    return _unliftable("a joined ridge end shares the apex height")
                 ends.append(n + joined)
                 continue
             if not point_inside(x, y, ring):
                 return _unliftable("a ridge end stays inside the footprint")
-            if any(math.hypot(x - px, y - py) < 1e-6 for px, py in ridge_points):
-                ends.append(n + len(apex_points) + _index_of(ridge_points, (x, y)))
-            else:
-                ends.append(n + len(apex_points) + len(ridge_points))
-                ridge_points.append((x, y))
+            meeting = _meeting_end(
+                ridge_points, ridge_heights, earlier, x, y, ridge_height
+            )
+            if isinstance(meeting, Failure):
+                return meeting
+            if meeting is not None:
+                ends.append(n + len(apex_points) + meeting)
+                continue
+            ends.append(n + len(apex_points) + len(ridge_points))
+            ridge_points.append((x, y))
+            ridge_heights.append(ridge_height)
         if ends[0] == ends[1]:
             return _unliftable("a ridge needs two distinct ends")
         constraints.append((ends[0], ends[1]))
-        snapped.append(ridge)
+        snapped.append(
+            Ridge(
+                ridge.x0,
+                ridge.y0,
+                ridge.x1,
+                ridge.y1,
+                height=ridge_height,
+            )
+        )
     for x, y in apex_points:
         if not point_inside(x, y, ring):
             return _unliftable("an apex stays inside the footprint")
@@ -1224,31 +1258,144 @@ def _build_interiors(
             ):
                 return _unliftable("ridges do not cross")
     interior = [*apex_points, *ridge_points]
+    interior_heights = [*apex_heights, *ridge_heights]
     if not interior:
         return _unliftable("the roof needs an apex or a ridge")
     triangles = triangulate(ring, interior, constraints)
     if triangles is None:
         return _unliftable("the interior could not be cut into triangles")
-    if any(min(tri) >= n for tri in triangles):
-        return _unliftable("the interior could not be cut into triangles")
     nodes = (
         *tuple(Node(x, y, 0.0) for x, y in ring),
-        *tuple(Node(x, y, roof_height) for x, y in interior),
+        *tuple(
+            Node(x, y, height)
+            for (x, y), height in zip(interior, interior_heights, strict=True)
+        ),
     )
-    faces, arcs = _faces_from_triangles(nodes, triangles, n)
-    if faces is None or arcs is None:
+    locked: set[tuple[int, int]] = set()
+    for start, end in constraints:
+        locked.add((start, end) if start < end else (end, start))
+    for index in range(n):
+        nxt = (index + 1) % n
+        locked.add((index, nxt) if index < nxt else (nxt, index))
+    built = _terrain_from_flips(
+        [*ring, *interior],
+        triangles,
+        locked,
+        nodes,
+        interior_heights,
+        n,
+        footprint,
+        eave_height,
+        tuple(
+            Apex(apex.x, apex.y, height=height)
+            for apex, height in zip(apexes, apex_heights, strict=True)
+        ),
+        tuple(snapped),
+    )
+    if built is None:
         return _unliftable("the interior could not be cut into triangles")
-    built = _finish_roof(nodes, faces, arcs, footprint, [], eave_height)
-    return InteriorRoof(
-        nodes=built.nodes,
-        faces=built.faces,
-        arcs=built.arcs,
-        ridge_height=built.ridge_height,
-        total_sloped_area=built.total_sloped_area,
-        validity=built.validity,
-        apexes=apexes,
-        ridges=tuple(snapped),
-    )
+    return built
+
+
+def _terrain_from_flips(
+    points: list[Vertex],
+    triangles: list[tuple[int, int, int]],
+    locked: set[tuple[int, int]],
+    nodes: tuple[Node, ...],
+    heights: list[float],
+    boundary: int,
+    footprint: list[Vertex],
+    eave_height: float,
+    apexes: tuple[Apex, ...],
+    ridges: tuple[Ridge, ...],
+) -> InteriorRoof | None:
+    """The triangulation, or a nearby flip, when that roof is a terrain."""
+
+    def assemble(
+        mesh: list[tuple[int, int, int]],
+    ) -> InteriorRoof | None:
+        if _flat_interior_triangle(mesh, heights, boundary):
+            return None
+        faces, arcs = _faces_from_triangles(nodes, mesh, boundary)
+        if faces is None or arcs is None:
+            return None
+        built = _finish_roof(nodes, faces, arcs, footprint, [], eave_height)
+        return InteriorRoof(
+            nodes=built.nodes,
+            faces=built.faces,
+            arcs=built.arcs,
+            ridge_height=built.ridge_height,
+            total_sloped_area=built.total_sloped_area,
+            validity=built.validity,
+            apexes=apexes,
+            ridges=ridges,
+        )
+
+    first = assemble(triangles)
+    if isinstance(first, InteriorRoof) and first.validity.is_terrain:
+        return first
+    seen = {_mesh_key(triangles)}
+    queue = [triangles]
+    while queue and len(seen) < 48:
+        current = queue.pop(0)
+        flipped: set[tuple[int, int]] = set()
+        for tri in current:
+            for start, end in _edges(tri):
+                edge = (start, end) if start < end else (end, start)
+                if edge in locked or edge in flipped:
+                    continue
+                flipped.add(edge)
+                nxt = _flip(current, points, start, end)
+                if nxt is None:
+                    continue
+                key = _mesh_key(nxt)
+                if key in seen:
+                    continue
+                seen.add(key)
+                roof = assemble(nxt)
+                if isinstance(roof, InteriorRoof) and roof.validity.is_terrain:
+                    return roof
+                queue.append(nxt)
+                if len(seen) >= 48:
+                    break
+    return first
+
+
+def _mesh_key(
+    triangles: list[tuple[int, int, int]],
+) -> tuple[tuple[int, int, int], ...]:
+    ordered: list[tuple[int, int, int]] = []
+    for one, two, three in triangles:
+        a, b, c = sorted((one, two, three))
+        ordered.append((a, b, c))
+    return tuple(sorted(ordered))
+
+
+def _blend_height(
+    previous: float | None, requested: float | None, t: float, roof_height: float
+) -> float:
+    start = roof_height if previous is None else previous
+    end = roof_height if requested is None else requested
+    return (1 - t) * start + t * end
+
+
+def _placed_height(height: float | None, roof_height: float) -> float:
+    if height is None:
+        return roof_height
+    return float(height)
+
+
+def _flat_interior_triangle(
+    triangles: list[tuple[int, int, int]], heights: list[float], boundary: int
+) -> bool:
+    """A triangle of interior points at one height is a flat cap."""
+    for tri in triangles:
+        if min(tri) < boundary:
+            continue
+        used = [heights[index - boundary] for index in tri]
+        if max(used) - min(used) <= 1e-6:
+            return True
+    return False
 
 
 def _joined_apex(apexes: list[Vertex], x: float, y: float) -> int | None:
@@ -1262,11 +1409,29 @@ def _joined_apex(apexes: list[Vertex], x: float, y: float) -> int | None:
     return best
 
 
-def _index_of(points: list[Vertex], point: Vertex) -> int:
-    for index, (x, y) in enumerate(points):
-        if math.hypot(x - point[0], y - point[1]) < 1e-6:
-            return index
-    return 0
+def _meeting_end(
+    points: list[Vertex],
+    heights: list[float],
+    earlier: int,
+    x: float,
+    y: float,
+    height: float,
+) -> int | Failure | None:
+    """The ridge end already placed here, or a Failure when the heights differ."""
+    exact = next(
+        (
+            index
+            for index, (px, py) in enumerate(points)
+            if math.hypot(x - px, y - py) < 1e-6
+        ),
+        None,
+    )
+    near = exact if exact is not None else _joined_apex(points[:earlier], x, y)
+    if near is None:
+        return None
+    if abs(heights[near] - height) > 1e-6:
+        return _unliftable("ridge ends that meet share one height")
+    return near
 
 
 def _faces_from_triangles(
@@ -1360,7 +1525,9 @@ def _arc_kind(nodes: tuple[Node, ...], start: int, end: int, boundary: int) -> A
         return "eave"
     a, b = nodes[start], nodes[end]
     if a.height > 1e-6 and b.height > 1e-6:
-        return "ridge"
+        if abs(a.height - b.height) <= 1e-6:
+            return "ridge"
+        return "hip"
     corner = start if start < boundary else end
     ring = [(nodes[i].x, nodes[i].y) for i in range(boundary)]
     return "hip" if _convex_at(ring, corner) else "valley"

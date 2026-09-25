@@ -408,8 +408,14 @@
                 m
               </label>
               {% endif %}
+              <label>
+                Height
+                <input name="{{ row.kind }}-{{ row.index }}-height" value="{{ row.height }}">
+                m above the eaves
+              </label>
               <input type="hidden" name="was-{{ row.kind }}-{{ row.index }}-x" value="{{ row.x }}">
               <input type="hidden" name="was-{{ row.kind }}-{{ row.index }}-y" value="{{ row.y }}">
+              <input type="hidden" name="was-{{ row.kind }}-{{ row.index }}-height" value="{{ row.height }}">
               {% if row.kind == "ridge" %}
               <input type="hidden" name="was-ridge-{{ row.index }}-direction" value="{{ row.direction }}">
               <input type="hidden" name="was-ridge-{{ row.index }}-length" value="{{ row.length }}">
@@ -434,7 +440,7 @@
             <p>
               <label>
                 <input type="checkbox" name="hold-{{ item.index }}" value="on"{% if item.checked %} checked{% endif %}>
-                Hold this reflection
+                Mirror across this reflection
               </label>
               <input type="hidden" name="hold-{{ item.index }}" value="off">
               <input type="hidden" name="was-hold-{{ item.index }}" value="{{ 'on' if item.checked else 'off' }}">
