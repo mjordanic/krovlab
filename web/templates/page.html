@@ -219,9 +219,9 @@
       </p>
       <ul>
         {% if method == "experimental" %}
-        <li>Load an example this method can roof: a rectangle, an L, one face over two walls, an overhang, an eave height, or a plan that crosses itself.</li>
+        <li>Load an example this method can roof: a rectangle, an L, an overhang, an eave height, or a plan that crosses itself.</li>
         <li>Roof height, overhang, and eave height still apply. Pitch, gable, knee, gambrel, holes, dormers, and extra cells do not.</li>
-        <li>Move the apex by typing an offset, in metres, from the middle of the footprint. Where a ridge is offered, choose it.</li>
+        <li>Add an apex or a ridge, then move it by typing an offset, in metres, from the middle of the footprint.</li>
         {% else %}
         <li>Load a catalog example (hip, gable, shed, mixed pitches, knee, gambrel, L-shape, courtyard, overhang, two cells, a dormer, a named failure).</li>
         <li>Select a wall or corner on the plan, drag vertices, add a detached cell, add a cell on a selected wall, split a wall with a vertex, or delete a cell.</li>
@@ -377,30 +377,59 @@
           </p>
           {% endif %}
           {% if show_placement and cell.index == 0 %}
-          <fieldset>
-            <legend>Apex</legend>
+          <fieldset {% if placement_disabled %}disabled{% endif %}>
+            <legend>Interior</legend>
+            <input type="hidden" name="built_method" value="experimental">
+            {% for row in interiors %}
+            <p>
+              <label>
+                <input type="radio" name="selected_interior" value="{{ row.key }}"{% if row.selected %} checked{% endif %}>
+                {{ row.name }}
+              </label>
+              <label>
+                Offset x
+                <input name="{{ row.kind }}-{{ row.index }}-x" value="{{ row.x }}">
+                m from the middle
+              </label>
+              <label>
+                Offset y
+                <input name="{{ row.kind }}-{{ row.index }}-y" value="{{ row.y }}">
+                m from the middle
+              </label>
+              {% if row.kind == "ridge" %}
+              <label>
+                Direction
+                <input name="ridge-{{ row.index }}-direction" value="{{ row.direction }}">
+                °
+              </label>
+              <label>
+                Length
+                <input name="ridge-{{ row.index }}-length" value="{{ row.length }}">
+                m
+              </label>
+              {% endif %}
+              <input type="hidden" name="was-{{ row.kind }}-{{ row.index }}-x" value="{{ row.x }}">
+              <input type="hidden" name="was-{{ row.kind }}-{{ row.index }}-y" value="{{ row.y }}">
+              {% if row.kind == "ridge" %}
+              <input type="hidden" name="was-ridge-{{ row.index }}-direction" value="{{ row.direction }}">
+              <input type="hidden" name="was-ridge-{{ row.index }}-length" value="{{ row.length }}">
+              {% endif %}
+            </p>
+            {% endfor %}
+            {% if placement_disabled %}
+            <p class="hint">This footprint has no roof to place.</p>
+            {% endif %}
+            <p>
+              <button type="submit" name="add_apex" value="1">Add apex</button>
+              <button type="submit" name="add_ridge" value="1">Add ridge</button>
+              <button type="submit" name="delete_interior" value="1">Delete</button>
+              <button type="submit" name="place_at_center" value="1">Place at the center</button>
+            </p>
             <input type="hidden" name="mid_x" value="{{ mid_x }}">
             <input type="hidden" name="mid_y" value="{{ mid_y }}">
             {% for axis in axes %}
             <input type="hidden" name="axis-{{ loop.index0 }}" value="{{ axis }}">
             {% endfor %}
-            {% if show_ridge %}
-            <p>
-              <label>
-                <input type="radio" name="style" value="apex"{% if style != "ridge" %} checked{% endif %}>
-                Apex
-              </label>
-              <label>
-                <input type="radio" name="style" value="ridge"{% if style == "ridge" %} checked{% endif %}>
-                Ridge
-              </label>
-            </p>
-            <input type="hidden" name="ridge_hx" value="{{ ridge_hx }}">
-            <input type="hidden" name="ridge_hy" value="{{ ridge_hy }}">
-            {% endif %}
-            {% if ridge_note %}
-            <p class="hint" id="ridge-note">{{ ridge_note }}</p>
-            {% endif %}
             {% for item in symmetry %}
             <p>
               <label>
@@ -408,9 +437,12 @@
                 Hold this reflection
               </label>
               <input type="hidden" name="hold-{{ item.index }}" value="off">
+              <input type="hidden" name="was-hold-{{ item.index }}" value="{{ 'on' if item.checked else 'off' }}">
             </p>
-            <p class="hint">{% if item.lies_on %}The offset lies on this reflection.{% else %}The offset leaves this reflection.{% endif %}</p>
             {% endfor %}
+            {% if not symmetry %}
+            <p class="hint">This footprint has no reflection.</p>
+            {% endif %}
             {% if symmetry_note %}
             <p class="hint" id="symmetry-note">{{ symmetry_note }}</p>
             {% endif %}
@@ -424,43 +456,9 @@
               </label>
               <input type="hidden" name="snap" value="off">
             </p>
-            <p>
-              <label>
-                Offset x
-                <input name="offset_x" value="{{ offset_x }}">
-                m from the middle
-              </label>
-              <label>
-                Offset y
-                <input name="offset_y" value="{{ offset_y }}">
-                m from the middle
-              </label>
-            </p>
-            <p>
-              <button type="submit" name="place_at_center" value="1">Place at the center</button>
-            </p>
-            <p>
-              <label>
-                Move x
-                <input name="move_x" value="0">
-                m
-              </label>
-              <label>
-                Move y
-                <input name="move_y" value="0">
-                m
-              </label>
-              <button type="submit" name="move_apex" value="1">Move</button>
-            </p>
-            <p>
-              <label>
-                Wall
-                <input name="toward_wall" value="1">
-              </label>
-              <button type="submit" name="step_toward_wall" value="1">1 m toward wall</button>
-            </p>
           </fieldset>
-          {% elif keep_offset and cell.index == 0 %}
+          {% elif cell.index == 0 %}
+          <input type="hidden" name="built_method" value="skeleton">
           <input type="hidden" name="offset_x" value="{{ offset_x }}">
           <input type="hidden" name="offset_y" value="{{ offset_y }}">
           {% if echo_style %}

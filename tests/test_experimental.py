@@ -13,7 +13,7 @@ import pytest
 from shapely.geometry import Point, Polygon  # type: ignore[import-untyped]
 
 from krovlab import Failure, Roof, roof
-from krovlab.experimental import Placement, moved_toward_wall, roof_from_face_graph
+from krovlab.experimental import Placement, roof_from_face_graph
 
 L_SHAPE = [
     (0.0, 0.0),
@@ -173,23 +173,6 @@ def test_offset_moves_the_apex_and_place_at_center_returns_it() -> None:
     assert isinstance(centered, Roof)
     back = max(centered.nodes, key=lambda node: node.height)
     assert (back.x, back.y) == pytest.approx((5.0, 3.0))
-
-
-def test_one_metre_toward_wall_2_puts_the_apex_at_6_3() -> None:
-    moved = moved_toward_wall(RECTANGLE, 2)
-    assert isinstance(moved, Placement)
-    result = roof_from_face_graph(RECTANGLE, roof_height=3.0, placement=moved)
-    assert isinstance(result, Roof)
-    apex = max(result.nodes, key=lambda node: node.height)
-    assert (apex.x, apex.y, apex.height) == pytest.approx((6.0, 3.0, 3.0))
-
-
-def test_a_move_adds_to_the_current_offset() -> None:
-    moved = Placement(dx=1.0, dy=0.0).added(0.5, -1.0)
-    result = roof_from_face_graph(RECTANGLE, roof_height=3.0, placement=moved)
-    assert isinstance(result, Roof)
-    apex = max(result.nodes, key=lambda node: node.height)
-    assert (apex.x, apex.y) == pytest.approx((6.5, 2.0))
 
 
 def test_overhang_is_applied_before_the_clearance_midpoint() -> None:

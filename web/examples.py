@@ -197,14 +197,6 @@ def load_experimental_examples() -> dict[str, Example]:
             cells=(Cell(L_SHAPE, 45.0),),
         ),
         Example(
-            slug="l-one-face",
-            label="One face over two walls",
-            group="Face graph",
-            caption="The same L, with the two inner walls named as one face.",
-            cells=(Cell(L_SHAPE, 45.0),),
-            face_graph=((0,), (1,), (2, 3), (4,), (5,)),
-        ),
-        Example(
             slug="eaves-overhang",
             label="Eaves overhang",
             group="Footprint",

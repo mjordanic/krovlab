@@ -14,11 +14,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
 from krovlab.experimental import (
+    InteriorRoof,
     PlacedRoof,
     Placement,
-    moved_toward_wall,
     reflection_axes,
     roof_from_face_graph,
+    roof_from_interiors,
 )
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
@@ -33,6 +34,15 @@ from web.examples import (
     load_experimental_examples,
 )
 from web.figures import input_footprint
+from web.interior_form import (
+    InteriorRow,
+    absolute_interiors,
+    apply_interior_buttons,
+    default_rows,
+    previous_rows,
+    rows_from_form,
+    rows_from_used,
+)
 from web.mesh import glb_bytes, obj_bytes
 
 
@@ -116,6 +126,16 @@ def create_app(
                 result = _run_experimental_example(example)
             else:
                 result = _run_cells(list(example.cells), list(example.dormers))
+            interiors = default_rows()
+            if isinstance(result, InteriorRoof) and example.cells:
+                ring = [(float(x), float(y)) for x, y in example.cells[0].footprint]
+                middle = _interior_middle(
+                    ring, _cell_views_from_cells(example.cells)[0]
+                )
+                if middle is not None:
+                    interiors = rows_from_used(
+                        result.apexes, result.ridges, middle, "apex-0"
+                    )
             return _render(
                 example,
                 _example_groups(catalog),
@@ -131,7 +151,9 @@ def create_app(
                 ),
                 offset_x="0",
                 offset_y="0",
-                show_placement=_has_interior(result) and method == "experimental",
+                show_placement=method == "experimental" and bool(example.cells),
+                interiors=interiors,
+                placement_disabled=isinstance(result, Failure),
                 snap_on=True,
             )
         method = _posted_method(request.form)
@@ -294,6 +316,109 @@ def _example_groups(
     return groups
 
 
+def _form_after_method_switch(form: Mapping[str, str], method: str) -> dict[str, str]:
+    """Keep Cell 1's outline and drop the roof knobs of the method just left."""
+    out: dict[str, str] = {}
+    wall_count = 0
+    while f"outer-x-{wall_count}" in form:
+        wall_count += 1
+    for key, value in form.items():
+        if key.startswith(("cell-", "dormer-", "apex-", "ridge-", "hold-", "was-")):
+            continue
+        if key in {
+            "use_overhang",
+            "use_eave_height",
+            "use_hole",
+            "style",
+            "offset_x",
+            "offset_y",
+            "roof_height",
+            "make_symmetric",
+            "add_apex",
+            "add_ridge",
+            "delete_interior",
+            "place_at_center",
+        }:
+            continue
+        if key.startswith("type-") or key.startswith("pitch-"):
+            continue
+        out[key] = value
+    for index in range(wall_count):
+        out[f"type-{index}"] = "hip"
+        out[f"pitch-{index}"] = "45"
+    out["snap"] = "on"
+    out["built_method"] = method
+    out["method"] = method
+    return out
+
+
+def _run_interiors(
+    form: Mapping[str, str],
+    views: list[CellView],
+    rows: list[InteriorRow],
+    reset: bool,
+) -> Roof | Failure:
+    if not views:
+        return Failure(kind="degenerate", reason="a footprint needs an outer ring")
+    ring = [(float(x), float(y)) for x, y in views[0].footprint]
+    placed = _placed_ring(ring, views[0])
+    if placed is None:
+        return Failure(
+            kind="unliftable",
+            reason="no interior point from which the faces can fan",
+        )
+    expanded, middle = placed
+    apexes, ridges = absolute_interiors(default_rows() if reset else rows, middle)
+    previous = None if reset else previous_rows(form)
+    previous_apexes = previous_ridges = None
+    if previous is not None:
+        previous_apexes, previous_ridges = absolute_interiors(previous, middle)
+    height_raw = (form.get("roof_height") or "").strip()
+    roof_height = float(height_raw) if height_raw else None
+    eave = float(views[0].eave_height) if views[0].use_eave else 0.0
+    return roof_from_interiors(
+        expanded,
+        apexes,
+        ridges,
+        eave_height=eave,
+        roof_height=roof_height,
+        previous_apexes=previous_apexes,
+        previous_ridges=previous_ridges,
+    )
+
+
+def _placed_ring(
+    ring: list[tuple[float, float]], cell: CellView
+) -> tuple[list[tuple[float, float]], tuple[float, float]] | None:
+    from krovlab._offset import apply_overhang
+    from krovlab.experimental import _clearance_midpoint
+
+    expanded = ring
+    if cell.use_overhang:
+        try:
+            overhang = float(cell.overhang)
+        except ValueError:
+            overhang = 0.0
+        if overhang:
+            got = apply_overhang(ring, [], overhang)
+            if isinstance(got, Failure):
+                return None
+            expanded = [(float(x), float(y)) for x, y in got[0]]
+    middle = _clearance_midpoint(expanded)
+    if middle is None:
+        return None
+    return expanded, middle
+
+
+def _interior_middle(
+    ring: list[tuple[float, float]], cell: CellView
+) -> tuple[float, float] | None:
+    placed = _placed_ring(ring, cell)
+    if placed is None:
+        return None
+    return placed[1]
+
+
 def _render_post(
     form: Mapping[str, str],
     example: Example,
@@ -306,6 +431,8 @@ def _render_post(
     set_pitch = form.get("set_pitch") or "45"
     edit_coordinates = bool(form.get("edit_coordinates"))
     method = _posted_method(form)
+    if form.get("built_method") not in (None, "", method):
+        form = _form_after_method_switch(form, method)
     views, parsed = _posted_cells(form, set_pitch)
     dormer_views, parsed_dormers = _posted_dormers(form)
     face_graph = _posted_face_graph(form)
@@ -327,17 +454,25 @@ def _render_post(
             selected_cell = str(index)
             reset_offset = True
     result: Roof | Project | Failure
-    placement: Placement | Failure | None = None
+    interior_rows = default_rows()
+    symmetry_fit = ""
     if method == "experimental":
-        placement = (
-            Placement(0.0, 0.0) if reset_offset else _placement_from_form(form)
-        )
-        if isinstance(placement, Failure):
-            result = placement
-        else:
-            result = _run_experimental_from_form(
-                form, face_graph, example, placement=placement
+        interior_rows = default_rows() if reset_offset else rows_from_form(form)
+        ring = [(float(x), float(y)) for x, y in views[0].footprint] if views else []
+        if not reset_offset:
+            interior_rows, symmetry_fit = apply_interior_buttons(
+                form, interior_rows, ring
             )
+        result = _run_interiors(form, views, interior_rows, reset_offset)
+        if isinstance(result, InteriorRoof):
+            middle = _interior_middle(ring, views[0])
+            selected = next(
+                (row.key for row in interior_rows if row.selected), "apex-0"
+            )
+            if middle is not None:
+                interior_rows = rows_from_used(
+                    result.apexes, result.ridges, middle, selected
+                )
     elif isinstance(parsed, Failure):
         result = parsed
     elif isinstance(parsed_dormers, Failure):
@@ -346,11 +481,7 @@ def _render_post(
         result = _run_cells(parsed, parsed_dormers)
     shown_cells = views
     shown_dormers = dormer_views
-    used_graph = (
-        face_graph
-        if face_graph is not None
-        else _example_face_graph(example)
-    )
+    used_graph = face_graph if face_graph is not None else _example_face_graph(example)
     posted_height = form.get("roof_height")
     mesh_roof_height = (
         posted_height.strip()
@@ -363,7 +494,7 @@ def _render_post(
         offset_x, offset_y = _fmt_offset(result.used_dx), _fmt_offset(result.used_dy)
     else:
         offset_x, offset_y = _echo_offset(form)
-    show_placement = method == "experimental" and _has_interior(result)
+    show_placement = method == "experimental" and bool(views)
     return _render(
         example,
         groups,
@@ -389,10 +520,12 @@ def _render_post(
         snap_on=_snap_on(form, reset=reset_offset),
         ridge_note=_ridge_note(form, result, reset=reset_offset),
         holds=_shown_holds(form, reset=reset_offset),
-        symmetry_note=_symmetry_note(form, reset=reset_offset),
+        symmetry_note=symmetry_fit or _symmetry_note(form, reset=reset_offset),
         echo_style=_echo_choice(form, "style", {"apex", "ridge"}),
         echo_snap=_echo_choice(form, "snap", {"on", "off"}),
         echo_holds=_echo_holds(form) if method == "skeleton" else [],
+        interiors=interior_rows,
+        placement_disabled=isinstance(result, Failure),
     )
 
 
@@ -486,6 +619,8 @@ def _render(
     echo_style: str = "",
     echo_snap: str = "",
     echo_holds: list[tuple[int, str]] | None = None,
+    interiors: list[InteriorRow] | None = None,
+    placement_disabled: bool = False,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -510,13 +645,9 @@ def _render(
         draw_overhang,
         extra_footprints,
     )
-    mid_x, mid_y, axes = _apex_frame(
-        result, draw_footprint if show_placement else []
-    )
+    mid_x, mid_y, axes = _apex_frame(result, draw_footprint if show_placement else [])
     show_ridge = (
-        show_placement
-        and isinstance(result, PlacedRoof)
-        and result.offers_ridge
+        show_placement and isinstance(result, PlacedRoof) and result.offers_ridge
     )
     style = "apex"
     ridge_hx = "0"
@@ -579,6 +710,8 @@ def _render(
         echo_style=echo_style,
         echo_snap=echo_snap,
         echo_holds=echo_holds or [],
+        interiors=interiors if interiors is not None else default_rows(),
+        placement_disabled=placement_disabled,
     )
 
 
@@ -647,10 +780,8 @@ def _default_example(method: str) -> str:
 
 def _run_experimental_example(example: Example) -> Roof | Failure:
     cell = example.cells[0]
-    graph = _example_face_graph(example)
-    return roof_from_face_graph(
+    return roof_from_interiors(
         list(cell.footprint),
-        graph,
         overhang=cell.overhang,
         eave_height=cell.eave_height,
     )
@@ -697,9 +828,6 @@ def _apex_frame(
     result: Roof | Project | Failure,
     footprint: list[tuple[Any, Any]],
 ) -> tuple[str, str, list[str]]:
-    if not isinstance(result, PlacedRoof) or not result.nodes:
-        return "", "", []
-    apex_x, apex_y = _placed_plan(result)
     points: list[tuple[float, float]] = []
     for x, y in footprint:
         try:
@@ -710,11 +838,14 @@ def _apex_frame(
         f"{_fmt_offset(nx)},{_fmt_offset(ny)},{_fmt_offset(c)}"
         for nx, ny, c in reflection_axes(points)
     ]
-    return (
-        _fmt_offset(apex_x - result.used_dx),
-        _fmt_offset(apex_y - result.used_dy),
-        axes,
-    )
+    if len(points) < 3:
+        return "", "", axes
+    from krovlab.experimental import _clearance_midpoint
+
+    middle = _clearance_midpoint(points)
+    if middle is None:
+        return "", "", axes
+    return _fmt_offset(middle[0]), _fmt_offset(middle[1]), axes
 
 
 def _placed_plan(result: PlacedRoof) -> tuple[float, float]:
@@ -804,9 +935,7 @@ def _held_lines(
 def _hold_flags(
     form: Mapping[str, str], axes: list[tuple[float, float, float]]
 ) -> list[bool]:
-    lines = [
-        line for line in _held_lines(form, axes) if math.isfinite(line[0])
-    ]
+    lines = [line for line in _held_lines(form, axes) if math.isfinite(line[0])]
     return [any(_same_axis(line, axis) for line in lines) for axis in axes]
 
 
@@ -850,11 +979,7 @@ def _project_offset(
 
 def _with_holds(form: Mapping[str, str], placement: Placement) -> Placement:
     axes = reflection_axes(_form_points(form))
-    mask = (
-        [True] * len(axes)
-        if form.get("make_symmetric")
-        else _hold_flags(form, axes)
-    )
+    mask = [True] * len(axes) if form.get("make_symmetric") else _hold_flags(form, axes)
     if not any(mask):
         return placement
     dx, dy = _project_offset(placement.dx, placement.dy, axes, mask)
@@ -924,12 +1049,7 @@ def _echo_offset(form: Mapping[str, str]) -> tuple[str, str]:
     )
 
 
-_OFFSET_REASON = (
-    "placement offset must be finite metres from the clearance midpoint"
-)
-_WALL_REASON = (
-    "wall number must be one of the walls on the page, starting at Wall 1"
-)
+_OFFSET_REASON = "placement offset must be finite metres from the clearance midpoint"
 
 
 def _offset_pair(
@@ -967,30 +1087,6 @@ def _placement_from_form(form: Mapping[str, str]) -> Placement | Failure:
         if isinstance(pair, Failure):
             return pair
         placement = Placement(dx=pair[0], dy=pair[1], style=style)
-        if form.get("move_apex"):
-            move = _offset_pair(form, "move_x", "move_y")
-            if isinstance(move, Failure):
-                return move
-            placement = placement.added(move[0], move[1])
-        elif form.get("step_toward_wall"):
-            raw = (form.get("toward_wall") or "").strip()
-            try:
-                wall_number = int(raw)
-            except ValueError:
-                return Failure(kind="degenerate", reason=_WALL_REASON)
-            ring = _posted_ring(form, "outer")
-            if ring is None:
-                return Failure(kind="degenerate", reason="a footprint needs an outer ring")
-            points: list[tuple[float, float]] = []
-            for x, y in ring:
-                try:
-                    points.append((float(x), float(y)))
-                except (TypeError, ValueError):
-                    return Failure(kind="degenerate", reason=_WALL_REASON)
-            moved = moved_toward_wall(points, wall_number, placement)
-            if isinstance(moved, Failure):
-                return moved
-            placement = moved
     return _with_holds(form, placement)
 
 

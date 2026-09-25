@@ -532,7 +532,42 @@ editor.pointerUp();
     assert result["fields"]["snap"] == "off"
 
 
-def test_roof_height_round_trips_in_fields() -> None:
+def test_dragging_an_apex_row_writes_its_offset() -> None:
+    fields = _placement_rect()
+    del fields["offset_x"]
+    del fields["offset_y"]
+    fields["apex-0-x"] = "0"
+    fields["apex-0-y"] = "0"
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(fields)});
+editor.pointerDown(5, 3);
+editor.pointerMove(7.2, 4.1);
+extra.releaseSubmits = editor.pointerUp();
+"""
+    )
+    assert float(result["fields"]["apex-0-x"]) == 2.0
+    assert float(result["fields"]["apex-0-y"]) == 1.0
+    assert result["extra"]["releaseSubmits"] is True
+
+
+def test_a_corner_within_a_tenth_of_a_metre_wins_over_an_apex() -> None:
+    fields = _placement_rect()
+    del fields["offset_x"]
+    del fields["offset_y"]
+    fields["apex-0-x"] = "4.95"
+    fields["apex-0-y"] = "2.95"
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(fields)});
+editor.pointerDown(10, 6);
+editor.pointerMove(12, 6);
+extra.releaseSubmits = editor.pointerUp();
+"""
+    )
+    assert result["fields"]["outer-x-2"] == "12"
+    assert result["fields"]["apex-0-x"] == "4.95"
+    assert result["extra"]["releaseSubmits"] is False
     result = _run_editor(
         f"editor.loadFields({json.dumps({**RECT, 'roof_height': '2'})});"
     )

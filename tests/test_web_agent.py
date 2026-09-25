@@ -256,30 +256,15 @@ def test_helper_places_the_apex_the_ridge_snap_and_symmetry() -> None:
         {"center": True},
         "Center the apex.",
     )
-    assert centered["offset_x"] == "0"
-    assert centered["offset_y"] == "0"
-    moved = _turn(
-        _experimental_rect(offset_x="1", offset_y="0"),
-        {"move_x": 0.5, "move_y": -1},
-        "Add an offset.",
-    )
-    assert moved["offset_x"] == "1.5"
-    assert moved["offset_y"] == "-1"
-    toward = _turn(
-        _experimental_rect(),
-        {"toward_wall": 2},
-        "Move toward wall 2.",
-    )
-    assert toward["offset_x"] == "1"
-    assert toward["offset_y"] == "0"
+    assert centered["apex-0-x"] == "0"
+    assert centered["apex-0-y"] == "0"
     ridge = _turn(_experimental_rect(), {"style": "ridge"}, "Choose the ridge.")
-    assert ridge["style"] == "ridge"
-    pyramid = _turn(_experimental_rect(style="ridge"), {"style": "pyramid"}, "Pyramid.")
-    assert pyramid["style"] == "apex"
-    pyramide = _turn(
-        _experimental_rect(style="ridge"), {"style": "pyramide"}, "Pyramide."
-    )
-    assert pyramide["style"] == "apex"
+    assert ridge["ridge-0-x"] == "0"
+    assert ridge["selected_interior"] == "ridge-0"
+    pyramid = _turn(_experimental_rect(), {"style": "pyramid"}, "Pyramid.")
+    assert pyramid["selected_interior"] == "apex-0"
+    pyramide = _turn(_experimental_rect(), {"style": "pyramide"}, "Pyramide.")
+    assert pyramide["selected_interior"] == "apex-0"
     snap = _turn(_experimental_rect(), {"snap": "off"}, "Turn snap off.")
     assert snap["snap"] == "off"
     held = _turn(
@@ -287,16 +272,14 @@ def test_helper_places_the_apex_the_ridge_snap_and_symmetry() -> None:
         {"hold": 0},
         "Hold the first reflection.",
     )
-    assert held["offset_x"] == "0"
-    assert held["offset_y"] == "0.5"
     assert held["hold-0"] == "on"
+    assert "apex-0-x" not in held
     symmetric = _turn(
-        _experimental_rect(offset_x="1", offset_y="0.5"),
+        _experimental_rect(**{"apex-0-x": "1", "apex-0-y": "0.5"}),
         {"symmetric": True},
         "Make it symmetric.",
     )
-    assert symmetric["offset_x"] == "0"
-    assert symmetric["offset_y"] == "0"
+    assert symmetric["make_symmetric"] == "1"
     assert symmetric["hold-0"] == "on"
     assert symmetric["hold-1"] == "on"
 
@@ -321,8 +304,7 @@ def test_helper_leaves_fields_unchanged_when_the_control_is_absent() -> None:
         }
     )
     ridge = set_cell(ell, style="ridge")
-    assert ridge.fields == {}
-    assert "no ridge" in ridge.note.lower()
+    assert ridge.fields["selected_interior"] == "ridge-0"
     missing = set_cell(ell, symmetric=True)
     assert missing.fields == {}
     assert "reflection" in missing.note.lower()
@@ -344,12 +326,10 @@ def test_helper_leaves_fields_unchanged_when_the_control_is_absent() -> None:
         }
     )
     spanned_ridge = set_cell(spanned, style="ridge")
-    assert spanned_ridge.fields == {}
-    assert "ridge" in spanned_ridge.note.lower()
+    assert spanned_ridge.fields["ridge-0-length"] == "2"
     plane = _experimental_rect(**{"face-0": "0,1,2,3"})
-    nowhere = set_cell(plane, center=True)
-    assert nowhere.fields == {}
-    assert "single plane" in nowhere.note.lower() or "failure" in nowhere.note.lower()
+    placed = set_cell(plane, center=True)
+    assert placed.fields["apex-0-x"] == "0"
     bowtie = _experimental_rect(
         **{
             "outer-x-1": "10",
@@ -367,7 +347,7 @@ def test_helper_leaves_fields_unchanged_when_the_control_is_absent() -> None:
     model = ScriptedModel(
         [
             ModelTurn(tool_calls=[ToolCall("set_cell", {"style": "ridge"})]),
-            ModelTurn(text="This footprint has no ridge. The apex stays."),
+            ModelTurn(text="Ridge 1 is on the list. Click Update roof."),
         ]
     )
     reply = run_turn(
@@ -375,7 +355,7 @@ def test_helper_leaves_fields_unchanged_when_the_control_is_absent() -> None:
         form=ell,
         messages=[{"role": "user", "content": "Give this L a ridge."}],
     )
-    assert reply.fields == {}
+    assert reply.fields["selected_interior"] == "ridge-0"
 
 
 def test_helper_still_sets_roof_height_and_refuses_a_wall_type() -> None:
@@ -396,13 +376,9 @@ def test_helper_instructions_name_placement_and_absent_controls() -> None:
     assert "apex" in text
     assert "ridge" in text
     assert "offset" in text
-    assert "move toward a wall" in text
     assert "snap" in text
     assert "symmetry" in text
-    assert "no ridge on an l" in text
-    assert "spanned face" in text
     assert "no symmetry the footprint lacks" in text
-    assert "single plane" in text
     assert "failure" in text
 
 

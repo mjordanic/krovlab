@@ -14,7 +14,7 @@ from html.parser import HTMLParser
 from flask.testing import FlaskClient
 from pygltflib import GLTF2  # type: ignore[import-untyped]
 from web.app import create_app
-from web.examples import DORMER_RING, GABLE_DORMER, GARAGE, HOUSE, L_SHAPE, RECTANGLE
+from web.examples import DORMER_RING, GABLE_DORMER, GARAGE, HOUSE, RECTANGLE
 
 from krovlab import Cell, Dormer, Project, Roof, project, roof
 from krovlab.experimental import roof_from_face_graph
@@ -212,15 +212,12 @@ def test_failure_and_non_terrain_downloads_are_not_files() -> None:
         assert _client().post(path, data=plus).status_code == 404
 
 
-ONE_FACE = ((0,), (1,), (2, 3), (4,), (5,))
-
-
 def test_experimental_download_is_the_shown_solid() -> None:
-    built = roof_from_face_graph(L_SHAPE, ONE_FACE)
-    skeleton = roof(L_SHAPE, 45.0)
+    built = roof_from_face_graph(RECTANGLE)
+    skeleton = roof(RECTANGLE, 45.0)
     assert isinstance(built, Roof)
     assert isinstance(skeleton, Roof)
-    page = _client().get("/?method=experimental&example=l-one-face").get_data(
+    page = _client().get("/?method=experimental&example=hip-rectangle").get_data(
         as_text=True
     )
     snapshot = _mesh_snapshot(page)

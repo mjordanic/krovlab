@@ -212,12 +212,6 @@ def _cell_kwargs(args: dict[str, Any]) -> dict[str, Any]:
         out["snap"] = args["snap"]
     if args.get("hold") not in (None, ""):
         out["hold"] = int(args["hold"])
-    if args.get("toward_wall") not in (None, ""):
-        out["toward_wall"] = int(args["toward_wall"])
-    if args.get("move_x") not in (None, ""):
-        out["move_x"] = float(args["move_x"])
-    if args.get("move_y") not in (None, ""):
-        out["move_y"] = float(args["move_y"])
     if args.get("placement") not in (None, ""):
         out["placement"] = str(args["placement"])
     return out

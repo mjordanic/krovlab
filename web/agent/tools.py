@@ -9,11 +9,8 @@ from typing import Any
 from krovlab import Failure
 from krovlab._input import degrees_from_pitch
 from krovlab.experimental import (
-    PlacedRoof,
-    Placement,
-    moved_toward_wall,
     reflection_axes,
-    roof_from_face_graph,
+    roof_from_interiors,
 )
 
 DEFAULT_PITCH = 45.0
@@ -110,8 +107,7 @@ def set_wall(
             ok=True,
             fields=patches,
             note=(
-                f"Cell {cell} Wall {wall} is now a gable (no face). "
-                "Click Update roof."
+                f"Cell {cell} Wall {wall} is now a gable (no face). Click Update roof."
             ),
         )
 
@@ -209,9 +205,6 @@ def set_cell(
     eave_height: float | None = None,
     roof_height: float | None = None,
     center: bool = False,
-    move_x: float | None = None,
-    move_y: float | None = None,
-    toward_wall: int | None = None,
     style: str | None = None,
     snap: str | bool | None = None,
     hold: int | None = None,
@@ -225,9 +218,6 @@ def set_cell(
     placed = _placement_patch(
         form,
         center=center,
-        move_x=move_x,
-        move_y=move_y,
-        toward_wall=toward_wall,
         style=style,
         snap=snap,
         hold=hold,
@@ -317,13 +307,8 @@ _PLACEMENT_WORDS = {
     "snap off": "snap-off",
 }
 _UNCHANGED = "The fields stay as they are."
-_NO_INTERIOR = (
-    "There is nothing to place on a single plane or a Failure. " + _UNCHANGED
-)
-_NO_RIDGE = "This footprint has no ridge. The apex stays. " + _UNCHANGED
-_NO_SYMMETRY = (
-    "This footprint has no such reflection. The roof stays. " + _UNCHANGED
-)
+_NO_INTERIOR = "There is nothing to place on a single plane or a Failure. " + _UNCHANGED
+_NO_SYMMETRY = "This footprint has no such reflection. The roof stays. " + _UNCHANGED
 _UNKNOWN_PLACEMENT = "That placement is not on the form. " + _UNCHANGED
 
 
@@ -331,9 +316,6 @@ def _placement_patch(
     form: dict[str, str],
     *,
     center: bool,
-    move_x: float | None,
-    move_y: float | None,
-    toward_wall: int | None,
     style: str | None,
     snap: str | bool | None,
     hold: int | None,
@@ -357,9 +339,6 @@ def _placement_patch(
             style = known
     asked = (
         center
-        or move_x is not None
-        or move_y is not None
-        or toward_wall is not None
         or style not in (None, "")
         or snap is not None
         or hold is not None
@@ -378,12 +357,8 @@ def _placement_patch(
     ring = _ring(form, "outer")
     if len(ring) < 3:
         return ToolResult(ok=False, note=_NO_INTERIOR)
-    try:
-        graph = _face_graph(form)
-    except ValueError:
-        return ToolResult(ok=False, note=_NO_INTERIOR)
-    built = roof_from_face_graph(ring, graph, placement=Placement())
-    if isinstance(built, Failure) or len(built.faces) <= 1:
+    built = roof_from_interiors(ring)
+    if isinstance(built, Failure):
         return ToolResult(ok=False, note=_NO_INTERIOR)
     axes = reflection_axes(ring)
     style_word = (style or "").strip().lower()
@@ -392,9 +367,6 @@ def _placement_patch(
         if mapped is None:
             return ToolResult(ok=False, note=_UNKNOWN_PLACEMENT)
         style_word = mapped
-    offers_ridge = isinstance(built, PlacedRoof) and built.offers_ridge
-    if style_word == "ridge" and not offers_ridge:
-        return ToolResult(ok=False, note=_NO_RIDGE)
     if symmetric and not axes:
         return ToolResult(ok=False, note=_NO_SYMMETRY)
     if hold is not None and (hold < 0 or hold >= len(axes)):
@@ -402,57 +374,39 @@ def _placement_patch(
     snap_value = _snap_word(snap)
     if snap is not None and snap_value is None:
         return ToolResult(ok=False, note=_UNKNOWN_PLACEMENT)
+    patches: dict[str, str] = {}
     dx, dy = _form_offset(form)
     if center:
         dx, dy = 0.0, 0.0
-    if move_x is not None or move_y is not None:
-        dx += 0.0 if move_x is None else float(move_x)
-        dy += 0.0 if move_y is None else float(move_y)
-    if toward_wall is not None:
-        moved = moved_toward_wall(ring, int(toward_wall), Placement(dx, dy))
-        if isinstance(moved, Failure):
-            return ToolResult(ok=False, note=f"{moved.reason} {_UNCHANGED}")
-        dx, dy = moved.dx, moved.dy
-    held: set[int] = set()
-    if symmetric:
-        held = set(range(len(axes)))
-    elif hold is not None:
-        held.add(hold)
-    if held:
-        dx, dy = _project_holds(dx, dy, axes, held)
-    patches: dict[str, str] = {
-        "offset_x": _fmt_metres(dx),
-        "offset_y": _fmt_metres(dy),
-    }
-    if style_word:
-        patches["style"] = style_word
+        patches["apex-0-x"] = "0"
+        patches["apex-0-y"] = "0"
+    if style_word == "ridge" and "ridge-0-x" not in form:
+        patches["ridge-0-x"] = "0"
+        patches["ridge-0-y"] = "0"
+        patches["ridge-0-direction"] = "0"
+        patches["ridge-0-length"] = "2"
+        patches["selected_interior"] = "ridge-0"
+    elif style_word == "apex":
+        patches["selected_interior"] = "apex-0"
+        patches.setdefault("apex-0-x", _fmt_metres(dx))
+        patches.setdefault("apex-0-y", _fmt_metres(dy))
     if snap_value is not None:
         patches["snap"] = snap_value
-    at_center = abs(dx) <= 1e-9 and abs(dy) <= 1e-9
-    for index, (nx, ny, _c) in enumerate(axes):
-        if at_center or index in held:
+    if symmetric:
+        patches["make_symmetric"] = "1"
+        for index in range(len(axes)):
             patches[f"hold-{index}"] = "on"
-        elif abs(nx * dx + ny * dy) > 1e-6:
-            patches[f"hold-{index}"] = "off"
+    elif hold is not None:
+        patches[f"hold-{hold}"] = "on"
+    if not patches:
+        return ToolResult(ok=False, note=_UNKNOWN_PLACEMENT)
     return ToolResult(ok=True, fields=patches, note="placement updated")
 
 
-def _project_holds(
-    dx: float,
-    dy: float,
-    axes: list[tuple[float, float, float]],
-    held: set[int],
-) -> tuple[float, float]:
-    for index in sorted(held):
-        nx, ny, _c = axes[index]
-        signed = nx * dx + ny * dy
-        dx -= nx * signed
-        dy -= ny * signed
-    return dx, dy
-
-
 def _form_offset(form: dict[str, str]) -> tuple[float, float]:
-    return _optional_float(form.get("offset_x")), _optional_float(form.get("offset_y"))
+    raw_x = form.get("apex-0-x", form.get("offset_x"))
+    raw_y = form.get("apex-0-y", form.get("offset_y"))
+    return _optional_float(raw_x), _optional_float(raw_y)
 
 
 def _optional_float(raw: str | None) -> float:
@@ -475,27 +429,6 @@ def _snap_word(snap: str | bool | None) -> str | None:
     if snap in (False, "off", "false", "0", 0):
         return "off"
     return None
-
-
-def _face_graph(form: dict[str, str]) -> list[list[int]] | None:
-    groups: list[list[int]] = []
-    index = 0
-    while f"face-{index}" in form:
-        text = form[f"face-{index}"].strip()
-        if text:
-            groups.append(
-                [int(part.strip()) for part in text.split(",") if part.strip()]
-            )
-        index += 1
-    if groups:
-        return groups
-    from web.examples import load_experimental_examples
-
-    slug = form.get("example") or ""
-    example = load_experimental_examples().get(slug)
-    if example is None or example.face_graph is None:
-        return None
-    return [list(group) for group in example.face_graph]
 
 
 def _prefix(cell_number: int) -> str:
@@ -528,8 +461,7 @@ def _cell(form: dict[str, str], cell_number: int) -> dict[str, Any] | None:
                     "type": kind,
                     "pitch": raw_pitch or "45",
                     "knee": form.get(f"{prefix}knee-{index}") or "0",
-                    "shallow": form.get(f"{prefix}gambrel-shallow-{index}")
-                    or "",
+                    "shallow": form.get(f"{prefix}gambrel-shallow-{index}") or "",
                     "break": form.get(f"{prefix}gambrel-break-{index}") or "0",
                 }
             )

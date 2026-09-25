@@ -104,24 +104,12 @@ _FUNCTION_DECLARATIONS = [
                     "type": "boolean",
                     "description": "Place the apex at the center. Offset (0, 0).",
                 },
-                "move_x": {
-                    "type": "number",
-                    "description": "Metres to add to the offset in x.",
-                },
-                "move_y": {
-                    "type": "number",
-                    "description": "Metres to add to the offset in y.",
-                },
-                "toward_wall": {
-                    "type": "integer",
-                    "description": "Move 1 m toward this Wall N (page numbering).",
-                },
                 "style": {
                     "type": "string",
                     "enum": ["apex", "ridge", "pyramid", "pyramide"],
                     "description": (
                         "Apex or Ridge. Pyramid and pyramide mean Apex. "
-                        "No ridge on an L or a spanned face."
+                        "A ridge can be added on any footprint that roofs."
                     ),
                 },
                 "snap": {

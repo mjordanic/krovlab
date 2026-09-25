@@ -164,6 +164,8 @@
     var axes = [];
     var holds = [];
     var placementOn = false;
+    var interiors = [];
+    var interiorMode = false;
     var dragging = null;
 
     function allRings(cell) {
@@ -653,6 +655,54 @@
       return Number.isNaN(n) ? null : n;
     }
 
+    function readInteriors(map) {
+      interiors = [];
+      var i = 0;
+      while (Object.prototype.hasOwnProperty.call(map, "apex-" + i + "-x")) {
+        interiors.push({
+          kind: "apex",
+          index: i,
+          x: readNumber(map, "apex-" + i + "-x") || 0,
+          y: readNumber(map, "apex-" + i + "-y") || 0,
+          direction: 0,
+          length: 0
+        });
+        i += 1;
+      }
+      i = 0;
+      while (Object.prototype.hasOwnProperty.call(map, "ridge-" + i + "-x")) {
+        interiors.push({
+          kind: "ridge",
+          index: i,
+          x: readNumber(map, "ridge-" + i + "-x") || 0,
+          y: readNumber(map, "ridge-" + i + "-y") || 0,
+          direction: readNumber(map, "ridge-" + i + "-direction") || 0,
+          length: readNumber(map, "ridge-" + i + "-length") || 2
+        });
+        i += 1;
+      }
+      interiorMode = interiors.length > 0 && midX !== null && midY !== null;
+      if (interiorMode) {
+        placementOn = true;
+      }
+    }
+
+    function interiorPoint(item) {
+      return [cleanMetres(midX + item.x), cleanMetres(midY + item.y)];
+    }
+
+    function ridgeEndsOf(item) {
+      var rad = (item.direction % 180) * Math.PI / 180;
+      var half = item.length / 2;
+      var at = interiorPoint(item);
+      var dx = Math.cos(rad) * half;
+      var dy = Math.sin(rad) * half;
+      return [
+        [cleanMetres(at[0] - dx), cleanMetres(at[1] - dy)],
+        [cleanMetres(at[0] + dx), cleanMetres(at[1] + dy)]
+      ];
+    }
+
     function readPlacement(map) {
       midX = readNumber(map, "mid_x");
       midY = readNumber(map, "mid_y");
@@ -664,6 +714,7 @@
       ridgeHx = readNumber(map, "ridge_hx") || 0;
       ridgeHy = readNumber(map, "ridge_hy") || 0;
       snapOn = map.snap !== "off";
+      readInteriors(map);
       axes = [];
       holds = [];
       var i = 0;
@@ -731,6 +782,19 @@
     }
 
     function releaseHolds() {
+      if (interiorMode) {
+        holds = holds.map(function (_held, index) {
+          var axis = axes[index];
+          if (!axis) {
+            return false;
+          }
+          return interiors.every(function (item) {
+            var at = interiorPoint(item);
+            return Math.abs(axis.nx * at[0] + axis.ny * at[1] - axis.c) <= 1e-6;
+          });
+        });
+        return;
+      }
       var at = apexPoint();
       if (!at) {
         return;
@@ -752,6 +816,15 @@
     }
 
     function apexPoint() {
+      if (interiorMode) {
+        var apex = null;
+        interiors.forEach(function (item) {
+          if (!apex && item.kind === "apex") {
+            apex = interiorPoint(item);
+          }
+        });
+        return apex;
+      }
       if (!placementOn) {
         return null;
       }
@@ -793,8 +866,78 @@
       return !!(ends && distanceToSegment(x, y, ends[0], ends[1]) <= 0.25);
     }
 
+    function hitInterior(x, y) {
+      var best = null;
+      var bestDist = 0.25;
+      interiors.forEach(function (item, index) {
+        var at = interiorPoint(item);
+        var dist = Math.hypot(x - at[0], y - at[1]);
+        if (dist <= bestDist) {
+          best = { index: index, part: "middle" };
+          bestDist = dist;
+        }
+        if (item.kind !== "ridge") {
+          return;
+        }
+        ridgeEndsOf(item).forEach(function (end, endIndex) {
+          var endDist = Math.hypot(x - end[0], y - end[1]);
+          if (endDist <= bestDist) {
+            best = { index: index, part: "end", end: endIndex };
+            bestDist = endDist;
+          }
+        });
+      });
+      return best;
+    }
+
+    function placeInterior(hit, x, y) {
+      var item = interiors[hit.index];
+      var placed = snapApexPoint(x, y);
+      if (hit.part === "end") {
+        var ends = ridgeEndsOf(item);
+        var other = ends[hit.end === 0 ? 1 : 0];
+        var cx = (placed.x + other[0]) / 2;
+        var cy = (placed.y + other[1]) / 2;
+        item.x = cleanMetres(cx - midX);
+        item.y = cleanMetres(cy - midY);
+        item.length = cleanMetres(Math.hypot(placed.x - other[0], placed.y - other[1]));
+        var angle = Math.atan2(placed.y - other[1], placed.x - other[0]) * 180 / Math.PI;
+        item.direction = cleanMetres((angle % 180 + 180) % 180);
+      } else {
+        item.x = cleanMetres(placed.x - midX);
+        item.y = cleanMetres(placed.y - midY);
+      }
+      releaseHolds();
+    }
+
     function pointerDown(x, y) {
-      if (hitApex(x, y)) {
+      var vert = hitVertex(x, y);
+      var ringPt = null;
+      if (vert && cells[vert.cell]) {
+        var cell = cells[vert.cell];
+        if (vert.vertex < cell.vertices.length) {
+          ringPt = cell.vertices[vert.vertex];
+        } else if (cell.hole) {
+          ringPt = cell.hole[vert.vertex - cell.vertices.length] || null;
+        }
+      }
+      var vertDist = ringPt ? Math.hypot(x - ringPt.x, y - ringPt.y) : Infinity;
+      if (interiorMode && vertDist > 0.1) {
+        var hit = hitInterior(x, y);
+        if (hit) {
+          dragging = { kind: "interior", index: hit.index, part: hit.part, end: hit.end };
+          selectedVertex = null;
+          selectedEdge = null;
+          var at = hit.part === "end"
+            ? ridgeEndsOf(interiors[hit.index])[hit.end]
+            : interiorPoint(interiors[hit.index]);
+          grabDx = x - at[0];
+          grabDy = y - at[1];
+          placeInterior(hit, x - grabDx, y - grabDy);
+          return;
+        }
+      }
+      if (!interiorMode && hitApex(x, y)) {
         var vert = hitVertex(x, y);
         var apexDist = Math.hypot(x - apexPoint()[0], y - apexPoint()[1]);
         var ringPt = null;
@@ -831,6 +974,10 @@
       if (!dragging) {
         return;
       }
+      if (dragging.kind === "interior") {
+        placeInterior(dragging, x - grabDx, y - grabDy);
+        return;
+      }
       if (dragging.kind === "apex") {
         placeApex(x - grabDx, y - grabDy);
         return;
@@ -843,7 +990,7 @@
     }
 
     function pointerUp() {
-      var submit = !!(dragging && dragging.kind === "apex");
+      var submit = !!(dragging && (dragging.kind === "apex" || dragging.kind === "interior"));
       dragging = null;
       return submit;
     }
@@ -917,7 +1064,24 @@
         if (index === 0 && cell.roofHeight) {
           out.roof_height = String(cell.roofHeight);
         }
-        if (index === 0 && placementOn) {
+        if (index === 0 && interiorMode) {
+          interiors.forEach(function (item) {
+            var key = item.kind + "-" + item.index;
+            out[key + "-x"] = String(cleanMetres(item.x));
+            out[key + "-y"] = String(cleanMetres(item.y));
+            if (item.kind === "ridge") {
+              out[key + "-direction"] = String(cleanMetres(item.direction));
+              out[key + "-length"] = String(cleanMetres(item.length));
+            }
+          });
+          out.snap = snapOn ? "on" : "off";
+          out.mid_x = String(midX);
+          out.mid_y = String(midY);
+          axes.forEach(function (axis, axisIndex) {
+            out["axis-" + axisIndex] = axis.nx + "," + axis.ny + "," + axis.c;
+            out["hold-" + axisIndex] = holds[axisIndex] ? "on" : "off";
+          });
+        } else if (index === 0 && placementOn) {
           out.offset_x = String(cleanMetres(offsetX));
           out.offset_y = String(cleanMetres(offsetY));
           if (styleKnown) {
@@ -1032,6 +1196,7 @@
       draggingKind: function () { return dragging ? dragging.kind : null; },
       apex: apexPoint,
       ridge: ridgeEnds,
+      interiors: function () { return interiors; },
       setSnap: function (on) { snapOn = !!on; },
       setHold: function (index, on) {
         if (index >= 0 && index < holds.length) {
@@ -1226,6 +1391,26 @@
           "\" r=\"0.18\" data-dormer=\"" + dIndex + "\" data-vertex=\"" + i + "\"></circle>";
       });
     });
+    var drawn = typeof editor.interiors === "function" ? editor.interiors() : [];
+    if (drawn.length) {
+      drawn.forEach(function (item) {
+        if (item.kind === "ridge") {
+          var rad = (item.direction % 180) * Math.PI / 180;
+          var half = item.length / 2;
+          var cx = parseFloat(editor.fields().mid_x) + item.x;
+          var cy = parseFloat(editor.fields().mid_y) + item.y;
+          var dx = Math.cos(rad) * half;
+          var dy = Math.sin(rad) * half;
+          html += "<line class=\"is-ridge\" x1=\"" + (cx - dx) + "\" y1=\"" + (cy - dy) +
+            "\" x2=\"" + (cx + dx) + "\" y2=\"" + (cy + dy) + "\"></line>";
+        } else {
+          var ax = parseFloat(editor.fields().mid_x) + item.x;
+          var ay = parseFloat(editor.fields().mid_y) + item.y;
+          html += "<circle class=\"is-apex\" cx=\"" + ax + "\" cy=\"" + ay +
+            "\" r=\"0.22\" data-apex=\"1\"></circle>";
+        }
+      });
+    } else {
     var ridgeAt = typeof editor.ridge === "function" ? editor.ridge() : null;
     if (ridgeAt) {
       html += "<line class=\"is-ridge\" x1=\"" + ridgeAt[0][0] + "\" y1=\"" + ridgeAt[0][1] +
@@ -1235,6 +1420,7 @@
     if (apexAt) {
       html += "<circle class=\"is-apex\" cx=\"" + apexAt[0] + "\" cy=\"" + apexAt[1] +
         "\" r=\"0.22\" data-apex=\"1\"></circle>";
+    }
     }
     html += "</g>";
     svg.innerHTML = html;
