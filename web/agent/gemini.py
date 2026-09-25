@@ -100,6 +100,61 @@ _FUNCTION_DECLARATIONS = [
                         "Not a pitch. Greater than zero."
                     ),
                 },
+                "center": {
+                    "type": "boolean",
+                    "description": "Place the apex at the center. Offset (0, 0).",
+                },
+                "move_x": {
+                    "type": "number",
+                    "description": "Metres to add to the offset in x.",
+                },
+                "move_y": {
+                    "type": "number",
+                    "description": "Metres to add to the offset in y.",
+                },
+                "toward_wall": {
+                    "type": "integer",
+                    "description": "Move 1 m toward this Wall N (page numbering).",
+                },
+                "style": {
+                    "type": "string",
+                    "enum": ["apex", "ridge", "pyramid", "pyramide"],
+                    "description": (
+                        "Apex or Ridge. Pyramid and pyramide mean Apex. "
+                        "No ridge on an L or a spanned face."
+                    ),
+                },
+                "snap": {
+                    "type": "string",
+                    "enum": ["on", "off"],
+                    "description": (
+                        "Snap the interior drag to a 0.5 m grid, "
+                        "or follow the pointer."
+                    ),
+                },
+                "hold": {
+                    "type": "integer",
+                    "description": (
+                        "Check one symmetry box, the reflection index on the form. "
+                        "No symmetry the footprint lacks."
+                    ),
+                },
+                "symmetric": {
+                    "type": "boolean",
+                    "description": (
+                        "Make it symmetric: check every reflection "
+                        "this footprint has."
+                    ),
+                },
+                "placement": {
+                    "type": "string",
+                    "description": (
+                        "A placement sentence. Unknown sentences, a ridge when "
+                        "the control is absent, a symmetry the footprint lacks, "
+                        "and a placement when there is nothing to place on a "
+                        "single plane or a Failure leave the fields unchanged."
+                    ),
+                },
             },
         },
     ),

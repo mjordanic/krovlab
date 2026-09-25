@@ -10,7 +10,7 @@ The helper is taught here, once the fields exist. It writes the same placement f
 
 **Blocked by:** 02: Drag and snap the apex, 03: Choose a ridge
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 16, 26, 29, 30, 31, 32, 33, 34, 35, 36, 37, 52, 56, 58, 59, 61, 62, 63, 64, 65, 66, 75, 76
 
@@ -18,14 +18,14 @@ The helper is taught here, once the fields exist. It writes the same placement f
 
 **Artifact homes:** No new file. The checkboxes are fields of the existing form. The helper's instructions live in its existing system prompt.
 
-- [ ] The rectangle shows two symmetry checkboxes, both checked at offset (0, 0). Checking one zeros only the component that breaks that reflection
-- [ ] Dragging off one axis clears that checkbox and keeps the offset. The page says which reflections the current offset still lies on
-- [ ] A footprint with one reflection shows one checkbox. The L shows none. Asking for a symmetry the footprint lacks changes nothing
-- [ ] "Make it symmetric" checks every reflection this footprint has
-- [ ] A corner edit that removes a reflection removes that checkbox
-- [ ] Update keeps the style, the offset, the checkboxes, and snap. A new example or a DXF resets to Apex, (0, 0), snap on, and every reflection of the new footprint checked
-- [ ] A skeleton POST ignores the placement. Switching back to experimental restores the style, the offset, the checkboxes, and snap
-- [ ] The helper can center, add an offset, move toward a wall, switch Apex and Ridge, set snap, and check symmetry. Pyramid and pyramide select Apex. The reply tells the visitor to click Update roof
-- [ ] A ridge on an L or a spanned face, a symmetry the footprint lacks, a placement when there is no interior, and an unknown placement sentence patch nothing
-- [ ] The helper still sets roof height, overhang, and eave height, and still refuses a wall type while experimental is selected
-- [ ] The helper's instructions name the apex, the ridge, the offset, a move toward a wall, snap, and symmetry, and they name the cases where a control is absent
+- [x] The rectangle shows two symmetry checkboxes, both checked at offset (0, 0). Checking one zeros only the component that breaks that reflection
+- [x] Dragging off one axis clears that checkbox and keeps the offset. The page says which reflections the current offset still lies on
+- [x] A footprint with one reflection shows one checkbox. The L shows none. Asking for a symmetry the footprint lacks changes nothing
+- [x] "Make it symmetric" checks every reflection this footprint has
+- [x] A corner edit that removes a reflection removes that checkbox
+- [x] Update keeps the style, the offset, the checkboxes, and snap. A new example or a DXF resets to Apex, (0, 0), snap on, and every reflection of the new footprint checked
+- [x] A skeleton POST ignores the placement. Switching back to experimental restores the style, the offset, the checkboxes, and snap
+- [x] The helper can center, add an offset, move toward a wall, switch Apex and Ridge, set snap, and check symmetry. Pyramid and pyramide select Apex. The reply tells the visitor to click Update roof
+- [x] A ridge on an L or a spanned face, a symmetry the footprint lacks, a placement when there is no interior, and an unknown placement sentence patch nothing
+- [x] The helper still sets roof height, overhang, and eave height, and still refuses a wall type while experimental is selected
+- [x] The helper's instructions name the apex, the ridge, the offset, a move toward a wall, snap, and symmetry, and they name the cases where a control is absent

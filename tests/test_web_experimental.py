@@ -634,3 +634,193 @@ def test_a_dxf_resets_the_offset_to_zero() -> None:
     )
     assert _value(page, "offset_x") == "0"
     assert _value(page, "offset_y") == "0"
+    assert 'name="style" value="apex" checked' in page
+    assert _checked(page, "snap")
+    assert _checked(page, "hold-0")
+    assert _checked(page, "hold-1")
+
+
+def _checked(page: str, name: str) -> bool:
+    return f'name="{name}" value="on" checked' in page
+
+
+def test_the_rectangle_starts_with_both_reflections_checked() -> None:
+    page = _client().get("/?method=experimental").get_data(as_text=True)
+    assert _checked(page, "hold-0")
+    assert _checked(page, "hold-1")
+    assert page.count("The offset lies on this reflection.") == 2
+    assert _value(page, "offset_x") == "0"
+    assert _value(page, "offset_y") == "0"
+
+
+def test_checking_one_reflection_zeros_only_that_component() -> None:
+    page = _client().post(
+        "/",
+        data=_rect_post(offset_x="1", offset_y="0.5", **{"hold-0": "on"}),
+    ).get_data(as_text=True)
+    assert _value(page, "offset_x") == "0"
+    assert _value(page, "offset_y") == "0.5"
+    assert _checked(page, "hold-0")
+    assert not _checked(page, "hold-1")
+    assert "The offset lies on this reflection." in page
+    assert "The offset leaves this reflection." in page
+    centered = _client().post(
+        "/",
+        data=_rect_post(
+            offset_x="1",
+            offset_y="0.5",
+            place_at_center="1",
+            **{"hold-0": "off", "hold-1": "off"},
+        ),
+    ).get_data(as_text=True)
+    assert _value(centered, "offset_x") == "0"
+    assert _value(centered, "offset_y") == "0"
+    assert _checked(centered, "hold-0")
+    assert _checked(centered, "hold-1")
+
+
+def test_one_reflection_has_one_checkbox_and_the_l_has_none() -> None:
+    triangle = _client().post(
+        "/",
+        data={
+            "example": "hip-rectangle",
+            "set_pitch": "45",
+            "method": "experimental",
+            "roof_height": "3",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "4",
+            "outer-y-1": "0",
+            "outer-x-2": "2",
+            "outer-y-2": "3",
+            "type-0": "hip",
+            "pitch-0": "45",
+            "type-1": "hip",
+            "pitch-1": "45",
+            "type-2": "hip",
+            "pitch-2": "45",
+        },
+    ).get_data(as_text=True)
+    assert 'name="hold-0"' in triangle
+    assert 'name="hold-1"' not in triangle
+    assert "The offset lies on this reflection." in triangle
+    ell = _client().get("/?method=experimental&example=l-shape").get_data(as_text=True)
+    assert 'name="hold-0"' not in ell
+    asked = _client().post(
+        "/",
+        data=_l_post(
+            method="experimental",
+            offset_x="1",
+            offset_y="0",
+            make_symmetric="1",
+        ),
+    ).get_data(as_text=True)
+    plain = _client().post(
+        "/",
+        data=_l_post(method="experimental", offset_x="1", offset_y="0"),
+    ).get_data(as_text=True)
+    assert "This footprint has no reflection. The roof stays." in asked
+    assert _value(asked, "offset_x") == _value(plain, "offset_x")
+    assert _value(asked, "offset_y") == _value(plain, "offset_y")
+    assert "ridge height:" in asked
+    assert 'name="hold-0"' not in asked
+
+
+def test_make_it_symmetric_checks_every_reflection() -> None:
+    page = _client().post(
+        "/",
+        data=_rect_post(offset_x="1", offset_y="0.5", make_symmetric="1"),
+    ).get_data(as_text=True)
+    assert _value(page, "offset_x") == "0"
+    assert _value(page, "offset_y") == "0"
+    assert _checked(page, "hold-0")
+    assert _checked(page, "hold-1")
+    assert page.count("The offset lies on this reflection.") == 2
+
+
+def test_a_corner_edit_drops_the_reflection_the_walls_lose() -> None:
+    page = _client().post(
+        "/",
+        data=_rect_post(
+            offset_x="1",
+            offset_y="0.5",
+            **{
+                "outer-x-2": "8",
+                "outer-y-2": "6",
+                "outer-x-3": "2",
+                "outer-y-3": "6",
+                "axis-0": "1,0,5",
+                "hold-0": "off",
+                "axis-1": "0,1,3",
+                "hold-1": "on",
+            },
+        ),
+    ).get_data(as_text=True)
+    assert 'name="hold-0"' in page
+    assert 'name="hold-1"' not in page
+    assert _value(page, "offset_x") == "1"
+    assert _value(page, "offset_y") == "0.5"
+    assert "This footprint has no such reflection. The roof stays." in page
+    assert "ridge height:" in page
+
+
+def test_update_keeps_style_offset_checkboxes_and_snap() -> None:
+    page = _client().post(
+        "/",
+        data=_rect_post(
+            style="ridge",
+            offset_x="1",
+            offset_y="0",
+            snap="off",
+            **{"axis-0": "1,0,5", "hold-0": "off", "axis-1": "0,1,3", "hold-1": "on"},
+        ),
+    ).get_data(as_text=True)
+    assert 'name="style" value="ridge" checked' in page
+    assert _value(page, "offset_x") == "1"
+    assert _value(page, "offset_y") == "0"
+    assert not _checked(page, "hold-0")
+    assert _checked(page, "hold-1")
+    assert not _checked(page, "snap")
+    fresh = _client().get("/?method=experimental&example=l-shape").get_data(
+        as_text=True
+    )
+    assert _value(fresh, "offset_x") == "0"
+    assert 'name="style" value="apex" checked' in fresh or 'name="style"' not in fresh
+    assert _checked(fresh, "snap")
+    assert 'name="hold-0"' not in fresh
+
+
+def test_skeleton_ignores_placement_and_switching_back_restores_it() -> None:
+    skeleton = _client().post(
+        "/",
+        data=_rect_post(
+            method="skeleton",
+            style="ridge",
+            offset_x="1",
+            offset_y="0",
+            snap="off",
+            **{"hold-1": "on"},
+        ),
+    ).get_data(as_text=True)
+    assert "ridge: 4.000 m" in skeleton
+    assert "Place at the center" not in skeleton
+    assert 'name="style" value="ridge"' in skeleton
+    assert _value(skeleton, "offset_x") == "1"
+    assert 'name="snap" value="off"' in skeleton
+    assert 'name="hold-1" value="on"' in skeleton
+    back = _client().post(
+        "/",
+        data=_rect_post(
+            style="ridge",
+            offset_x="1",
+            offset_y="0",
+            snap="off",
+            **{"hold-1": "on"},
+        ),
+    ).get_data(as_text=True)
+    assert 'name="style" value="ridge" checked' in back
+    assert _value(back, "offset_x") == "1"
+    assert _value(back, "offset_y") == "0"
+    assert _checked(back, "hold-1")
+    assert not _checked(back, "snap")
+    assert "Place at the center" in back

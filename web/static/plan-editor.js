@@ -162,6 +162,7 @@
     var midX = null;
     var midY = null;
     var axes = [];
+    var holds = [];
     var placementOn = false;
     var dragging = null;
 
@@ -664,6 +665,7 @@
       ridgeHy = readNumber(map, "ridge_hy") || 0;
       snapOn = map.snap !== "off";
       axes = [];
+      holds = [];
       var i = 0;
       while (Object.prototype.hasOwnProperty.call(map, "axis-" + i)) {
         var parts = String(map["axis-" + i]).split(",");
@@ -673,6 +675,7 @@
             ny: parseFloat(parts[1]),
             c: parseFloat(parts[2])
           });
+          holds.push(map["hold-" + i] === "on");
         }
         i += 1;
       }
@@ -724,6 +727,28 @@
       var placed = snapApexPoint(x, y);
       offsetX = cleanMetres(placed.x - midX);
       offsetY = cleanMetres(placed.y - midY);
+      releaseHolds();
+    }
+
+    function releaseHolds() {
+      var at = apexPoint();
+      if (!at) {
+        return;
+      }
+      if (Math.abs(offsetX) <= 1e-6 && Math.abs(offsetY) <= 1e-6) {
+        holds = holds.map(function () { return true; });
+        return;
+      }
+      holds.forEach(function (held, index) {
+        var axis = axes[index];
+        if (!axis) {
+          return;
+        }
+        var dist = Math.abs(axis.nx * at[0] + axis.ny * at[1] - axis.c);
+        if (dist > 1e-6) {
+          holds[index] = false;
+        }
+      });
     }
 
     function apexPoint() {
@@ -905,6 +930,7 @@
           out.mid_y = String(midY);
           axes.forEach(function (axis, axisIndex) {
             out["axis-" + axisIndex] = axis.nx + "," + axis.ny + "," + axis.c;
+            out["hold-" + axisIndex] = holds[axisIndex] ? "on" : "off";
           });
         }
         if (cell.useHole) {
@@ -949,11 +975,11 @@
     function formMap(form) {
       var map = {};
       Array.prototype.forEach.call(form.querySelectorAll("[name]"), function (el) {
-        if (el.name === "snap") {
+        if (el.name === "snap" || /^hold-\d+$/.test(el.name)) {
           if (el.type === "checkbox") {
-            map.snap = el.checked ? "on" : "off";
-          } else if (!Object.prototype.hasOwnProperty.call(map, "snap")) {
-            map.snap = el.value;
+            map[el.name] = el.checked ? "on" : "off";
+          } else if (!Object.prototype.hasOwnProperty.call(map, el.name)) {
+            map[el.name] = el.value;
           }
           return;
         }
@@ -1007,6 +1033,11 @@
       apex: apexPoint,
       ridge: ridgeEnds,
       setSnap: function (on) { snapOn = !!on; },
+      setHold: function (index, on) {
+        if (index >= 0 && index < holds.length) {
+          holds[index] = !!on;
+        }
+      },
       applySettings: applySettings,
       applyForm: function (formEl) { applySettings(formMap(formEl)); },
       loadFields: loadFields,
@@ -1082,6 +1113,14 @@
       var input = form.querySelector("[name='" + name + "']");
       if (input) { input.value = posted[name]; }
     });
+    var holdIndex = 0;
+    while (posted["hold-" + holdIndex] != null) {
+      var box = form.querySelector("[name='hold-" + holdIndex + "']");
+      if (box && box.type === "checkbox") {
+        box.checked = posted["hold-" + holdIndex] === "on";
+      }
+      holdIndex += 1;
+    }
   }
 
   function collectPoints(editor) {
@@ -1283,8 +1322,13 @@
         while (posted["axis-" + axisIndex] != null) {
           html += "<input type=\"hidden\" name=\"axis-" + axisIndex + "\" value=\"" +
             esc(posted["axis-" + axisIndex]) + "\">";
+          var held = posted["hold-" + axisIndex] === "on";
+          html += "<p><label><input type=\"checkbox\" name=\"hold-" + axisIndex +
+            "\" value=\"on\"" + (held ? " checked" : "") + "> Hold this reflection</label>";
+          html += "<input type=\"hidden\" name=\"hold-" + axisIndex + "\" value=\"off\"></p>";
           axisIndex += 1;
         }
+        html += "<p><button type=\"submit\" name=\"make_symmetric\" value=\"1\">Make it symmetric</button></p>";
         if (posted.style) {
           html += "<p><label><input type=\"radio\" name=\"style\" value=\"apex\"" +
             (posted.style === "ridge" ? "" : " checked") + "> Apex</label> ";
@@ -1535,6 +1579,13 @@
       if (!el || !el.name) { return; }
       if (el.name === "snap" && el.type === "checkbox") {
         editor.setSnap(el.checked);
+        return;
+      }
+      if (/^hold-\d+$/.test(el.name) && el.type === "checkbox") {
+        editor.setHold(parseInt(el.name.slice(5), 10), el.checked);
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+        }
         return;
       }
       if (el.name.indexOf("type-") !== -1 && el.type === "radio" && el.checked) {

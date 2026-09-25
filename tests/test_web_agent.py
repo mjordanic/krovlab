@@ -223,6 +223,189 @@ def test_agent_increases_side_3_through_json() -> None:
     assert "Update roof" in body["reply"]
 
 
+def _experimental_rect(**overrides: str) -> dict[str, str]:
+    form = dict(_rect())
+    form["method"] = "experimental"
+    form["roof_height"] = "3"
+    form["offset_x"] = "0"
+    form["offset_y"] = "0"
+    form["snap"] = "on"
+    form.update(overrides)
+    return form
+
+
+def _turn(form: dict[str, str], args: dict[str, object], text: str) -> dict[str, str]:
+    model = ScriptedModel(
+        [
+            ModelTurn(tool_calls=[ToolCall("set_cell", args)]),
+            ModelTurn(text=text),
+        ]
+    )
+    reply = run_turn(
+        model,
+        form=form,
+        messages=[{"role": "user", "content": text}],
+    )
+    assert "Update roof" in reply.reply
+    return reply.fields
+
+
+def test_helper_places_the_apex_the_ridge_snap_and_symmetry() -> None:
+    centered = _turn(
+        _experimental_rect(offset_x="1", offset_y="0.5"),
+        {"center": True},
+        "Center the apex.",
+    )
+    assert centered["offset_x"] == "0"
+    assert centered["offset_y"] == "0"
+    moved = _turn(
+        _experimental_rect(offset_x="1", offset_y="0"),
+        {"move_x": 0.5, "move_y": -1},
+        "Add an offset.",
+    )
+    assert moved["offset_x"] == "1.5"
+    assert moved["offset_y"] == "-1"
+    toward = _turn(
+        _experimental_rect(),
+        {"toward_wall": 2},
+        "Move toward wall 2.",
+    )
+    assert toward["offset_x"] == "1"
+    assert toward["offset_y"] == "0"
+    ridge = _turn(_experimental_rect(), {"style": "ridge"}, "Choose the ridge.")
+    assert ridge["style"] == "ridge"
+    pyramid = _turn(_experimental_rect(style="ridge"), {"style": "pyramid"}, "Pyramid.")
+    assert pyramid["style"] == "apex"
+    pyramide = _turn(
+        _experimental_rect(style="ridge"), {"style": "pyramide"}, "Pyramide."
+    )
+    assert pyramide["style"] == "apex"
+    snap = _turn(_experimental_rect(), {"snap": "off"}, "Turn snap off.")
+    assert snap["snap"] == "off"
+    held = _turn(
+        _experimental_rect(offset_x="1", offset_y="0.5"),
+        {"hold": 0},
+        "Hold the first reflection.",
+    )
+    assert held["offset_x"] == "0"
+    assert held["offset_y"] == "0.5"
+    assert held["hold-0"] == "on"
+    symmetric = _turn(
+        _experimental_rect(offset_x="1", offset_y="0.5"),
+        {"symmetric": True},
+        "Make it symmetric.",
+    )
+    assert symmetric["offset_x"] == "0"
+    assert symmetric["offset_y"] == "0"
+    assert symmetric["hold-0"] == "on"
+    assert symmetric["hold-1"] == "on"
+
+
+def test_helper_leaves_fields_unchanged_when_the_control_is_absent() -> None:
+    ell = _experimental_rect(
+        **{
+            "example": "l-shape",
+            "outer-x-0": "0",
+            "outer-y-0": "0",
+            "outer-x-1": "10",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "6",
+            "outer-x-3": "3",
+            "outer-y-3": "6",
+            "outer-x-4": "3",
+            "outer-y-4": "10",
+            "outer-x-5": "0",
+            "outer-y-5": "10",
+            "offset_x": "1",
+        }
+    )
+    ridge = set_cell(ell, style="ridge")
+    assert ridge.fields == {}
+    assert "no ridge" in ridge.note.lower()
+    missing = set_cell(ell, symmetric=True)
+    assert missing.fields == {}
+    assert "reflection" in missing.note.lower()
+    spanned = _experimental_rect(
+        **{
+            "outer-x-1": "5",
+            "outer-y-1": "0",
+            "outer-x-2": "10",
+            "outer-y-2": "0",
+            "outer-x-3": "10",
+            "outer-y-3": "6",
+            "outer-x-4": "0",
+            "outer-y-4": "6",
+            "face-0": "0,1",
+            "face-1": "2",
+            "face-2": "3",
+            "face-3": "4",
+            "offset_x": "1",
+        }
+    )
+    spanned_ridge = set_cell(spanned, style="ridge")
+    assert spanned_ridge.fields == {}
+    assert "ridge" in spanned_ridge.note.lower()
+    plane = _experimental_rect(**{"face-0": "0,1,2,3"})
+    nowhere = set_cell(plane, center=True)
+    assert nowhere.fields == {}
+    assert "single plane" in nowhere.note.lower() or "failure" in nowhere.note.lower()
+    bowtie = _experimental_rect(
+        **{
+            "outer-x-1": "10",
+            "outer-y-1": "10",
+            "outer-x-2": "10",
+            "outer-y-2": "0",
+            "outer-x-3": "0",
+            "outer-y-3": "10",
+        }
+    )
+    failed = set_cell(bowtie, center=True)
+    assert failed.fields == {}
+    unknown = set_cell(_experimental_rect(), placement="spin the apex")
+    assert unknown.fields == {}
+    model = ScriptedModel(
+        [
+            ModelTurn(tool_calls=[ToolCall("set_cell", {"style": "ridge"})]),
+            ModelTurn(text="This footprint has no ridge. The apex stays."),
+        ]
+    )
+    reply = run_turn(
+        model,
+        form=ell,
+        messages=[{"role": "user", "content": "Give this L a ridge."}],
+    )
+    assert reply.fields == {}
+
+
+def test_helper_still_sets_roof_height_and_refuses_a_wall_type() -> None:
+    form = _experimental_rect()
+    result = set_cell(form, cell=1, roof_height=2.0, overhang=0.4, eave_height=1.0)
+    assert result.ok
+    assert result.fields["roof_height"] == "2"
+    assert result.fields["overhang"] == "0.4"
+    assert result.fields["eave_height"] == "1"
+    assert "Update roof" in result.note
+    refused = set_wall(form, cell=1, wall=2, type="gable")
+    assert not refused.ok
+    assert refused.fields == {}
+
+
+def test_helper_instructions_name_placement_and_absent_controls() -> None:
+    text = system_prompt().lower()
+    assert "apex" in text
+    assert "ridge" in text
+    assert "offset" in text
+    assert "move toward a wall" in text
+    assert "snap" in text
+    assert "symmetry" in text
+    assert "no ridge on an l" in text
+    assert "spanned face" in text
+    assert "no symmetry the footprint lacks" in text
+    assert "single plane" in text
+    assert "failure" in text
+
+
 def test_agent_sets_roof_height_on_the_experimental_form() -> None:
     model = ScriptedModel(
         [

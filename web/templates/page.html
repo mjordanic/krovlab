@@ -401,6 +401,22 @@
             {% if ridge_note %}
             <p class="hint" id="ridge-note">{{ ridge_note }}</p>
             {% endif %}
+            {% for item in symmetry %}
+            <p>
+              <label>
+                <input type="checkbox" name="hold-{{ item.index }}" value="on"{% if item.checked %} checked{% endif %}>
+                Hold this reflection
+              </label>
+              <input type="hidden" name="hold-{{ item.index }}" value="off">
+            </p>
+            <p class="hint">{% if item.lies_on %}The offset lies on this reflection.{% else %}The offset leaves this reflection.{% endif %}</p>
+            {% endfor %}
+            {% if symmetry_note %}
+            <p class="hint" id="symmetry-note">{{ symmetry_note }}</p>
+            {% endif %}
+            <p>
+              <button type="submit" name="make_symmetric" value="1">Make it symmetric</button>
+            </p>
             <p>
               <label>
                 <input type="checkbox" name="snap" value="on"{% if snap_on %} checked{% endif %}>
@@ -447,6 +463,15 @@
           {% elif keep_offset and cell.index == 0 %}
           <input type="hidden" name="offset_x" value="{{ offset_x }}">
           <input type="hidden" name="offset_y" value="{{ offset_y }}">
+          {% if echo_style %}
+          <input type="hidden" name="style" value="{{ echo_style }}">
+          {% endif %}
+          {% if echo_snap %}
+          <input type="hidden" name="snap" value="{{ echo_snap }}">
+          {% endif %}
+          {% for index, value in echo_holds %}
+          <input type="hidden" name="hold-{{ index }}" value="{{ value }}">
+          {% endfor %}
           {% endif %}
           {% for wall in cell.walls %}
           <div class="wall" data-cell="{{ cell.index }}" data-wall="{{ wall.index }}">

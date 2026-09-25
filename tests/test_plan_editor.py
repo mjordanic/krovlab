@@ -487,6 +487,35 @@ editor.pointerUp();
     assert float(result["fields"]["offset_y"]) == 0.0
 
 
+def test_dragging_off_one_axis_clears_that_checkbox_and_keeps_the_offset() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(**{"hold-0": "on", "hold-1": "on"}))});
+editor.pointerDown(5, 3);
+editor.pointerMove(7, 3);
+editor.pointerUp();
+"""
+    )
+    assert float(result["fields"]["offset_x"]) == 2.0
+    assert float(result["fields"]["offset_y"]) == 0.0
+    assert result["fields"]["hold-0"] == "off"
+    assert result["fields"]["hold-1"] == "on"
+    back = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(
+    offset_x="2", offset_y="0", **{"hold-0": "off", "hold-1": "on"}
+))});
+editor.pointerDown(7, 3);
+editor.pointerMove(5, 3);
+editor.pointerUp();
+"""
+    )
+    assert float(back["fields"]["offset_x"]) == 0.0
+    assert float(back["fields"]["offset_y"]) == 0.0
+    assert back["fields"]["hold-0"] == "on"
+    assert back["fields"]["hold-1"] == "on"
+
+
 def test_snap_off_writes_the_pointer_including_through_the_midpoint() -> None:
     result = _run_editor(
         f"""

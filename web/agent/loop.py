@@ -202,6 +202,24 @@ def _cell_kwargs(args: dict[str, Any]) -> dict[str, Any]:
         out["eave_height"] = float(args["eave_height"])
     if args.get("roof_height") not in (None, ""):
         out["roof_height"] = float(args["roof_height"])
+    if args.get("center") in (True, "true", "on", "1", 1):
+        out["center"] = True
+    if args.get("symmetric") in (True, "true", "on", "1", 1):
+        out["symmetric"] = True
+    if args.get("style") not in (None, ""):
+        out["style"] = str(args["style"])
+    if args.get("snap") not in (None, ""):
+        out["snap"] = args["snap"]
+    if args.get("hold") not in (None, ""):
+        out["hold"] = int(args["hold"])
+    if args.get("toward_wall") not in (None, ""):
+        out["toward_wall"] = int(args["toward_wall"])
+    if args.get("move_x") not in (None, ""):
+        out["move_x"] = float(args["move_x"])
+    if args.get("move_y") not in (None, ""):
+        out["move_y"] = float(args["move_y"])
+    if args.get("placement") not in (None, ""):
+        out["placement"] = str(args["placement"])
     return out
 
 

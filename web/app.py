@@ -388,6 +388,11 @@ def _render_post(
         keep_offset=method == "skeleton",
         snap_on=_snap_on(form, reset=reset_offset),
         ridge_note=_ridge_note(form, result, reset=reset_offset),
+        holds=_shown_holds(form, reset=reset_offset),
+        symmetry_note=_symmetry_note(form, reset=reset_offset),
+        echo_style=_echo_choice(form, "style", {"apex", "ridge"}),
+        echo_snap=_echo_choice(form, "snap", {"on", "off"}),
+        echo_holds=_echo_holds(form) if method == "skeleton" else [],
     )
 
 
@@ -476,6 +481,11 @@ def _render(
     keep_offset: bool = False,
     snap_on: bool = True,
     ridge_note: str = "",
+    holds: list[bool] | None = None,
+    symmetry_note: str = "",
+    echo_style: str = "",
+    echo_snap: str = "",
+    echo_holds: list[tuple[int, str]] | None = None,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -564,6 +574,11 @@ def _render(
         ridge_hx=ridge_hx,
         ridge_hy=ridge_hy,
         ridge_note=ridge_note if show_placement else "",
+        symmetry=_symmetry_rows(axes, offset_x, offset_y, mid_x, mid_y, holds),
+        symmetry_note=symmetry_note if show_placement else "",
+        echo_style=echo_style,
+        echo_snap=echo_snap,
+        echo_holds=echo_holds or [],
     )
 
 
@@ -722,6 +737,180 @@ def _ridge_note(
     return "This footprint has no ridge. The apex stays."
 
 
+_HELD = {"on", "true", "1"}
+_NO_REFLECTION = "This footprint has no reflection. The roof stays."
+_NO_SUCH_REFLECTION = "This footprint has no such reflection. The roof stays."
+
+
+def _form_points(form: Mapping[str, str]) -> list[tuple[float, float]]:
+    ring = _posted_ring(form, "outer")
+    if not ring:
+        return []
+    points: list[tuple[float, float]] = []
+    for x, y in ring:
+        try:
+            points.append((float(x), float(y)))
+        except (TypeError, ValueError):
+            return []
+    return points
+
+
+def _parse_axis(raw: str | None) -> tuple[float, float, float] | None:
+    if raw is None or not raw.strip():
+        return None
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 3:
+        return None
+    try:
+        return (float(parts[0]), float(parts[1]), float(parts[2]))
+    except ValueError:
+        return None
+
+
+def _same_axis(
+    left: tuple[float, float, float], right: tuple[float, float, float]
+) -> bool:
+    same = all(abs(a - b) <= 1e-6 for a, b in zip(left, right, strict=True))
+    opposite = all(abs(a + b) <= 1e-6 for a, b in zip(left, right, strict=True))
+    return same or opposite
+
+
+def _hold_indexes(form: Mapping[str, str]) -> list[int]:
+    indexes: set[int] = set()
+    for key in form:
+        if not (key.startswith("hold-") or key.startswith("axis-")):
+            continue
+        suffix = key.split("-", 1)[1]
+        if suffix.isdigit():
+            indexes.add(int(suffix))
+    return sorted(indexes)
+
+
+def _held_lines(
+    form: Mapping[str, str], axes: list[tuple[float, float, float]]
+) -> list[tuple[float, float, float]]:
+    lines: list[tuple[float, float, float]] = []
+    for index in _hold_indexes(form):
+        raw = (form.get(f"hold-{index}") or "").strip().lower()
+        if raw not in _HELD:
+            continue
+        parsed = _parse_axis(form.get(f"axis-{index}"))
+        if parsed is None and index < len(axes):
+            parsed = axes[index]
+        lines.append(parsed if parsed is not None else (math.nan, math.nan, math.nan))
+    return lines
+
+
+def _hold_flags(
+    form: Mapping[str, str], axes: list[tuple[float, float, float]]
+) -> list[bool]:
+    lines = [
+        line for line in _held_lines(form, axes) if math.isfinite(line[0])
+    ]
+    return [any(_same_axis(line, axis) for line in lines) for axis in axes]
+
+
+def _shown_holds(form: Mapping[str, str], *, reset: bool) -> list[bool] | None:
+    if reset:
+        return None
+    axes = reflection_axes(_form_points(form))
+    if form.get("make_symmetric"):
+        return [True] * len(axes)
+    return _hold_flags(form, axes)
+
+
+def _symmetry_note(form: Mapping[str, str], *, reset: bool) -> str:
+    if reset:
+        return ""
+    axes = reflection_axes(_form_points(form))
+    if form.get("make_symmetric") and not axes:
+        return _NO_REFLECTION
+    for line in _held_lines(form, axes):
+        matched = any(_same_axis(line, axis) for axis in axes)
+        if not math.isfinite(line[0]) or not matched:
+            return _NO_SUCH_REFLECTION
+    return ""
+
+
+def _project_offset(
+    dx: float,
+    dy: float,
+    axes: list[tuple[float, float, float]],
+    mask: list[bool],
+) -> tuple[float, float]:
+    for axis, hold in zip(axes, mask, strict=True):
+        if not hold:
+            continue
+        nx, ny, _c = axis
+        signed = nx * dx + ny * dy
+        dx -= nx * signed
+        dy -= ny * signed
+    return dx, dy
+
+
+def _with_holds(form: Mapping[str, str], placement: Placement) -> Placement:
+    axes = reflection_axes(_form_points(form))
+    mask = (
+        [True] * len(axes)
+        if form.get("make_symmetric")
+        else _hold_flags(form, axes)
+    )
+    if not any(mask):
+        return placement
+    dx, dy = _project_offset(placement.dx, placement.dy, axes, mask)
+    return Placement(dx, dy, style=placement.style)
+
+
+def _echo_choice(form: Mapping[str, str], name: str, allowed: set[str]) -> str:
+    raw = (form.get(name) or "").strip().lower()
+    if raw in allowed:
+        return raw
+    return ""
+
+
+def _echo_holds(form: Mapping[str, str]) -> list[tuple[int, str]]:
+    indexes: set[int] = set()
+    for key in form:
+        if not key.startswith("hold-"):
+            continue
+        suffix = key.removeprefix("hold-")
+        if suffix.isdigit():
+            indexes.add(int(suffix))
+    rows: list[tuple[int, str]] = []
+    for index in sorted(indexes):
+        raw = (form.get(f"hold-{index}") or "").strip().lower()
+        rows.append((index, "on" if raw in _HELD else "off"))
+    return rows
+
+
+def _symmetry_rows(
+    axes: list[str],
+    offset_x: str,
+    offset_y: str,
+    mid_x: str,
+    mid_y: str,
+    holds: list[bool] | None,
+) -> list[dict[str, object]]:
+    try:
+        dx = float(offset_x)
+        dy = float(offset_y)
+        mx = float(mid_x)
+        my = float(mid_y)
+    except (TypeError, ValueError):
+        dx = dy = mx = my = 0.0
+    rows: list[dict[str, object]] = []
+    for index, raw in enumerate(axes):
+        parsed = _parse_axis(raw)
+        if parsed is None:
+            continue
+        nx, ny, c = parsed
+        lies_on = abs(nx * (mx + dx) + ny * (my + dy) - c) <= 1e-5
+        at_center = abs(dx) <= 1e-6 and abs(dy) <= 1e-6
+        checked = holds is None or at_center or (index < len(holds) and holds[index])
+        rows.append({"index": index, "checked": checked, "lies_on": lies_on})
+    return rows
+
+
 def _fmt_offset(value: float) -> str:
     return format(value, ".12g")
 
@@ -772,33 +961,37 @@ def _posted_style(form: Mapping[str, str]) -> str:
 def _placement_from_form(form: Mapping[str, str]) -> Placement | Failure:
     style = _posted_style(form)
     if form.get("place_at_center"):
-        return Placement(0.0, 0.0, style=style)
-    pair = _offset_pair(form, "offset_x", "offset_y")
-    if isinstance(pair, Failure):
-        return pair
-    placement = Placement(dx=pair[0], dy=pair[1], style=style)
-    if form.get("move_apex"):
-        move = _offset_pair(form, "move_x", "move_y")
-        if isinstance(move, Failure):
-            return move
-        return placement.added(move[0], move[1])
-    if form.get("step_toward_wall"):
-        raw = (form.get("toward_wall") or "").strip()
-        try:
-            wall_number = int(raw)
-        except ValueError:
-            return Failure(kind="degenerate", reason=_WALL_REASON)
-        ring = _posted_ring(form, "outer")
-        if ring is None:
-            return Failure(kind="degenerate", reason="a footprint needs an outer ring")
-        points: list[tuple[float, float]] = []
-        for x, y in ring:
+        placement = Placement(0.0, 0.0, style=style)
+    else:
+        pair = _offset_pair(form, "offset_x", "offset_y")
+        if isinstance(pair, Failure):
+            return pair
+        placement = Placement(dx=pair[0], dy=pair[1], style=style)
+        if form.get("move_apex"):
+            move = _offset_pair(form, "move_x", "move_y")
+            if isinstance(move, Failure):
+                return move
+            placement = placement.added(move[0], move[1])
+        elif form.get("step_toward_wall"):
+            raw = (form.get("toward_wall") or "").strip()
             try:
-                points.append((float(x), float(y)))
-            except (TypeError, ValueError):
+                wall_number = int(raw)
+            except ValueError:
                 return Failure(kind="degenerate", reason=_WALL_REASON)
-        return moved_toward_wall(points, wall_number, placement)
-    return placement
+            ring = _posted_ring(form, "outer")
+            if ring is None:
+                return Failure(kind="degenerate", reason="a footprint needs an outer ring")
+            points: list[tuple[float, float]] = []
+            for x, y in ring:
+                try:
+                    points.append((float(x), float(y)))
+                except (TypeError, ValueError):
+                    return Failure(kind="degenerate", reason=_WALL_REASON)
+            moved = moved_toward_wall(points, wall_number, placement)
+            if isinstance(moved, Failure):
+                return moved
+            placement = moved
+    return _with_holds(form, placement)
 
 
 def _run_experimental_from_form(
