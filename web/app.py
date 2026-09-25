@@ -387,6 +387,7 @@ def _render_post(
         show_placement=show_placement,
         keep_offset=method == "skeleton",
         snap_on=_snap_on(form, reset=reset_offset),
+        ridge_note=_ridge_note(form, result, reset=reset_offset),
     )
 
 
@@ -474,6 +475,7 @@ def _render(
     show_placement: bool = False,
     keep_offset: bool = False,
     snap_on: bool = True,
+    ridge_note: str = "",
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -501,6 +503,19 @@ def _render(
     mid_x, mid_y, axes = _apex_frame(
         result, draw_footprint if show_placement else []
     )
+    show_ridge = (
+        show_placement
+        and isinstance(result, PlacedRoof)
+        and result.offers_ridge
+    )
+    style = "apex"
+    ridge_hx = "0"
+    ridge_hy = "0"
+    if show_ridge and isinstance(result, PlacedRoof):
+        if result.style == "ridge":
+            style = "ridge"
+        ridge_hx = _fmt_offset(result.ridge_hx)
+        ridge_hy = _fmt_offset(result.ridge_hy)
     mesh_fields: dict[str, str] = {}
     if solid_html is not None:
         mesh_fields = _mesh_fields(
@@ -513,6 +528,7 @@ def _render(
             face_graph=mesh_face_graph,
             offset_x=offset_x if show_placement else None,
             offset_y=offset_y if show_placement else None,
+            style=style if show_placement else None,
         )
     return render_template(
         "page.html",
@@ -543,6 +559,11 @@ def _render(
         mid_x=mid_x,
         mid_y=mid_y,
         axes=axes,
+        show_ridge=show_ridge,
+        style=style,
+        ridge_hx=ridge_hx,
+        ridge_hy=ridge_hy,
+        ridge_note=ridge_note if show_placement else "",
     )
 
 
@@ -663,7 +684,7 @@ def _apex_frame(
 ) -> tuple[str, str, list[str]]:
     if not isinstance(result, PlacedRoof) or not result.nodes:
         return "", "", []
-    apex = result.nodes[-1]
+    apex_x, apex_y = _placed_plan(result)
     points: list[tuple[float, float]] = []
     for x, y in footprint:
         try:
@@ -675,10 +696,30 @@ def _apex_frame(
         for nx, ny, c in reflection_axes(points)
     ]
     return (
-        _fmt_offset(apex.x - result.used_dx),
-        _fmt_offset(apex.y - result.used_dy),
+        _fmt_offset(apex_x - result.used_dx),
+        _fmt_offset(apex_y - result.used_dy),
         axes,
     )
+
+
+def _placed_plan(result: PlacedRoof) -> tuple[float, float]:
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    if len(ridges) == 1:
+        start = result.nodes[ridges[0].start]
+        end = result.nodes[ridges[0].end]
+        return ((start.x + end.x) / 2.0, (start.y + end.y) / 2.0)
+    node = result.nodes[-1]
+    return (node.x, node.y)
+
+
+def _ridge_note(
+    form: Mapping[str, str], result: Roof | Project | Failure, *, reset: bool
+) -> str:
+    if reset or _posted_style(form) != "ridge":
+        return ""
+    if isinstance(result, PlacedRoof) and result.style == "ridge":
+        return ""
+    return "This footprint has no ridge. The apex stays."
 
 
 def _fmt_offset(value: float) -> str:
@@ -721,13 +762,21 @@ def _offset_pair(
     return (values[0], values[1])
 
 
+def _posted_style(form: Mapping[str, str]) -> str:
+    raw = (form.get("style") or "apex").strip().lower()
+    if raw == "ridge":
+        return "ridge"
+    return "apex"
+
+
 def _placement_from_form(form: Mapping[str, str]) -> Placement | Failure:
+    style = _posted_style(form)
     if form.get("place_at_center"):
-        return Placement(0.0, 0.0)
+        return Placement(0.0, 0.0, style=style)
     pair = _offset_pair(form, "offset_x", "offset_y")
     if isinstance(pair, Failure):
         return pair
-    placement = Placement(dx=pair[0], dy=pair[1])
+    placement = Placement(dx=pair[0], dy=pair[1], style=style)
     if form.get("move_apex"):
         move = _offset_pair(form, "move_x", "move_y")
         if isinstance(move, Failure):
@@ -1494,6 +1543,7 @@ def _mesh_fields(
     face_graph: list[list[int]] | None = None,
     offset_x: str | None = None,
     offset_y: str | None = None,
+    style: str | None = None,
 ) -> dict[str, str]:
     """Form fields that rebuild the solid currently drawn on the page."""
     fields: dict[str, str] = {"set_pitch": set_pitch, "method": method}
@@ -1504,6 +1554,8 @@ def _mesh_fields(
     if method == "experimental" and offset_x is not None and offset_y is not None:
         fields["offset_x"] = offset_x
         fields["offset_y"] = offset_y
+        if style:
+            fields["style"] = style
     if method == "experimental" and face_graph:
         for index, group in enumerate(face_graph):
             fields[f"face-{index}"] = ",".join(str(wall) for wall in group)

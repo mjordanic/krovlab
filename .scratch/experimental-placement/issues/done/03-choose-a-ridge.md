@@ -8,7 +8,7 @@ The page explanation says the visitor can move the apex and, where Ridge is offe
 
 **Blocked by:** 01: Centered apex and a typed offset, 02: Drag and snap the apex
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 15, 17, 18, 19, 21, 22, 23, 24, 25, 55, 60, 67, 71
 
@@ -16,9 +16,9 @@ The page explanation says the visitor can move the apex and, where Ridge is offe
 
 **Artifact homes:** No new file. The Apex / Ridge choice is a field of the existing form and an optional placement on the experimental entry point.
 
-- [ ] The rectangle offers Apex and Ridge. Apex is selected on arrival. Ridge at offset (0, 0) and roof height 3 m is the segment (3, 3)–(7, 3), every pitch is 45°, and the takeoff includes that ridge
-- [ ] Apex on that rectangle still has no ridge, and both roofs are terrains with the usual quantities
-- [ ] Switching style keeps the offset. The offset slides the ridge without changing its length or direction. The interior handle drags the segment
-- [ ] The L, and a face that spans several walls, offer no Ridge control
-- [ ] A corner edit that removes the single clearance segment returns to Apex and keeps the offset. A corner edit that keeps the segment keeps the style
-- [ ] The experimental explanation says the visitor can move the apex and, on the rectangle, choose a ridge
+- [x] The rectangle offers Apex and Ridge. Apex is selected on arrival. Ridge at offset (0, 0) and roof height 3 m is the segment (3, 3)–(7, 3), every pitch is 45°, and the takeoff includes that ridge
+- [x] Apex on that rectangle still has no ridge, and both roofs are terrains with the usual quantities
+- [x] Switching style keeps the offset. The offset slides the ridge without changing its length or direction. The interior handle drags the segment
+- [x] The L, and a face that spans several walls, offer no Ridge control
+- [x] A corner edit that removes the single clearance segment returns to Apex and keeps the offset. A corner edit that keeps the segment keeps the style
+- [x] The experimental explanation says the visitor can move the apex and, on the rectangle, choose a ridge

@@ -320,6 +320,108 @@ def _value(page: str, name: str) -> str:
     return match.group(1)
 
 
+def test_the_rectangle_offers_apex_and_ridge_and_the_takeoff_includes_it() -> None:
+    page = _client().get("/?method=experimental").get_data(as_text=True)
+    assert 'name="style" value="apex" checked' in page
+    assert 'name="style" value="ridge"' in page
+    assert "where a ridge is offered, choose it" in page.lower()
+    ridge = _client().post(
+        "/", data=_rect_post(style="ridge", roof_height="3", offset_x="0", offset_y="0")
+    ).get_data(as_text=True)
+    assert "ridge: 4.000 m" in ridge
+    assert "terrain: True" in ridge
+    assert 'name="style" value="ridge" checked' in ridge
+    assert _value(ridge, "offset_x") == "0"
+    for edge in range(4):
+        assert f"edge {edge}: pitch 45°" in ridge
+    apex = _client().post(
+        "/", data=_rect_post(style="apex", roof_height="3")
+    ).get_data(as_text=True)
+    assert "ridge: " not in apex
+    assert "terrain: True" in apex
+    kept = _client().post(
+        "/",
+        data=_rect_post(style="ridge", offset_x="1", offset_y="-0.5", roof_height="3"),
+    ).get_data(as_text=True)
+    assert _value(kept, "offset_x") == "1"
+    assert _value(kept, "offset_y") == "-0.5"
+    assert 'name="style" value="ridge" checked' in kept
+
+
+def test_the_l_and_a_spanned_face_have_no_ridge_control() -> None:
+    ell = _client().get("/?method=experimental&example=l-shape").get_data(as_text=True)
+    assert 'name="style" value="ridge"' not in ell
+    assert 'name="offset_x"' in ell
+    asked = _client().post(
+        "/",
+        data=_l_post(method="experimental", style="ridge", offset_x="0", offset_y="0"),
+    ).get_data(as_text=True)
+    assert "This footprint has no ridge. The apex stays." in asked
+    assert 'name="style" value="ridge"' not in asked
+    assert _value(asked, "offset_x") == "0"
+    assert "ridge: " not in asked
+    spanned = _client().post(
+        "/",
+        data=_rect_post(
+            style="ridge",
+            offset_x="1",
+            offset_y="0",
+            **{
+                "outer-x-0": "0",
+                "outer-y-0": "0",
+                "outer-x-1": "5",
+                "outer-y-1": "0",
+                "outer-x-2": "10",
+                "outer-y-2": "0",
+                "outer-x-3": "10",
+                "outer-y-3": "6",
+                "outer-x-4": "0",
+                "outer-y-4": "6",
+                "type-4": "hip",
+                "pitch-4": "45",
+                "face-0": "0,1",
+                "face-1": "2",
+                "face-2": "3",
+                "face-3": "4",
+            },
+        ),
+    ).get_data(as_text=True)
+    assert 'name="style" value="ridge"' not in spanned
+    assert "This footprint has no ridge. The apex stays." in spanned
+    assert _value(spanned, "offset_x") == "1"
+
+
+def test_a_corner_edit_drops_ridge_only_when_the_segment_is_gone() -> None:
+    kept = _client().post(
+        "/",
+        data=_rect_post(
+            style="ridge",
+            offset_x="1",
+            offset_y="0",
+            **{"outer-y-2": "8", "outer-y-3": "8"},
+        ),
+    ).get_data(as_text=True)
+    assert 'name="style" value="ridge" checked' in kept
+    assert _value(kept, "offset_x") == "1"
+    square = _client().post(
+        "/",
+        data=_rect_post(
+            style="ridge",
+            offset_x="1",
+            offset_y="0.5",
+            **{"outer-y-2": "10", "outer-y-3": "10"},
+        ),
+    ).get_data(as_text=True)
+    assert 'name="style" value="ridge"' not in square
+    assert _value(square, "offset_x") == "1"
+    assert _value(square, "offset_y") == "0.5"
+    assert "This footprint has no ridge. The apex stays." in square
+    fresh = _client().get("/?method=experimental&example=l-shape").get_data(
+        as_text=True
+    )
+    assert 'name="style" value="ridge" checked' not in fresh
+
+
 def test_experimental_explanation_says_the_visitor_can_move_the_apex() -> None:
     page = _client().get("/?method=experimental").get_data(as_text=True)
     assert "move the apex" in page.lower()

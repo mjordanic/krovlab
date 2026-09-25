@@ -55,6 +55,7 @@ process.stdout.write(JSON.stringify({{
   selectedEdge: editor.selectedEdge(),
   selectedDormer: editor.selectedDormer(),
   apex: typeof editor.apex === "function" ? editor.apex() : null,
+  ridge: typeof editor.ridge === "function" ? editor.ridge() : null,
   extra: extra
 }}));
 """
@@ -379,6 +380,48 @@ extra.releaseSubmits = editor.pointerUp();
     assert float(result["fields"]["offset_y"]) == 1.0
     assert result["apex"] == [7, 4]
     assert result["extra"]["releaseSubmits"] is True
+
+
+def test_dragging_the_interior_handle_slides_the_ridge() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(
+    style="ridge", ridge_hx="2", ridge_hy="0"
+))});
+editor.pointerDown(7, 3);
+editor.pointerMove(8, 4);
+extra.releaseSubmits = editor.pointerUp();
+"""
+    )
+    assert _xy(result["fields"], "") == [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (0.0, 6.0),
+    ]
+    assert result["fields"]["style"] == "ridge"
+    assert float(result["fields"]["offset_x"]) == 1.0
+    assert float(result["fields"]["offset_y"]) == 1.0
+    assert result["ridge"] == [[4, 4], [8, 4]]
+    assert result["extra"]["releaseSubmits"] is True
+
+
+def test_dragging_a_corner_keeps_the_ridge_style_and_the_offset() -> None:
+    result = _run_editor(
+        f"""
+editor.loadFields({json.dumps(_placement_rect(
+    style="ridge", ridge_hx="2", ridge_hy="0", offset_x="1", offset_y="0"
+))});
+editor.pointerDown(10, 6);
+editor.pointerMove(12, 6);
+extra.releaseSubmits = editor.pointerUp();
+"""
+    )
+    assert result["fields"]["style"] == "ridge"
+    assert result["fields"]["offset_x"] == "1"
+    assert result["fields"]["offset_y"] == "0"
+    assert result["fields"]["outer-x-2"] == "12"
+    assert result["extra"]["releaseSubmits"] is False
 
 
 def test_dragging_a_corner_writes_the_corner_and_leaves_the_offset() -> None:

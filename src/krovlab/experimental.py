@@ -47,6 +47,10 @@ class PlacedRoof(Roof):
 
     used_dx: float = 0.0
     used_dy: float = 0.0
+    style: str = "apex"
+    offers_ridge: bool = False
+    ridge_hx: float = 0.0
+    ridge_hy: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -54,14 +58,18 @@ class Placement:
     """Metres from the clearance midpoint, in the footprint's axes.
 
     ``(0, 0)`` is that midpoint. Omitted placement is the same as this.
+    ``style`` is ``"apex"`` or ``"ridge"``. Ridge is used only when the
+    footprint's maximum-clearance set is one segment and no face spans
+    several walls; otherwise the apex is built.
     """
 
     dx: float = 0.0
     dy: float = 0.0
+    style: str = "apex"
 
     def added(self, dx: float, dy: float) -> Placement:
         """Shift this offset by another pair of metres."""
-        return Placement(dx=self.dx + dx, dy=self.dy + dy)
+        return Placement(dx=self.dx + dx, dy=self.dy + dy, style=self.style)
 
 
 DEFAULT_CHECKPOINT = (
@@ -161,6 +169,9 @@ def roof_from_face_graph(
     offset = _placement_offset(placement)
     if isinstance(offset, Failure):
         return offset
+    style = "apex"
+    if placement is not None and placement.style == "ridge":
+        style = "ridge"
     expanded = apply_overhang(cleaned, [], float(overhang))
     if isinstance(expanded, Failure):
         return expanded
@@ -185,7 +196,14 @@ def roof_from_face_graph(
     for group in faces:
         oriented.append(sorted((caller_to_ring[w] for w in group), key=lambda w: w))
     lifted = _lift(
-        ring, oriented, edge_map, cleaned, float(eave_height), rise, offset
+        ring,
+        oriented,
+        edge_map,
+        cleaned,
+        float(eave_height),
+        rise,
+        offset,
+        style,
     )
     return lifted
 
@@ -367,13 +385,34 @@ def _lift(
     eave_height: float,
     roof_height: float,
     offset: Vertex,
+    style: str = "apex",
 ) -> Roof | Failure:
     if len(faces) == 1:
         return _lift_one_plane(
             ring, faces[0], edge_map, footprint, eave_height, roof_height
         )
+    offered = _simple_ridge(ring, faces)
+    if style == "ridge" and offered is not None:
+        return _lift_ridge(
+            ring,
+            faces,
+            edge_map,
+            footprint,
+            eave_height,
+            roof_height,
+            offset,
+            offered,
+        )
     return _lift_fan(
-        ring, faces, edge_map, footprint, eave_height, roof_height, offset
+        ring,
+        faces,
+        edge_map,
+        footprint,
+        eave_height,
+        roof_height,
+        offset,
+        offered is not None,
+        offered,
     )
 
 
@@ -491,24 +530,40 @@ def _lift_fan(
     eave_height: float,
     roof_height: float,
     offset: Vertex,
+    offers_ridge: bool = False,
+    ridge: tuple[Vertex, Vertex, dict[int, int]] | None = None,
 ) -> Roof | Failure:
     midpoint = _clearance_midpoint(ring)
     if midpoint is None:
         return _unliftable("no interior point from which the faces can fan")
     target = (midpoint[0] + offset[0], midpoint[1] + offset[1])
-    return _pull_back(midpoint, target, lambda apex_xy: _lift_fan_at(
-        ring, faces, edge_map, footprint, eave_height, roof_height, apex_xy
-    ))
+    half = _ridge_half(ridge)
+    return _pull_back(
+        midpoint,
+        target,
+        lambda apex_xy: _lift_fan_at(
+            ring, faces, edge_map, footprint, eave_height, roof_height, apex_xy
+        ),
+        offers_ridge=offers_ridge,
+        ridge_half=half,
+    )
 
 
 def _lifts(result: Roof | Failure) -> bool:
     return isinstance(result, Roof) and result.validity.is_terrain
 
 
-def _remember(result: Roof | Failure, midpoint: Vertex) -> Roof | Failure:
+def _remember(
+    result: Roof | Failure,
+    midpoint: Vertex,
+    *,
+    offers_ridge: bool = False,
+    ridge_half: Vertex = (0.0, 0.0),
+) -> Roof | Failure:
     if not isinstance(result, Roof):
         return result
-    apex = result.nodes[-1]
+    placed = _interior_xy(result)
+    style = "ridge" if any(arc.kind == "ridge" for arc in result.arcs) else "apex"
     return PlacedRoof(
         nodes=result.nodes,
         faces=result.faces,
@@ -516,23 +571,49 @@ def _remember(result: Roof | Failure, midpoint: Vertex) -> Roof | Failure:
         ridge_height=result.ridge_height,
         total_sloped_area=result.total_sloped_area,
         validity=result.validity,
-        used_dx=apex.x - midpoint[0],
-        used_dy=apex.y - midpoint[1],
+        used_dx=placed[0] - midpoint[0],
+        used_dy=placed[1] - midpoint[1],
+        style=style,
+        offers_ridge=offers_ridge,
+        ridge_hx=ridge_half[0],
+        ridge_hy=ridge_half[1],
     )
+
+
+def _interior_xy(result: Roof) -> Vertex:
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    if len(ridges) == 1:
+        start = result.nodes[ridges[0].start]
+        end = result.nodes[ridges[0].end]
+        return ((start.x + end.x) / 2.0, (start.y + end.y) / 2.0)
+    apex = result.nodes[-1]
+    return (apex.x, apex.y)
 
 
 def _pull_back(
     midpoint: Vertex,
     target: Vertex,
     build: Callable[[Vertex], Roof | Failure],
+    *,
+    offers_ridge: bool = False,
+    ridge_half: Vertex = (0.0, 0.0),
 ) -> Roof | Failure:
     """Last place on the segment from the midpoint to ``target`` that lifts."""
+
+    def remember(result: Roof | Failure) -> Roof | Failure:
+        return _remember(
+            result,
+            midpoint,
+            offers_ridge=offers_ridge,
+            ridge_half=ridge_half,
+        )
+
     placed = build(target)
     if _lifts(placed):
-        return _remember(placed, midpoint)
+        return remember(placed)
     origin = build(midpoint)
     if not _lifts(origin):
-        return _remember(origin, midpoint)
+        return remember(origin)
     low = 0.0
     high = 1.0
     best: Roof | Failure = origin
@@ -548,7 +629,7 @@ def _pull_back(
             best = trial
         else:
             high = t
-    return _remember(best, midpoint)
+    return remember(best)
 
 
 def _lift_fan_at(
@@ -708,6 +789,184 @@ def _convex_at(ring: list[Vertex], index: int) -> bool:
     bx, by = ring[index]
     cx, cy = ring[(index + 1) % n]
     return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0.0
+
+
+def _ridge_half(
+    ridge: tuple[Vertex, Vertex, dict[int, int]] | None,
+) -> Vertex:
+    if ridge is None:
+        return (0.0, 0.0)
+    start, end, _links = ridge
+    return ((end[0] - start[0]) / 2.0, (end[1] - start[1]) / 2.0)
+
+
+def _simple_ridge(
+    ring: list[Vertex], faces: list[list[int]]
+) -> tuple[Vertex, Vertex, dict[int, int]] | None:
+    """One clearance segment, and every interior skeleton node on it.
+
+    An L has that segment plus lower interior nodes, so it is not offered.
+    A face over several walls is not offered either.
+    """
+    if any(len(group) != 1 for group in faces):
+        return None
+    n = len(ring)
+    raw = _straight_skeleton([ring], [1.0] * n)
+    if not raw.complete or not raw.nodes:
+        return None
+    max_height = max(node[2] for node in raw.nodes)
+    if max_height <= 1e-6:
+        return None
+    interior = [i for i, node in enumerate(raw.nodes) if node[2] > 1e-6]
+    segments: list[tuple[int, int]] = []
+    for start, end, _face_a, _face_b in raw.arcs:
+        if start < n or end < n:
+            continue
+        a = raw.nodes[start]
+        b = raw.nodes[end]
+        if abs(a[2] - max_height) > 1e-6 or abs(b[2] - max_height) > 1e-6:
+            continue
+        if math.hypot(a[0] - b[0], a[1] - b[1]) <= 1e-6:
+            continue
+        segments.append((start, end))
+    if len(segments) != 1:
+        return None
+    first, second = segments[0]
+    if set(interior) != {first, second}:
+        return None
+    links: dict[int, int] = {}
+    for start, end, _face_a, _face_b in raw.arcs:
+        boundary: int | None
+        inner: int | None
+        if start < n <= end:
+            boundary, inner = start, end
+        elif end < n <= start:
+            boundary, inner = end, start
+        else:
+            continue
+        if inner not in (first, second):
+            return None
+        links[boundary] = 0 if inner == first else 1
+    if set(links) != set(range(n)):
+        return None
+    start_xy = (raw.nodes[first][0], raw.nodes[first][1])
+    end_xy = (raw.nodes[second][0], raw.nodes[second][1])
+    if (end_xy[0], end_xy[1]) < (start_xy[0], start_xy[1]):
+        start_xy, end_xy = end_xy, start_xy
+        links = {corner: 1 - which for corner, which in links.items()}
+    return start_xy, end_xy, links
+
+
+def _lift_ridge(
+    ring: list[Vertex],
+    faces: list[list[int]],
+    edge_map: list[int],
+    footprint: list[Vertex],
+    eave_height: float,
+    roof_height: float,
+    offset: Vertex,
+    ridge: tuple[Vertex, Vertex, dict[int, int]],
+) -> Roof | Failure:
+    midpoint = _clearance_midpoint(ring)
+    if midpoint is None:
+        return _unliftable("no interior point from which the faces can fan")
+    target = (midpoint[0] + offset[0], midpoint[1] + offset[1])
+    half = _ridge_half(ridge)
+    return _pull_back(
+        midpoint,
+        target,
+        lambda apex_xy: _lift_ridge_at(
+            ring,
+            faces,
+            edge_map,
+            footprint,
+            eave_height,
+            roof_height,
+            ridge,
+            midpoint,
+            apex_xy,
+        ),
+        offers_ridge=True,
+        ridge_half=half,
+    )
+
+
+def _lift_ridge_at(
+    ring: list[Vertex],
+    faces: list[list[int]],
+    edge_map: list[int],
+    footprint: list[Vertex],
+    eave_height: float,
+    roof_height: float,
+    ridge: tuple[Vertex, Vertex, dict[int, int]],
+    midpoint: Vertex,
+    apex_xy: Vertex,
+) -> Roof | Failure:
+    start, end, links = ridge
+    shift = (apex_xy[0] - midpoint[0], apex_xy[1] - midpoint[1])
+    a_xy = (start[0] + shift[0], start[1] + shift[1])
+    b_xy = (end[0] + shift[0], end[1] + shift[1])
+    n = len(ring)
+    nodes = (
+        *tuple(Node(ring[i][0], ring[i][1], 0.0) for i in range(n)),
+        Node(a_xy[0], a_xy[1], roof_height),
+        Node(b_xy[0], b_xy[1], roof_height),
+    )
+    start_i = n
+    end_i = n + 1
+
+    def ridge_end(corner: int) -> int:
+        return start_i if links[corner] == 0 else end_i
+
+    built_faces: list[Face] = []
+    arcs: list[Arc] = []
+    for group in faces:
+        wall = group[0]
+        nxt = (wall + 1) % n
+        left = ridge_end(wall)
+        right = ridge_end(nxt)
+        cycle = (
+            [wall, nxt, left] if left == right else [wall, nxt, right, left]
+        )
+        pitch = _pitch_from_nodes(nodes, cycle)
+        built_faces.append(
+            _face_from_cycle(edge_map[wall], pitch, cycle, nodes, [wall], edge_map)
+        )
+        a, b = nodes[wall], nodes[nxt]
+        arcs.append(Arc(start=wall, end=nxt, kind="eave", length=_node_distance(a, b)))
+    seen: set[tuple[int, int]] = set()
+    for corner in range(n):
+        inner = ridge_end(corner)
+        pair = (corner, inner)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        kind: ArcKind = "hip" if _convex_at(ring, corner) else "valley"
+        arcs.append(
+            Arc(
+                start=corner,
+                end=inner,
+                kind=kind,
+                length=_node_distance(nodes[corner], nodes[inner]),
+            )
+        )
+    arcs.append(
+        Arc(
+            start=start_i,
+            end=end_i,
+            kind="ridge",
+            length=_node_distance(nodes[start_i], nodes[end_i]),
+        )
+    )
+    built = _finish_roof(nodes, built_faces, arcs, footprint, [], eave_height)
+    planar_fail = [
+        reason
+        for reason in built.validity.reasons
+        if reason.startswith("every face is planar")
+    ]
+    if planar_fail:
+        return _unliftable("the face graph could not be lifted into planar faces")
+    return built
 
 
 def _clearance_midpoint(ring: list[Vertex]) -> Vertex | None:

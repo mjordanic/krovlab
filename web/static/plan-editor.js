@@ -152,6 +152,12 @@
     var selectedDormerVertex = null;
     var offsetX = 0;
     var offsetY = 0;
+    var style = "apex";
+    var styleKnown = false;
+    var ridgeHx = 0;
+    var ridgeHy = 0;
+    var grabDx = 0;
+    var grabDy = 0;
     var snapOn = true;
     var midX = null;
     var midY = null;
@@ -652,6 +658,10 @@
       placementOn = midX !== null && midY !== null;
       offsetX = readNumber(map, "offset_x") || 0;
       offsetY = readNumber(map, "offset_y") || 0;
+      styleKnown = Object.prototype.hasOwnProperty.call(map, "style");
+      style = map.style === "ridge" ? "ridge" : "apex";
+      ridgeHx = readNumber(map, "ridge_hx") || 0;
+      ridgeHy = readNumber(map, "ridge_hy") || 0;
       snapOn = map.snap !== "off";
       axes = [];
       var i = 0;
@@ -723,12 +733,39 @@
       return [cleanMetres(midX + offsetX), cleanMetres(midY + offsetY)];
     }
 
+    function ridgeEnds() {
+      if (!placementOn || style !== "ridge") {
+        return null;
+      }
+      var at = apexPoint();
+      return [
+        [cleanMetres(at[0] - ridgeHx), cleanMetres(at[1] - ridgeHy)],
+        [cleanMetres(at[0] + ridgeHx), cleanMetres(at[1] + ridgeHy)]
+      ];
+    }
+
+    function distanceToSegment(x, y, a, b) {
+      var dx = b[0] - a[0];
+      var dy = b[1] - a[1];
+      var len2 = dx * dx + dy * dy;
+      if (len2 < 1e-18) {
+        return Math.hypot(x - a[0], y - a[1]);
+      }
+      var t = ((x - a[0]) * dx + (y - a[1]) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+    }
+
     function hitApex(x, y) {
       if (!placementOn) {
         return false;
       }
       var at = apexPoint();
-      return Math.hypot(x - at[0], y - at[1]) <= 0.25;
+      if (Math.hypot(x - at[0], y - at[1]) <= 0.25) {
+        return true;
+      }
+      var ends = ridgeEnds();
+      return !!(ends && distanceToSegment(x, y, ends[0], ends[1]) <= 0.25);
     }
 
     function pointerDown(x, y) {
@@ -749,7 +786,9 @@
           dragging = { kind: "apex" };
           selectedVertex = null;
           selectedEdge = null;
-          placeApex(x, y);
+          grabDx = x - apexPoint()[0];
+          grabDy = y - apexPoint()[1];
+          placeApex(x - grabDx, y - grabDy);
           return;
         }
       }
@@ -768,7 +807,7 @@
         return;
       }
       if (dragging.kind === "apex") {
-        placeApex(x, y);
+        placeApex(x - grabDx, y - grabDy);
         return;
       }
       if (dragging.kind === "dormer") {
@@ -856,6 +895,11 @@
         if (index === 0 && placementOn) {
           out.offset_x = String(cleanMetres(offsetX));
           out.offset_y = String(cleanMetres(offsetY));
+          if (styleKnown) {
+            out.style = style;
+            out.ridge_hx = String(ridgeHx);
+            out.ridge_hy = String(ridgeHy);
+          }
           out.snap = snapOn ? "on" : "off";
           out.mid_x = String(midX);
           out.mid_y = String(midY);
@@ -961,6 +1005,7 @@
       pointerUp: pointerUp,
       draggingKind: function () { return dragging ? dragging.kind : null; },
       apex: apexPoint,
+      ridge: ridgeEnds,
       setSnap: function (on) { snapOn = !!on; },
       applySettings: applySettings,
       applyForm: function (formEl) { applySettings(formMap(formEl)); },
@@ -1057,6 +1102,12 @@
       var apex = editor.apex();
       if (apex) { pts.push(apex); }
     }
+    if (typeof editor.ridge === "function") {
+      var ridgeEnds = editor.ridge();
+      if (ridgeEnds) {
+        ridgeEnds.forEach(function (pt) { pts.push(pt); });
+      }
+    }
     return pts;
   }
 
@@ -1136,6 +1187,11 @@
           "\" r=\"0.18\" data-dormer=\"" + dIndex + "\" data-vertex=\"" + i + "\"></circle>";
       });
     });
+    var ridgeAt = typeof editor.ridge === "function" ? editor.ridge() : null;
+    if (ridgeAt) {
+      html += "<line class=\"is-ridge\" x1=\"" + ridgeAt[0][0] + "\" y1=\"" + ridgeAt[0][1] +
+        "\" x2=\"" + ridgeAt[1][0] + "\" y2=\"" + ridgeAt[1][1] + "\"></line>";
+    }
     var apexAt = typeof editor.apex === "function" ? editor.apex() : null;
     if (apexAt) {
       html += "<circle class=\"is-apex\" cx=\"" + apexAt[0] + "\" cy=\"" + apexAt[1] +
@@ -1228,6 +1284,16 @@
           html += "<input type=\"hidden\" name=\"axis-" + axisIndex + "\" value=\"" +
             esc(posted["axis-" + axisIndex]) + "\">";
           axisIndex += 1;
+        }
+        if (posted.style) {
+          html += "<p><label><input type=\"radio\" name=\"style\" value=\"apex\"" +
+            (posted.style === "ridge" ? "" : " checked") + "> Apex</label> ";
+          html += "<label><input type=\"radio\" name=\"style\" value=\"ridge\"" +
+            (posted.style === "ridge" ? " checked" : "") + "> Ridge</label></p>";
+        }
+        if (posted.ridge_hx != null) {
+          html += "<input type=\"hidden\" name=\"ridge_hx\" value=\"" + esc(posted.ridge_hx) + "\">";
+          html += "<input type=\"hidden\" name=\"ridge_hy\" value=\"" + esc(posted.ridge_hy) + "\">";
         }
         html += "<p><label><input type=\"checkbox\" name=\"snap\" value=\"on\"" +
           (posted.snap === "off" ? "" : " checked") + "> Snap to 0.5 m</label>";

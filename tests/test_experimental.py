@@ -57,6 +57,108 @@ def test_omitted_placement_centers_the_apex_on_the_10_by_6() -> None:
     )
 
 
+def test_ridge_at_the_center_of_the_10_by_6_is_the_clearance_segment() -> None:
+    result = roof_from_face_graph(
+        RECTANGLE,
+        roof_height=3.0,
+        placement=Placement(style="ridge"),
+    )
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    assert len(ridges) == 1
+    arc = ridges[0]
+    ends = sorted(
+        (
+            (
+                result.nodes[arc.start].x,
+                result.nodes[arc.start].y,
+                result.nodes[arc.start].height,
+            ),
+            (
+                result.nodes[arc.end].x,
+                result.nodes[arc.end].y,
+                result.nodes[arc.end].height,
+            ),
+        )
+    )
+    assert ends == pytest.approx([(3.0, 3.0, 3.0), (7.0, 3.0, 3.0)])
+    assert arc.length == pytest.approx(4.0)
+    assert [face.pitch for face in result.faces] == pytest.approx(
+        [45.0, 45.0, 45.0, 45.0]
+    )
+    footprint_area = Polygon(RECTANGLE).area
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(footprint_area)
+    assert result.total_sloped_area == pytest.approx(
+        sum(face.sloped_area for face in result.faces)
+    )
+
+
+def test_offset_slides_the_ridge_and_switching_keeps_the_offset() -> None:
+    ridge = roof_from_face_graph(
+        RECTANGLE,
+        roof_height=3.0,
+        placement=Placement(dx=1.0, dy=0.5, style="ridge"),
+    )
+    apex = roof_from_face_graph(
+        RECTANGLE,
+        roof_height=3.0,
+        placement=Placement(dx=1.0, dy=0.5, style="apex"),
+    )
+    assert isinstance(ridge, Roof)
+    assert isinstance(apex, Roof)
+    assert not any(arc.kind == "ridge" for arc in apex.arcs)
+    arc = next(item for item in ridge.arcs if item.kind == "ridge")
+    ends = sorted(
+        (
+            (ridge.nodes[arc.start].x, ridge.nodes[arc.start].y),
+            (ridge.nodes[arc.end].x, ridge.nodes[arc.end].y),
+        )
+    )
+    assert ends == pytest.approx([(4.0, 3.5), (8.0, 3.5)])
+    assert ridge.nodes[arc.start].y == pytest.approx(ridge.nodes[arc.end].y)
+    tip = max(apex.nodes, key=lambda node: node.height)
+    midpoint = (
+        (ends[0][0] + ends[1][0]) / 2.0,
+        (ends[0][1] + ends[1][1]) / 2.0,
+    )
+    assert midpoint == pytest.approx((tip.x, tip.y))
+
+
+def test_an_l_and_a_spanned_face_stay_on_the_apex() -> None:
+    ell = roof_from_face_graph(
+        L_SHAPE,
+        [[0], [1], [2], [3], [4], [5]],
+        roof_height=3.0,
+        checkpoint=None,
+        placement=Placement(dx=1.0, dy=0.0, style="ridge"),
+    )
+    spanned = roof_from_face_graph(
+        [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)],
+        [[0, 1], [2], [3], [4]],
+        roof_height=3.0,
+        checkpoint=None,
+        placement=Placement(dx=1.0, dy=0.0, style="ridge"),
+    )
+    assert isinstance(ell, Roof)
+    assert isinstance(spanned, Roof)
+    assert not any(arc.kind == "ridge" for arc in ell.arcs)
+    assert not any(arc.kind == "ridge" for arc in spanned.arcs)
+    ell_apex = roof_from_face_graph(
+        L_SHAPE,
+        [[0], [1], [2], [3], [4], [5]],
+        roof_height=3.0,
+        checkpoint=None,
+        placement=Placement(dx=1.0, dy=0.0),
+    )
+    assert isinstance(ell_apex, Roof)
+    ell_tip = max(ell.nodes, key=lambda node: node.height)
+    same = max(ell_apex.nodes, key=lambda node: node.height)
+    assert (ell_tip.x, ell_tip.y) == pytest.approx((same.x, same.y))
+    spanned_tip = max(spanned.nodes, key=lambda node: node.height)
+    assert (spanned_tip.x, spanned_tip.y) == pytest.approx((6.0, 3.0))
+
+
 def test_offset_moves_the_apex_and_place_at_center_returns_it() -> None:
     moved = roof_from_face_graph(
         RECTANGLE, roof_height=3.0, placement=Placement(dx=1.0, dy=0.0)
