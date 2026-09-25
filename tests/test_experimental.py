@@ -13,7 +13,7 @@ import pytest
 from shapely.geometry import Point, Polygon  # type: ignore[import-untyped]
 
 from krovlab import Failure, Roof, roof
-from krovlab.experimental import roof_from_face_graph
+from krovlab.experimental import Placement, moved_toward_wall, roof_from_face_graph
 
 L_SHAPE = [
     (0.0, 0.0),
@@ -42,6 +42,128 @@ def test_omitted_roof_height_rises_like_a_45_degree_hip_on_the_10_by_6() -> None
     assert result.ridge_height == pytest.approx(3.0)
 
 
+def test_omitted_placement_centers_the_apex_on_the_10_by_6() -> None:
+    result = roof_from_face_graph(RECTANGLE, roof_height=3.0)
+    assert isinstance(result, Roof)
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y, apex.height) == pytest.approx((5.0, 3.0, 3.0))
+    assert not any(arc.kind == "ridge" for arc in result.arcs)
+    long_walls = [face for face in result.faces if face.edge_index in (0, 2)]
+    short_walls = [face for face in result.faces if face.edge_index in (1, 3)]
+    assert [face.pitch for face in long_walls] == pytest.approx([45.0, 45.0])
+    short_pitch = math.degrees(math.atan(3.0 / 5.0))
+    assert [face.pitch for face in short_walls] == pytest.approx(
+        [short_pitch, short_pitch]
+    )
+
+
+def test_offset_moves_the_apex_and_place_at_center_returns_it() -> None:
+    moved = roof_from_face_graph(
+        RECTANGLE, roof_height=3.0, placement=Placement(dx=1.0, dy=0.0)
+    )
+    assert isinstance(moved, Roof)
+    apex = max(moved.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y) == pytest.approx((6.0, 3.0))
+    assert moved.ridge_height == pytest.approx(3.0)
+    centered = roof_from_face_graph(
+        RECTANGLE, roof_height=3.0, placement=Placement(dx=0.0, dy=0.0)
+    )
+    assert isinstance(centered, Roof)
+    back = max(centered.nodes, key=lambda node: node.height)
+    assert (back.x, back.y) == pytest.approx((5.0, 3.0))
+
+
+def test_one_metre_toward_wall_2_puts_the_apex_at_6_3() -> None:
+    moved = moved_toward_wall(RECTANGLE, 2)
+    assert isinstance(moved, Placement)
+    result = roof_from_face_graph(RECTANGLE, roof_height=3.0, placement=moved)
+    assert isinstance(result, Roof)
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y, apex.height) == pytest.approx((6.0, 3.0, 3.0))
+
+
+def test_a_move_adds_to_the_current_offset() -> None:
+    moved = Placement(dx=1.0, dy=0.0).added(0.5, -1.0)
+    result = roof_from_face_graph(RECTANGLE, roof_height=3.0, placement=moved)
+    assert isinstance(result, Roof)
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y) == pytest.approx((6.5, 2.0))
+
+
+def test_overhang_is_applied_before_the_clearance_midpoint() -> None:
+    result = roof_from_face_graph(RECTANGLE, roof_height=3.0, overhang=1.0)
+    assert isinstance(result, Roof)
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y) == pytest.approx((5.0, 3.0))
+    long_pitch = math.degrees(math.atan(3.0 / 4.0))
+    short_pitch = math.degrees(math.atan(3.0 / 6.0))
+    long_walls = [face.pitch for face in result.faces if face.edge_index in (0, 2)]
+    short_walls = [face.pitch for face in result.faces if face.edge_index in (1, 3)]
+    assert long_walls == pytest.approx([long_pitch, long_pitch])
+    assert short_walls == pytest.approx([short_pitch, short_pitch])
+
+
+def test_eave_height_lifts_the_placed_roof() -> None:
+    result = roof_from_face_graph(
+        RECTANGLE,
+        roof_height=3.0,
+        eave_height=2.0,
+        placement=Placement(dx=1.0, dy=0.0),
+    )
+    assert isinstance(result, Roof)
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y, apex.height) == pytest.approx((6.0, 3.0, 5.0))
+
+
+def test_placement_does_not_change_which_walls_share_a_face() -> None:
+    centered = roof_from_face_graph(
+        L_SHAPE, MIXED, roof_height=3.0, checkpoint=None
+    )
+    moved = roof_from_face_graph(
+        L_SHAPE,
+        MIXED,
+        roof_height=3.0,
+        checkpoint=None,
+        placement=Placement(dx=0.5, dy=0.0),
+    )
+    assert isinstance(centered, Roof)
+    assert isinstance(moved, Roof)
+    assert [face.edge_index for face in moved.faces] == [
+        face.edge_index for face in centered.faces
+    ]
+    spanning = next(face for face in moved.faces if face.edge_index == 2)
+    assert {2, 3, 4} <= set(spanning.node_indices)
+
+
+def test_the_l_starts_at_the_clearance_midpoint() -> None:
+    result = roof_from_face_graph(
+        L_SHAPE, [[0], [1], [2], [3], [4], [5]], roof_height=3.0, checkpoint=None
+    )
+    assert isinstance(result, Roof)
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y) == pytest.approx((5.0, 3.0))
+
+
+def test_an_offset_outside_the_footprint_pulls_back_along_the_segment() -> None:
+    result = roof_from_face_graph(
+        RECTANGLE, roof_height=3.0, placement=Placement(dx=10.0, dy=0.0)
+    )
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert apex.y == pytest.approx(3.0)
+    assert apex.x < 10.0
+    assert apex.x == pytest.approx(10.0, abs=1e-2)
+    settled = roof_from_face_graph(
+        RECTANGLE,
+        roof_height=3.0,
+        placement=Placement(dx=apex.x - 5.0, dy=apex.y - 3.0),
+    )
+    assert isinstance(settled, Roof)
+    again = max(settled.nodes, key=lambda node: node.height)
+    assert (again.x, again.y) == pytest.approx((apex.x, apex.y))
+
+
 def test_roof_height_sets_the_rise_above_the_eaves() -> None:
     result = roof_from_face_graph(RECTANGLE, roof_height=2.0)
     assert isinstance(result, Roof)
@@ -60,7 +182,8 @@ def test_roof_height_must_be_above_the_eaves() -> None:
 def test_omitted_graph_roofs_from_the_committed_checkpoint() -> None:
     result = roof_from_face_graph(L_SHAPE)
     assert isinstance(result, Roof)
-    assert result.validity.is_terrain is True
+    apex = max(result.nodes, key=lambda node: node.height)
+    assert (apex.x, apex.y) == pytest.approx((5.0, 3.0))
     assert "pitch" not in signature(roof_from_face_graph).parameters
 
 
@@ -130,6 +253,13 @@ def test_terrain_quantities_use_the_same_definitions_as_roof() -> None:
         a, b = result.nodes[arc.start], result.nodes[arc.end]
         length = math.hypot(a.x - b.x, a.y - b.y, a.height - b.height)
         assert arc.length == pytest.approx(length)
+
+
+def test_roof_and_project_do_not_take_a_placement() -> None:
+    from krovlab import project
+
+    assert "placement" not in signature(roof).parameters
+    assert "placement" not in signature(project).parameters
 
 
 def test_import_krovlab_does_not_load_the_experimental_module() -> None:

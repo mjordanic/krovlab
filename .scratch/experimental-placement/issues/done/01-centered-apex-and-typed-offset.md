@@ -8,7 +8,7 @@ Update keeps the offset. Changing roof height or editing a corner keeps it, meas
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Stories:** 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 20, 27, 28, 49, 50, 51, 53, 54, 57, 68, 69, 70, 72, 73, 74
 
@@ -16,13 +16,13 @@ Update keeps the offset. Changing roof height or editing a corner keeps it, meas
 
 **Artifact homes:** No new file. Placement is an optional argument of the experimental entry point. The offset fields and the experimental explanation live on the existing form page.
 
-- [ ] An omitted placement on the 10×6 rectangle puts the apex at (5, 3) when the roof height is 3 m, with no ridge, long-wall pitch 45°, and the short-wall pitch a 3 m rise over a 5 m run
-- [ ] The existing 3 m rise test on that rectangle still passes
-- [ ] Offset (1, 0) puts the apex at (6, 3). Place-at-center returns it to (5, 3). A move adds to the current offset
-- [ ] 1 m toward Wall 2 from the center of that rectangle puts the apex at (6, 3)
-- [ ] An offset that leaves the footprint returns a Roof on the segment from the midpoint to the request, the fields show the offset that was used, and submitting that offset again returns the same interior
-- [ ] Update, a roof-height change, and a corner edit keep the offset, measured from the current midpoint. Overhang is applied before the midpoint. Eave height lifts the finished roof
-- [ ] Another example or a DXF resets the offset to (0, 0). A skeleton POST does not use the offset. The fields are still there after switching back to experimental
-- [ ] A single plane and a Failure show no placement controls. The face graph is otherwise unchanged, and a supplied face graph still says which walls share a face
-- [ ] The experimental explanation says the visitor can move the apex
-- [ ] `roof` and `project` are unchanged. `import krovlab` still loads no experimental module and no PyTorch
+- [x] An omitted placement on the 10×6 rectangle puts the apex at (5, 3) when the roof height is 3 m, with no ridge, long-wall pitch 45°, and the short-wall pitch a 3 m rise over a 5 m run
+- [x] The existing 3 m rise test on that rectangle still passes
+- [x] Offset (1, 0) puts the apex at (6, 3). Place-at-center returns it to (5, 3). A move adds to the current offset
+- [x] 1 m toward Wall 2 from the center of that rectangle puts the apex at (6, 3)
+- [x] An offset that leaves the footprint returns a Roof on the segment from the midpoint to the request, the fields show the offset that was used, and submitting that offset again returns the same interior
+- [x] Update, a roof-height change, and a corner edit keep the offset, measured from the current midpoint. Overhang is applied before the midpoint. Eave height lifts the finished roof
+- [x] Another example or a DXF resets the offset to (0, 0). A skeleton POST does not use the offset. The fields are still there after switching back to experimental
+- [x] A single plane and a Failure show no placement controls. The face graph is otherwise unchanged, and a supplied face graph still says which walls share a face
+- [x] The experimental explanation says the visitor can move the apex
+- [x] `roof` and `project` are unchanged. `import krovlab` still loads no experimental module and no PyTorch

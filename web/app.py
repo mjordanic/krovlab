@@ -13,7 +13,12 @@ from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
-from krovlab.experimental import roof_from_face_graph
+from krovlab.experimental import (
+    PlacedRoof,
+    Placement,
+    moved_toward_wall,
+    roof_from_face_graph,
+)
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
 from web.agent.rate_limit import RateLimiter
@@ -123,6 +128,9 @@ def create_app(
                 mesh_face_graph=(
                     _example_face_graph(example) if method == "experimental" else None
                 ),
+                offset_x="0",
+                offset_y="0",
+                show_placement=_has_interior(result) and method == "experimental",
             )
         method = _posted_method(request.form)
         catalog = _catalog(method, examples, experimental_examples)
@@ -207,7 +215,12 @@ def _result_from_form(form: Mapping[str, str]) -> Roof | Project | Failure:
         catalog = load_experimental_examples()
         slug = form.get("example") or DEFAULT_EXPERIMENTAL_EXAMPLE
         example = catalog.get(slug, catalog[DEFAULT_EXPERIMENTAL_EXAMPLE])
-        return _run_experimental_from_form(form, _posted_face_graph(form), example)
+        placement = _placement_from_form(form)
+        if isinstance(placement, Failure):
+            return placement
+        return _run_experimental_from_form(
+            form, _posted_face_graph(form), example, placement=placement
+        )
     set_pitch = form.get("set_pitch") or "45"
     _, parsed = _posted_cells(form, set_pitch)
     _, parsed_dormers = _posted_dormers(form)
@@ -294,21 +307,41 @@ def _render_post(
     views, parsed = _posted_cells(form, set_pitch)
     dormer_views, parsed_dormers = _posted_dormers(form)
     face_graph = _posted_face_graph(form)
-    result: Roof | Project | Failure
-    if method == "experimental":
-        result = _run_experimental_from_form(form, face_graph, example)
-    elif isinstance(parsed, Failure):
-        result = parsed
-    elif isinstance(parsed_dormers, Failure):
-        result = parsed_dormers
-    else:
-        result = _run_cells(parsed, parsed_dormers)
     dxf_units = form.get("dxf_units") or "mm"
     if dxf_units not in {"mm", "cm", "m"}:
         dxf_units = "mm"
     dxf_message = ""
     needs_update = False
     selected_cell = form.get("selected_cell") or ""
+    reset_offset = False
+    if is_upload:
+        loaded = _load_dxf(files, dxf_units)
+        if isinstance(loaded, str):
+            dxf_message = loaded
+        else:
+            index = _selected_cell_index(form, len(views))
+            views = _apply_dxf_to_cell(views, index, loaded, set_pitch)
+            needs_update = True
+            selected_cell = str(index)
+            reset_offset = True
+    result: Roof | Project | Failure
+    placement: Placement | Failure | None = None
+    if method == "experimental":
+        placement = (
+            Placement(0.0, 0.0) if reset_offset else _placement_from_form(form)
+        )
+        if isinstance(placement, Failure):
+            result = placement
+        else:
+            result = _run_experimental_from_form(
+                form, face_graph, example, placement=placement
+            )
+    elif isinstance(parsed, Failure):
+        result = parsed
+    elif isinstance(parsed_dormers, Failure):
+        result = parsed_dormers
+    else:
+        result = _run_cells(parsed, parsed_dormers)
     shown_cells = views
     shown_dormers = dormer_views
     used_graph = (
@@ -322,15 +355,13 @@ def _render_post(
         if method == "experimental" and posted_height and posted_height.strip()
         else None
     )
-    if is_upload:
-        loaded = _load_dxf(files, dxf_units)
-        if isinstance(loaded, str):
-            dxf_message = loaded
-        else:
-            index = _selected_cell_index(form, len(views))
-            views = _apply_dxf_to_cell(views, index, loaded, set_pitch)
-            needs_update = True
-            selected_cell = str(index)
+    if reset_offset:
+        offset_x, offset_y = "0", "0"
+    elif isinstance(result, PlacedRoof):
+        offset_x, offset_y = _fmt_offset(result.used_dx), _fmt_offset(result.used_dy)
+    else:
+        offset_x, offset_y = _echo_offset(form)
+    show_placement = method == "experimental" and _has_interior(result)
     return _render(
         example,
         groups,
@@ -349,6 +380,10 @@ def _render_post(
         mesh_dormers=shown_dormers,
         mesh_face_graph=used_graph if method == "experimental" else None,
         mesh_roof_height=mesh_roof_height,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        show_placement=show_placement,
+        keep_offset=method == "skeleton",
     )
 
 
@@ -431,6 +466,10 @@ def _render(
     mesh_dormers: list[DormerView] | None = None,
     mesh_face_graph: list[list[int]] | None = None,
     mesh_roof_height: str | None = None,
+    offset_x: str = "0",
+    offset_y: str = "0",
+    show_placement: bool = False,
+    keep_offset: bool = False,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -465,6 +504,8 @@ def _render(
             example=example.slug,
             roof_height=mesh_roof_height,
             face_graph=mesh_face_graph,
+            offset_x=offset_x if show_placement else None,
+            offset_y=offset_y if show_placement else None,
         )
     return render_template(
         "page.html",
@@ -487,6 +528,10 @@ def _render(
         needs_update=needs_update,
         selected_cell=selected_cell,
         mesh_fields=mesh_fields,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        show_placement=show_placement,
+        keep_offset=keep_offset,
     )
 
 
@@ -588,10 +633,86 @@ def _example_face_graph(example: Example) -> list[list[int]] | None:
     return [list(group) for group in example.face_graph]
 
 
+def _has_interior(result: Roof | Project | Failure) -> bool:
+    return isinstance(result, Roof) and len(result.faces) > 1
+
+
+def _fmt_offset(value: float) -> str:
+    return format(value, ".12g")
+
+
+def _echo_offset(form: Mapping[str, str]) -> tuple[str, str]:
+    raw_x = form.get("offset_x")
+    raw_y = form.get("offset_y")
+    return (
+        "0" if raw_x is None or raw_x.strip() == "" else raw_x.strip(),
+        "0" if raw_y is None or raw_y.strip() == "" else raw_y.strip(),
+    )
+
+
+_OFFSET_REASON = (
+    "placement offset must be finite metres from the clearance midpoint"
+)
+_WALL_REASON = (
+    "wall number must be one of the walls on the page, starting at Wall 1"
+)
+
+
+def _offset_pair(
+    form: Mapping[str, str], x_name: str, y_name: str
+) -> tuple[float, float] | Failure:
+    values: list[float] = []
+    for name in (x_name, y_name):
+        raw = form.get(name)
+        if raw is None or raw.strip() == "":
+            values.append(0.0)
+            continue
+        try:
+            number = float(raw)
+        except ValueError:
+            return Failure(kind="degenerate", reason=_OFFSET_REASON)
+        if not math.isfinite(number):
+            return Failure(kind="degenerate", reason=_OFFSET_REASON)
+        values.append(number)
+    return (values[0], values[1])
+
+
+def _placement_from_form(form: Mapping[str, str]) -> Placement | Failure:
+    if form.get("place_at_center"):
+        return Placement(0.0, 0.0)
+    pair = _offset_pair(form, "offset_x", "offset_y")
+    if isinstance(pair, Failure):
+        return pair
+    placement = Placement(dx=pair[0], dy=pair[1])
+    if form.get("move_apex"):
+        move = _offset_pair(form, "move_x", "move_y")
+        if isinstance(move, Failure):
+            return move
+        return placement.added(move[0], move[1])
+    if form.get("step_toward_wall"):
+        raw = (form.get("toward_wall") or "").strip()
+        try:
+            wall_number = int(raw)
+        except ValueError:
+            return Failure(kind="degenerate", reason=_WALL_REASON)
+        ring = _posted_ring(form, "outer")
+        if ring is None:
+            return Failure(kind="degenerate", reason="a footprint needs an outer ring")
+        points: list[tuple[float, float]] = []
+        for x, y in ring:
+            try:
+                points.append((float(x), float(y)))
+            except (TypeError, ValueError):
+                return Failure(kind="degenerate", reason=_WALL_REASON)
+        return moved_toward_wall(points, wall_number, placement)
+    return placement
+
+
 def _run_experimental_from_form(
     form: Mapping[str, str],
     face_graph: list[list[int]] | None,
     example: Example,
+    placement: Placement | None = None,
 ) -> Roof | Failure:
     posted_outer = _posted_ring(form, "outer")
     if posted_outer is None:
@@ -621,6 +742,7 @@ def _run_experimental_from_form(
         overhang=overhang,
         eave_height=eave_height,
         roof_height=roof_height,
+        placement=placement,
     )
 
 
@@ -1326,6 +1448,8 @@ def _mesh_fields(
     example: str = "",
     roof_height: str | None = None,
     face_graph: list[list[int]] | None = None,
+    offset_x: str | None = None,
+    offset_y: str | None = None,
 ) -> dict[str, str]:
     """Form fields that rebuild the solid currently drawn on the page."""
     fields: dict[str, str] = {"set_pitch": set_pitch, "method": method}
@@ -1333,6 +1457,9 @@ def _mesh_fields(
         fields["example"] = example
     if method == "experimental" and roof_height:
         fields["roof_height"] = roof_height
+    if method == "experimental" and offset_x is not None and offset_y is not None:
+        fields["offset_x"] = offset_x
+        fields["offset_y"] = offset_y
     if method == "experimental" and face_graph:
         for index, group in enumerate(face_graph):
             fields[f"face-{index}"] = ",".join(str(wall) for wall in group)

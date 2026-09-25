@@ -219,6 +219,7 @@
         {% if method == "experimental" %}
         <li>Load an example this method can roof: a rectangle, an L, one face over two walls, an overhang, an eave height, or a plan that crosses itself.</li>
         <li>Roof height, overhang, and eave height still apply. Pitch, gable, knee, gambrel, holes, dormers, and extra cells do not.</li>
+        <li>Move the apex by typing an offset, in metres, from the middle of the footprint.</li>
         {% else %}
         <li>Load a catalog example (hip, gable, shed, mixed pitches, knee, gambrel, L-shape, courtyard, overhang, two cells, a dormer, a named failure).</li>
         <li>Select a wall or corner on the plan, drag vertices, add a detached cell, add a cell on a selected wall, split a wall with a vertex, or delete a cell.</li>
@@ -253,9 +254,9 @@
     <p class="caption" id="experimental-copy"{% if method != "experimental" %} hidden{% endif %}>
       A network chooses which faces share a boundary. A planarity step then
       makes those faces planar. Pitch is not an input. Use this method for a
-      face over several walls or for another ridge layout. Keep the skeleton
-      when each wall has a pitch. Gable, knee, gambrel, holes, dormers, and
-      extra cells are not part of this method.
+      face over several walls or for another ridge layout. You can move the
+      apex. Keep the skeleton when each wall has a pitch. Gable, knee,
+      gambrel, holes, dormers, and extra cells are not part of this method.
     </p>
   </div>
   <form class="example-bar" method="get" action="/">
@@ -372,6 +373,49 @@
               m above the eaves
             </label>
           </p>
+          {% endif %}
+          {% if show_placement and cell.index == 0 %}
+          <fieldset>
+            <legend>Apex</legend>
+            <p>
+              <label>
+                Offset x
+                <input name="offset_x" value="{{ offset_x }}">
+                m from the middle
+              </label>
+              <label>
+                Offset y
+                <input name="offset_y" value="{{ offset_y }}">
+                m from the middle
+              </label>
+            </p>
+            <p>
+              <button type="submit" name="place_at_center" value="1">Place at the center</button>
+            </p>
+            <p>
+              <label>
+                Move x
+                <input name="move_x" value="0">
+                m
+              </label>
+              <label>
+                Move y
+                <input name="move_y" value="0">
+                m
+              </label>
+              <button type="submit" name="move_apex" value="1">Move</button>
+            </p>
+            <p>
+              <label>
+                Wall
+                <input name="toward_wall" value="1">
+              </label>
+              <button type="submit" name="step_toward_wall" value="1">1 m toward wall</button>
+            </p>
+          </fieldset>
+          {% elif keep_offset and cell.index == 0 %}
+          <input type="hidden" name="offset_x" value="{{ offset_x }}">
+          <input type="hidden" name="offset_y" value="{{ offset_y }}">
           {% endif %}
           {% for wall in cell.walls %}
           <div class="wall" data-cell="{{ cell.index }}" data-wall="{{ wall.index }}">
@@ -544,7 +588,8 @@
       radios.forEach(function (radio) {
         radio.addEventListener("change", function () {
           if (!radio.checked) return;
-          window.location = "/?method=" + encodeURIComponent(radio.value);
+          var form = document.getElementById("roof-form");
+          if (form) form.requestSubmit();
         });
       });
     })();

@@ -17,11 +17,13 @@ an interior point to the nearest wall.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from krovlab._input import check_footprint
 from krovlab._offset import apply_overhang
+from krovlab._skeleton import skeleton as _straight_skeleton
 from krovlab.roof import (
     Arc,
     ArcKind,
@@ -37,6 +39,30 @@ from krovlab.roof import (
 
 type Vertex = tuple[float, float]
 type FaceGraph = Sequence[Sequence[int]]
+
+
+@dataclass(frozen=True)
+class PlacedRoof(Roof):
+    """A fan roof that records the offset, in metres, that was actually used."""
+
+    used_dx: float = 0.0
+    used_dy: float = 0.0
+
+
+@dataclass(frozen=True)
+class Placement:
+    """Metres from the clearance midpoint, in the footprint's axes.
+
+    ``(0, 0)`` is that midpoint. Omitted placement is the same as this.
+    """
+
+    dx: float = 0.0
+    dy: float = 0.0
+
+    def added(self, dx: float, dy: float) -> Placement:
+        """Shift this offset by another pair of metres."""
+        return Placement(dx=self.dx + dx, dy=self.dy + dy)
+
 
 DEFAULT_CHECKPOINT = (
     Path(__file__).resolve().parents[2] / "models" / "ren2021-face-adjacency.pt"
@@ -56,6 +82,7 @@ def roof_from_face_graph(
     eave_height: float = 0.0,
     roof_height: float | None = None,
     checkpoint: Path | str | None = DEFAULT_CHECKPOINT,
+    placement: Placement | None = None,
 ) -> Roof | Failure:
     """Lift a face graph over one footprint into a roof.
 
@@ -80,6 +107,10 @@ def roof_from_face_graph(
         ``face_graph`` is omitted. The shipped path is the default.
         ``None``, or a path that is not a file, is Failure
         ``no_face_graph``. Ignored when a face graph is supplied.
+    placement
+        Offset in metres from the midpoint of the maximum-clearance set.
+        Omitted, the apex is that midpoint. A single plane has no interior
+        to move, so the offset is ignored there.
 
     Returns
     -------
@@ -127,6 +158,9 @@ def roof_from_face_graph(
             kind="degenerate",
             reason="roof height must be a finite number of metres above the eaves",
         )
+    offset = _placement_offset(placement)
+    if isinstance(offset, Failure):
+        return offset
     expanded = apply_overhang(cleaned, [], float(overhang))
     if isinstance(expanded, Failure):
         return expanded
@@ -150,8 +184,92 @@ def roof_from_face_graph(
     oriented = []
     for group in faces:
         oriented.append(sorted((caller_to_ring[w] for w in group), key=lambda w: w))
-    lifted = _lift(ring, oriented, edge_map, cleaned, float(eave_height), rise)
+    lifted = _lift(
+        ring, oriented, edge_map, cleaned, float(eave_height), rise, offset
+    )
     return lifted
+
+
+def moved_toward_wall(
+    footprint: Sequence[Vertex],
+    wall_number: int,
+    placement: Placement | None = None,
+    metres: float = 1.0,
+) -> Placement | Failure:
+    """Add ``metres`` toward wall ``wall_number`` (page numbering, from 1).
+
+    The step is perpendicular to that wall, from the current interior
+    toward the wall, so the distance to it decreases.
+    """
+    current = placement if placement is not None else Placement()
+    if (
+        isinstance(wall_number, bool)
+        or not isinstance(wall_number, int)
+        or wall_number < 1
+        or wall_number > len(footprint)
+    ):
+        return Failure(
+            kind="degenerate",
+            reason=(
+                "wall number must be one of the walls on the page, starting at Wall 1"
+            ),
+        )
+    if (
+        isinstance(metres, bool)
+        or not isinstance(metres, (int, float))
+        or not math.isfinite(metres)
+    ):
+        return Failure(
+            kind="degenerate",
+            reason="a move toward a wall must be a finite number of metres",
+        )
+    index = wall_number - 1
+    start = footprint[index]
+    end = footprint[(index + 1) % len(footprint)]
+    edge_x = end[0] - start[0]
+    edge_y = end[1] - start[1]
+    length = math.hypot(edge_x, edge_y)
+    if length < 1e-18:
+        return Failure(
+            kind="degenerate",
+            reason="a move toward a wall needs a wall with length",
+        )
+    midpoint = _clearance_midpoint(list(footprint))
+    if midpoint is None:
+        return Failure(
+            kind="unliftable",
+            reason="no interior point from which the faces can fan",
+        )
+    interior = (midpoint[0] + current.dx, midpoint[1] + current.dy)
+    signed = (
+        edge_x * (interior[1] - start[1]) - edge_y * (interior[0] - start[0])
+    ) / length
+    left_x = -edge_y / length
+    left_y = edge_x / length
+    if signed >= 0.0:
+        step_x, step_y = -left_x, -left_y
+    else:
+        step_x, step_y = left_x, left_y
+    return current.added(step_x * float(metres), step_y * float(metres))
+
+
+def _placement_offset(placement: Placement | None) -> Vertex | Failure:
+    if placement is None:
+        return (0.0, 0.0)
+    dx, dy = placement.dx, placement.dy
+    if (
+        isinstance(dx, bool)
+        or isinstance(dy, bool)
+        or not isinstance(dx, (int, float))
+        or not isinstance(dy, (int, float))
+        or not math.isfinite(dx)
+        or not math.isfinite(dy)
+    ):
+        return Failure(
+            kind="degenerate",
+            reason="placement offset must be finite metres from the clearance midpoint",
+        )
+    return (float(dx), float(dy))
 
 
 def _unliftable(reason: str) -> Failure:
@@ -248,12 +366,15 @@ def _lift(
     footprint: list[Vertex],
     eave_height: float,
     roof_height: float,
+    offset: Vertex,
 ) -> Roof | Failure:
     if len(faces) == 1:
         return _lift_one_plane(
             ring, faces[0], edge_map, footprint, eave_height, roof_height
         )
-    return _lift_fan(ring, faces, edge_map, footprint, eave_height, roof_height)
+    return _lift_fan(
+        ring, faces, edge_map, footprint, eave_height, roof_height, offset
+    )
 
 
 def _walls_collinear(ring: list[Vertex], walls: list[int]) -> bool:
@@ -369,10 +490,76 @@ def _lift_fan(
     footprint: list[Vertex],
     eave_height: float,
     roof_height: float,
+    offset: Vertex,
 ) -> Roof | Failure:
-    apex_xy = _kernel_point(ring)
-    if apex_xy is None:
+    midpoint = _clearance_midpoint(ring)
+    if midpoint is None:
         return _unliftable("no interior point from which the faces can fan")
+    target = (midpoint[0] + offset[0], midpoint[1] + offset[1])
+    return _pull_back(midpoint, target, lambda apex_xy: _lift_fan_at(
+        ring, faces, edge_map, footprint, eave_height, roof_height, apex_xy
+    ))
+
+
+def _lifts(result: Roof | Failure) -> bool:
+    return isinstance(result, Roof) and result.validity.is_terrain
+
+
+def _remember(result: Roof | Failure, midpoint: Vertex) -> Roof | Failure:
+    if not isinstance(result, Roof):
+        return result
+    apex = result.nodes[-1]
+    return PlacedRoof(
+        nodes=result.nodes,
+        faces=result.faces,
+        arcs=result.arcs,
+        ridge_height=result.ridge_height,
+        total_sloped_area=result.total_sloped_area,
+        validity=result.validity,
+        used_dx=apex.x - midpoint[0],
+        used_dy=apex.y - midpoint[1],
+    )
+
+
+def _pull_back(
+    midpoint: Vertex,
+    target: Vertex,
+    build: Callable[[Vertex], Roof | Failure],
+) -> Roof | Failure:
+    """Last place on the segment from the midpoint to ``target`` that lifts."""
+    placed = build(target)
+    if _lifts(placed):
+        return _remember(placed, midpoint)
+    origin = build(midpoint)
+    if not _lifts(origin):
+        return _remember(origin, midpoint)
+    low = 0.0
+    high = 1.0
+    best: Roof | Failure = origin
+    for _ in range(40):
+        t = (low + high) / 2.0
+        point = (
+            midpoint[0] + t * (target[0] - midpoint[0]),
+            midpoint[1] + t * (target[1] - midpoint[1]),
+        )
+        trial = build(point)
+        if _lifts(trial):
+            low = t
+            best = trial
+        else:
+            high = t
+    return _remember(best, midpoint)
+
+
+def _lift_fan_at(
+    ring: list[Vertex],
+    faces: list[list[int]],
+    edge_map: list[int],
+    footprint: list[Vertex],
+    eave_height: float,
+    roof_height: float,
+    apex_xy: Vertex,
+) -> Roof | Failure:
     n = len(ring)
     parsed: list[tuple[list[int], list[int]]] = []
     for group in faces:
@@ -523,99 +710,72 @@ def _convex_at(ring: list[Vertex], index: int) -> bool:
     return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0.0
 
 
-def _kernel_point(ring: list[Vertex]) -> Vertex | None:
-    """A point inside the polygon from which every wall is visible, if any."""
-    n = len(ring)
-    xs = [p[0] for p in ring]
-    ys = [p[1] for p in ring]
-    minx, maxx = min(xs), max(xs)
-    miny, maxy = min(ys), max(ys)
-    best: Vertex | None = None
-    best_clearance = -1.0
-    grid = 16
-    for i in range(grid):
-        for j in range(grid):
-            pt = (
-                minx + (i + 0.5) / grid * (maxx - minx),
-                miny + (j + 0.5) / grid * (maxy - miny),
-            )
-            if not _visible_from(pt, ring):
-                continue
-            clearance = min(
-                _signed_left(pt, ring[k], ring[(k + 1) % n]) for k in range(n)
-            )
-            if clearance > best_clearance:
-                best_clearance = clearance
-                best = pt
-    if best is None:
+def _clearance_midpoint(ring: list[Vertex]) -> Vertex | None:
+    """Midpoint of the points farthest from the nearest wall.
+
+    Equal-speed straight skeleton: height is distance to the boundary.
+    The maximum-clearance set is the skeleton at that greatest height,
+    a point or a segment. A rectangle's segment is centered here.
+    """
+    oriented, _edge_map = _oriented_ring(list(ring), clockwise=False)
+    raw = _straight_skeleton([oriented], [1.0] * len(oriented))
+    if not raw.complete or not raw.nodes:
         return None
-    return _refine_kernel(best, ring)
+    max_height = max(node[2] for node in raw.nodes)
+    segments: list[tuple[Vertex, Vertex]] = []
+    for start, end, _face_a, _face_b in raw.arcs:
+        a = raw.nodes[start]
+        b = raw.nodes[end]
+        if abs(a[2] - max_height) > 1e-6 or abs(b[2] - max_height) > 1e-6:
+            continue
+        if math.hypot(a[0] - b[0], a[1] - b[1]) <= 1e-6:
+            continue
+        segments.append(((a[0], a[1]), (b[0], b[1])))
+    if segments:
+        moment_x = 0.0
+        moment_y = 0.0
+        length = 0.0
+        for left, right in segments:
+            span = math.hypot(right[0] - left[0], right[1] - left[1])
+            moment_x += 0.5 * (left[0] + right[0]) * span
+            moment_y += 0.5 * (left[1] + right[1]) * span
+            length += span
+        return (moment_x / length, moment_y / length)
+    tops = [node for node in raw.nodes if abs(node[2] - max_height) <= 1e-6]
+    if not tops:
+        return None
+    count = float(len(tops))
+    return (
+        sum(node[0] for node in tops) / count,
+        sum(node[1] for node in tops) / count,
+    )
 
 
 def _default_roof_height(ring: list[Vertex]) -> float:
-    """Rise of a 45° hip from an interior point to the nearest wall."""
-    apex = _kernel_point(ring)
+    """Rise of a 45° hip: distance from the clearance midpoint to the nearest wall."""
+    apex = _clearance_midpoint(ring)
     if apex is None:
         xs = [point[0] for point in ring]
         ys = [point[1] for point in ring]
         return 0.5 * min(max(xs) - min(xs), max(ys) - min(ys))
-    return _clearance(apex, ring)
+    return _distance_to_boundary(apex, ring)
 
 
-def _clearance(pt: Vertex, ring: list[Vertex]) -> float:
+def _distance_to_boundary(pt: Vertex, ring: list[Vertex]) -> float:
     n = len(ring)
-    return min(_signed_left(pt, ring[k], ring[(k + 1) % n]) for k in range(n))
+    return min(
+        _segment_distance(pt, ring[i], ring[(i + 1) % n]) for i in range(n)
+    )
 
 
-def _refine_kernel(pt: Vertex, ring: list[Vertex]) -> Vertex:
-    xs = [point[0] for point in ring]
-    ys = [point[1] for point in ring]
-    step = max(max(xs) - min(xs), max(ys) - min(ys)) / 32.0
-    for _ in range(24):
-        best = pt
-        best_clearance = _clearance(pt, ring)
-        for ix in (-1, 0, 1):
-            for iy in (-1, 0, 1):
-                nxt = (pt[0] + ix * step, pt[1] + iy * step)
-                if not _in_ring(nxt, ring):
-                    continue
-                clearance = _clearance(nxt, ring)
-                if clearance > best_clearance:
-                    best = nxt
-                    best_clearance = clearance
-        pt = best
-        step *= 0.5
-    return pt
-
-
-def _visible_from(pt: Vertex, ring: list[Vertex]) -> bool:
-    if not _in_ring(pt, ring):
-        return False
-    return all(_segment_in_ring(pt, vertex, ring) for vertex in ring)
-
-
-def _in_ring(pt: Vertex, ring: list[Vertex]) -> bool:
-    x, y = pt
-    n = len(ring)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        xi, yi = ring[i]
-        xj, yj = ring[j]
-        crosses = yj != yi and ((yi > y) != (yj > y))
-        if crosses and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
-            inside = not inside
-        j = i
-    return inside
-
-
-def _segment_in_ring(a: Vertex, b: Vertex, ring: list[Vertex]) -> bool:
-    for step in range(1, 8):
-        t = step / 8
-        pt = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
-        if not _in_ring(pt, ring):
-            return False
-    return True
+def _segment_distance(pt: Vertex, a: Vertex, b: Vertex) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length_sq = dx * dx + dy * dy
+    if length_sq < 1e-18:
+        return math.hypot(pt[0] - a[0], pt[1] - a[1])
+    t = ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / length_sq
+    t = min(1.0, max(0.0, t))
+    return math.hypot(pt[0] - (a[0] + t * dx), pt[1] - (a[1] + t * dy))
 
 
 def _signed_left(pt: Vertex, a: Vertex, b: Vertex) -> float:
