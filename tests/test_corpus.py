@@ -121,7 +121,11 @@ def test_the_committed_corpus_is_discovered_from_the_fixtures_directory() -> Non
     names = {item.name for item in _COMMITTED}
     assert names, "drop a .toml file in tests/fixtures/footprints/"
     discovered = {path.stem for path in CORPUS_DIR.glob("*.toml")}
-    assert names == discovered
+    skipped = discovered - names
+    assert names <= discovered
+    for name in skipped:
+        text = (CORPUS_DIR / f"{name}.toml").read_text()
+        assert "[[cells]]" in text
 
 
 @pytest.mark.parametrize("fixture", _COMMITTED, ids=lambda item: item.name)

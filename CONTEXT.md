@@ -13,16 +13,33 @@ listed as "not:" so we don't drift.
 Always counter-clockwise, always in metres. A footprint may have holes.
 _Not: outline, boundary, plan, slab._
 
+**Wall** — one straight run of facade between corners. The skeleton's unit is
+a footprint edge; a straight wall is one edge. Two collinear edges on the
+same wall are still two edges, not one wall with two pitches.
+_Not: outline wall._
+
 **Hole** — an interior ring of a footprint that the roof does not cover: a
 courtyard, light well or atrium. A footprint with a hole is still one footprint,
 not two.
 
-**Wing** — one connected footprint within a project that has more than one. Two
-wings are separate polygons; a single L-shaped building is one footprint, not
-two wings.
+**Wing** — a footprint that does not share a wall with another in the same
+project. Two detached masses are two wings. A single L-shaped building is
+one footprint, not two wings.
+_Not: cell._
 
-**Eave height** — the height above project datum of the footprint plane, i.e.
-where the roof surface meets the wall. Uniform across a footprint unless stated.
+**Cell** — one footprint roofed by a single straight skeleton, with one eave
+height. Two gable roofs that meet at a party wall are two cells. An L-shaped
+building drawn as one polygon is one cell.
+_Not: wing, zone, part, massing._
+
+**Project** — the roofs of one building, made of one or more cells. Takeoff
+sums across cells. A project need not be a single terrain: cells may sit at
+different eave heights.
+_Not: site, file, model._
+
+**Eave height** — the height above project datum of a cell's footprint plane,
+i.e. where that cell's roof meets the wall. Uniform across a cell. A project
+may give each cell its own eave height.
 
 ## The roof surface
 
@@ -31,8 +48,10 @@ where the roof surface meets the wall. Uniform across a footprint unless stated.
 folds back over itself. A geometry that violates this is not a roof, and saying
 so is how we reject bad output.
 
-**Face** — one planar piece of the roof, rising from exactly one footprint edge
-at that edge's pitch. Every face is a plane, never curved, never warped.
+**Face** — one planar piece of the roof, rising from one footprint edge at
+that edge's pitch. Every face is a plane, never curved, never warped.
+That one-wall rule is the skeleton's; an experimental face may span several
+walls.
 
 **Pitch** — the angle of a face from horizontal, in degrees, `0 < pitch < 90`.
 The single most important design variable. _Not: slope, inclination, fall, rise
@@ -84,8 +103,13 @@ variable.
 
 **Flat** — pitch at the practical minimum, not literally zero.
 
-Gambrel, mansard and butterfly roofs are out of scope; they need two pitches per
-edge, which the model does not carry.
+**Gambrel** — two pitches stacked up one wall, steep then shallow, with a
+**break height** in metres above that cell's eave. The takeoff reports two
+faces on that wall. A gambrel cannot share an edge with a knee or a gable.
+_Not: mansard (the same break on every wall), butterfly._
+
+Mansard and butterfly roofs stay out; they need a different story than one
+gambrel on a wall.
 
 ## The algorithm
 
@@ -114,9 +138,9 @@ how a gable end is expressed, and it is the only degenerate weight the model
 permits.
 
 **Additive weight** — a delay before an edge starts moving, so the wall rises
-vertically to some height and only then slopes. Would give half-hips and
-knee-walls. Not part of this model, but not foreclosed either; see
-`docs/future-work.md`.
+vertically to some height and only then slopes. This is how **knee height**
+is implemented: the architect sets metres of vertical wall; conversion to
+delay happens at the boundary. Not exposed as a weight.
 
 **Time** — how far the wavefront has propagated. Because the wavefront rises at
 unit rate as it moves in, the time at which a skeleton node is created *is* the

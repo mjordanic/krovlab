@@ -1,0 +1,13 @@
+# Two 5 × 6 m gable cells sharing the party wall at x = 5.
+# Plate heights 5 m and 7 m, pitch 45°. Each cell's ridge is 3 m above
+# its eave (half the 6 m gable-wall span), so the project ridge is 10 m.
+
+[[cells]]
+footprint = [[0.0, 0.0], [5.0, 0.0], [5.0, 6.0], [0.0, 6.0]]
+pitch = [45.0, 90.0, 45.0, 90.0]
+eave_height = 5.0
+
+[[cells]]
+footprint = [[5.0, 0.0], [10.0, 0.0], [10.0, 6.0], [5.0, 6.0]]
+pitch = [45.0, 90.0, 45.0, 90.0]
+eave_height = 7.0

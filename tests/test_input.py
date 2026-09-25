@@ -101,12 +101,32 @@ def test_closed_ring_spelling_is_roofable() -> None:
 
 def test_collinear_edges_that_leave_area_are_roofable() -> None:
     # Midpoint on the south eave: same rectangle, one extra vertex.
+    # Same-pitch collinear halves are one plane, two faces; still a terrain.
     result = roof(
         [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)],
         45.0,
     )
     assert isinstance(result, Roof)
     assert result.ridge_height == pytest.approx(3.0)
+    assert result.validity.is_terrain is True
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(60.0)
+    assert len(result.faces) == 5
+    south = [face for face in result.faces if face.edge_index in (0, 1)]
+    assert len(south) == 2
+    assert all(face.plan_area > 0.0 for face in south)
+
+
+def test_collinear_same_pitch_with_a_gable_is_a_terrain() -> None:
+    # West wall split at the midpoint; south is a gable. Same building
+    # without the extra vertex is a hip-and-gable rectangle.
+    result = roof(
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 3.0)],
+        [90.0, 45.0, 45.0, 45.0, 45.0],
+    )
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert result.ridge_height == pytest.approx(5.0)
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(60.0)
 
 
 def test_adjacent_parallel_edges_of_differing_pitch_are_refused() -> None:

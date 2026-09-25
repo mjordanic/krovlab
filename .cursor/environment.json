@@ -1,0 +1,6 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh; npx --yes skills@latest add mattpocock/skills; uv sync --group dev"
+}

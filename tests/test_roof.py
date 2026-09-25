@@ -62,6 +62,28 @@ def test_rectangle_has_one_ridge_of_hand_computed_length_and_position() -> None:
     assert result.ridge_height == pytest.approx(3.0)
 
 
+def test_rectangle_at_default_eave_height_matches_omitting_the_argument() -> None:
+    omitted = roof(RECTANGLE, 45.0)
+    explicit = roof(RECTANGLE, 45.0, eave_height=0.0)
+    assert isinstance(omitted, Roof)
+    assert isinstance(explicit, Roof)
+    assert omitted.validity.is_terrain is True
+    assert omitted.ridge_height == pytest.approx(3.0)
+    assert omitted == explicit
+
+
+def test_rectangle_lifted_seven_metres_has_ridge_height_ten() -> None:
+    at_datum = roof(RECTANGLE, 45.0)
+    lifted = roof(RECTANGLE, 45.0, eave_height=7.0)
+    assert isinstance(at_datum, Roof)
+    assert isinstance(lifted, Roof)
+    assert lifted.validity.is_terrain is True
+    assert lifted.ridge_height == pytest.approx(10.0)
+    assert [face.plan_area for face in lifted.faces] == pytest.approx(
+        [face.plan_area for face in at_datum.faces]
+    )
+
+
 def test_each_arc_is_ridge_hip_or_eave_and_reports_its_length() -> None:
     result = roof(RECTANGLE, 45.0)
     assert isinstance(result, Roof)
@@ -153,7 +175,9 @@ def test_roof_reports_node_heights_ridge_height_and_total_sloped_area() -> None:
 
 
 def test_returned_roof_carries_no_weight() -> None:
-    for cls in (Roof, Face, Arc, Node):
+    from krovlab import Cell
+
+    for cls in (Roof, Face, Arc, Node, Cell):
         assert "weight" not in cls.__dataclass_fields__
     result = roof(SQUARE, 45.0)
     assert isinstance(result, Roof)
@@ -163,6 +187,18 @@ def test_returned_roof_carries_no_weight() -> None:
     mixed = roof(SQUARE, mixed_pitches)
     assert isinstance(mixed, Roof)
     assert "weight" not in str(mixed)
+    kneed = roof(RECTANGLE, 45.0, knee_height=[0.0, 0.0, 0.0, 0.0])
+    assert isinstance(kneed, Roof)
+    assert "weight" not in str(kneed)
+    assert "weight" not in str(Cell(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0]))
+
+
+def test_one_footprint_faces_have_no_cell_index() -> None:
+    assert "cell_index" not in Face.__dataclass_fields__
+    result = roof(RECTANGLE, 45.0)
+    assert isinstance(result, Roof)
+    for face in result.faces:
+        assert not hasattr(face, "cell_index")
 
 
 def test_uniform_pitch_list_matches_the_same_pitch_as_a_scalar() -> None:
@@ -241,8 +277,9 @@ def test_core_imports_nothing_outside_the_standard_library() -> None:
     root = Path(__file__).resolve().parents[1] / "src" / "krovlab"
     stdlib = sys.stdlib_module_names
     for path in root.rglob("*.py"):
-        # Optional extra: Plotly lives here so the core stays stdlib-only.
-        if path.name == "viz.py" or "viz" in path.relative_to(root).parts:
+        # Optional extras: Plotly (viz) and PyTorch (ren_gnn) stay out of the core.
+        rel = path.relative_to(root)
+        if path.name == "viz.py" or "viz" in rel.parts or "ren_gnn" in rel.parts:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -465,6 +502,16 @@ def test_symmetric_u_is_deterministic_under_simultaneous_events() -> None:
 def test_colliding_split_footprint_does_not_raise() -> None:
     result = roof(PLUS, 45.0)
     assert isinstance(result, (Roof, Failure))
+
+
+def test_plus_shape_stays_non_terrain_after_eave_height() -> None:
+    at_datum = roof(PLUS, 45.0)
+    lifted = roof(PLUS, 45.0, eave_height=7.0)
+    assert isinstance(at_datum, Roof)
+    assert isinstance(lifted, Roof)
+    assert at_datum.validity.is_terrain is False
+    assert lifted.validity.is_terrain is False
+    assert lifted.validity.reasons == at_datum.validity.reasons
 
 
 def test_notched_rectangle_event_log_records_a_split() -> None:
@@ -722,9 +769,7 @@ def test_rectangle_with_overhang_has_eaves_outside_the_walls() -> None:
     result = roof(RECTANGLE, 45.0, overhang=OVERHANG_M)
     assert isinstance(result, Roof)
     walls = Polygon(RECTANGLE)
-    enlarged = walls.buffer(
-        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
-    )
+    enlarged = walls.buffer(OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0)
     assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
     eaves = [arc for arc in result.arcs if arc.kind == "eave"]
     assert len(eaves) == 4
@@ -764,9 +809,7 @@ def test_overhang_offsets_a_hole_inward() -> None:
     assert isinstance(result, Roof)
     assert result.validity.is_terrain is True
     walls = Polygon(SQUARE, [COURTYARD_HOLE])
-    enlarged = walls.buffer(
-        OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0
-    )
+    enlarged = walls.buffer(OVERHANG_M, join_style=JOIN_STYLE.mitre, mitre_limit=1000.0)
     assert sum(face.plan_area for face in result.faces) == pytest.approx(enlarged.area)
     courtyard = Polygon(COURTYARD_HOLE)
     inner_eaves = []
@@ -800,7 +843,168 @@ def test_overhang_that_collapses_a_concave_footprint_is_a_stated_failure() -> No
 def test_wavefront_and_event_handling_do_not_refer_to_overhang() -> None:
     from pathlib import Path
 
-    skeleton = (
-        Path(__file__).resolve().parents[1] / "src" / "krovlab" / "_skeleton.py"
-    )
+    skeleton = Path(__file__).resolve().parents[1] / "src" / "krovlab" / "_skeleton.py"
     assert "overhang" not in skeleton.read_text(encoding="utf-8").lower()
+
+
+def test_zero_knee_height_matches_omitting_the_argument() -> None:
+    omitted = roof(RECTANGLE, 45.0)
+    as_scalar = roof(RECTANGLE, 45.0, knee_height=0.0)
+    as_list = roof(RECTANGLE, 45.0, knee_height=[0.0, 0.0, 0.0, 0.0])
+    assert isinstance(omitted, Roof)
+    assert isinstance(as_scalar, Roof)
+    assert isinstance(as_list, Roof)
+    assert omitted == as_scalar
+    assert omitted == as_list
+    assert omitted.validity.is_terrain is True
+    assert omitted.ridge_height == pytest.approx(3.0)
+
+
+def test_gable_plus_knee_on_the_same_edge_is_a_named_failure() -> None:
+    result = roof(RECTANGLE, [45.0, 90.0, 45.0, 45.0], knee_height=[0.0, 3.0, 0.0, 0.0])
+    assert isinstance(result, Failure)
+    assert result.kind == "gable_versus_knee"
+    assert "gable" in result.reason.lower()
+    assert "knee" in result.reason.lower()
+    still_gable = roof(
+        RECTANGLE, [45.0, 90.0, 45.0, 45.0], knee_height=[0.0, 0.0, 0.0, 0.0]
+    )
+    assert isinstance(still_gable, Roof)
+
+
+def test_gambrel_plus_knee_on_the_same_edge_is_a_named_failure() -> None:
+    result = roof(
+        RECTANGLE,
+        45.0,
+        knee_height=[1.0, 0.0, 0.0, 0.0],
+        gambrel=[(60.0, 30.0, math.sqrt(3.0)), None, None, None],
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "gambrel_versus_knee"
+    assert "gambrel" in result.reason.lower()
+    assert "knee" in result.reason.lower()
+
+
+def test_gambrel_plus_gable_on_the_same_edge_is_a_named_failure() -> None:
+    result = roof(
+        RECTANGLE,
+        [90.0, 45.0, 45.0, 45.0],
+        gambrel=[(60.0, 30.0, math.sqrt(3.0)), None, None, None],
+    )
+    assert isinstance(result, Failure)
+    assert result.kind == "gambrel_versus_gable"
+    assert "gambrel" in result.reason.lower()
+    assert "gable" in result.reason.lower()
+
+
+def test_rectangle_long_edges_gambrel_has_two_faces_per_wall() -> None:
+    # 10 x 6 m. Long walls (edges 0 and 2) are 60° then 30° with the break
+    # √3 m above the eave, so the steep band insets 1 m. Short walls stay 45°.
+    break_height = math.sqrt(3.0)
+    result = roof(
+        RECTANGLE,
+        45.0,
+        gambrel=[
+            (60.0, 30.0, break_height),
+            None,
+            (60.0, 30.0, break_height),
+            None,
+        ],
+    )
+    assert isinstance(result, Roof)
+    long_faces = [face for face in result.faces if face.edge_index in (0, 2)]
+    short_faces = [face for face in result.faces if face.edge_index in (1, 3)]
+    assert len(long_faces) == 4
+    assert len(short_faces) == 2
+    steep_plan = 10.0 - math.sqrt(3.0)
+    shallow_plan = 20.0 - 4.0 * math.sqrt(3.0) - 4.0 / math.sqrt(3.0)
+    for edge in (0, 2):
+        pair = [face for face in result.faces if face.edge_index == edge]
+        assert pair[0].pitch == pytest.approx(60.0)
+        assert pair[1].pitch == pytest.approx(30.0)
+        assert pair[0].plan_area == pytest.approx(steep_plan)
+        assert pair[1].plan_area == pytest.approx(shallow_plan)
+        assert pair[0].sloped_area == pytest.approx(
+            steep_plan / math.cos(math.radians(60.0))
+        )
+        assert pair[1].sloped_area == pytest.approx(
+            shallow_plan / math.cos(math.radians(30.0))
+        )
+    from shapely.geometry import Polygon
+
+    assert sum(face.plan_area for face in result.faces) == pytest.approx(
+        Polygon(RECTANGLE).area
+    )
+
+
+def test_gambrel_break_height_is_metres_above_the_eave() -> None:
+    break_height = math.sqrt(3.0)
+    gambrel = [
+        (60.0, 30.0, break_height),
+        None,
+        (60.0, 30.0, break_height),
+        None,
+    ]
+    at_datum = roof(RECTANGLE, 45.0, gambrel=gambrel)
+    lifted = roof(RECTANGLE, 45.0, eave_height=7.0, gambrel=gambrel)
+    assert isinstance(at_datum, Roof)
+    assert isinstance(lifted, Roof)
+    assert lifted.ridge_height == pytest.approx(at_datum.ridge_height + 7.0)
+    at_break = [
+        node.height for node in at_datum.nodes if abs(node.height - break_height) < 1e-6
+    ]
+    lifted_break = [
+        node.height
+        for node in lifted.nodes
+        if abs(node.height - (7.0 + break_height)) < 1e-6
+    ]
+    assert at_break
+    assert lifted_break
+
+
+def test_gambrel_without_a_dormer_is_still_a_terrain() -> None:
+    from invariants import (
+        drainage_runs_to_each_faces_own_eave,
+        every_face_is_planar,
+        plan_areas_sum_to_footprint_area,
+    )
+
+    result = roof(
+        RECTANGLE,
+        45.0,
+        gambrel=[
+            (60.0, 30.0, math.sqrt(3.0)),
+            None,
+            (60.0, 30.0, math.sqrt(3.0)),
+            None,
+        ],
+    )
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    plan_areas_sum_to_footprint_area(result, RECTANGLE)
+    every_face_is_planar(result)
+    drainage_runs_to_each_faces_own_eave(result, RECTANGLE)
+
+
+def test_short_edge_knee_equal_to_ridge_is_a_vertical_gablet() -> None:
+    # 10 x 6 m at 45 degrees: the full hip's ridge is 3 m. Knee 3 m on the east
+    # short edge (edge 1) is a vertical gablet; neighbours close over it
+    # as verges; ridge height matches the un-kneed rectangle.
+    un_kneed = roof(RECTANGLE, 45.0)
+    result = roof(RECTANGLE, 45.0, knee_height=[0.0, 3.0, 0.0, 0.0])
+    assert isinstance(un_kneed, Roof)
+    assert isinstance(result, Roof)
+    assert result.validity.is_terrain is True
+    assert result.ridge_height == pytest.approx(un_kneed.ridge_height)
+    by_edge = {face.edge_index: face for face in result.faces}
+    assert 1 not in by_edge
+    assert sorted(by_edge) == [0, 2, 3]
+    for face in result.faces:
+        assert face.pitch == pytest.approx(45.0)
+    verges = [arc for arc in result.arcs if arc.kind == "verge"]
+    assert len(verges) == 2
+    verge_3d = 3.0 * math.sqrt(2.0)
+    assert sorted(arc.length for arc in verges) == pytest.approx([verge_3d, verge_3d])
+    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
+    assert len(ridges) == 1
+    assert ridges[0].length == pytest.approx(7.0)

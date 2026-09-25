@@ -48,16 +48,25 @@ class Fixture:
 
 
 def load_fixtures(directory: Path) -> list[Fixture]:
-    """Every ``*.toml`` in ``directory``, sorted by name."""
+    """Every single-footprint ``*.toml`` in ``directory``, sorted by name.
+
+    Multi-cell project fixtures (a ``cells`` table, no top-level
+    ``footprint``) live in the same directory for the page dropdown but
+    are not fed through ``roof``.
+    """
     fixtures: list[Fixture] = []
     for path in sorted(directory.glob("*.toml")):
-        fixtures.append(_load_fixture(path))
+        loaded = _load_fixture(path)
+        if loaded is not None:
+            fixtures.append(loaded)
     return fixtures
 
 
-def _load_fixture(path: Path) -> Fixture:
+def _load_fixture(path: Path) -> Fixture | None:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
+    if "cells" in data and "footprint" not in data:
+        return None
     holes_raw = data.get("holes")
     holes: list[list[tuple[float, float]]] | None
     if holes_raw is None:

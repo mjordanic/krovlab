@@ -33,3 +33,5 @@ The core package does not import the web stack, does no I/O, and does not grow a
 ## Consequences
 
 A `web` extra and a Flask application live beside the library, not inside it. Hosting needs a container and a Google Cloud project with billing enabled; localhost does not. Someone who finds the public Cloud Run URL can run roofs — there is no auth, and this app has nothing to steal.
+
+The page is a curated demo catalog (`web/examples.py`), not a listing of the test-corpus fixtures. `GET /?example=…` loads and runs an example; `POST` is Update roof. Drawing writes the same form fields. Gable is still `pitch = 90`, expressed on the form as an exclusive wall type (hip / gable / knee / gambrel).

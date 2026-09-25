@@ -1,0 +1,3 @@
+{
+  "setup-worktree": ["uv sync --group dev"]
+}

@@ -366,3 +366,105 @@ def test_core_does_not_import_viz() -> None:
                 assert module != "krovlab.viz"
                 assert not module.startswith("krovlab.viz.")
                 assert "viz" not in module.split(".")
+
+
+def test_plan_view_of_a_project_draws_every_cell() -> None:
+    from krovlab import Cell, Project, project
+    from krovlab.viz import plan_view
+
+    garage = [(12.0, 0.0), (17.0, 0.0), (17.0, 6.0), (12.0, 6.0)]
+    result = project([Cell(RECTANGLE, 45.0), Cell(garage, 45.0)])
+    assert isinstance(result, Project)
+    fig = plan_view(result)
+    fills = [trace for trace in fig.data if trace.name and "footprint" in trace.name]
+    assert len(fills) == len(result.roofs)
+    xs = [float(x) for trace in fills for x in trace.x if x == x]
+    assert min(xs) == pytest.approx(0.0)
+    assert max(xs) == pytest.approx(17.0)
+
+
+def test_plan_view_builds_from_a_two_cell_project() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Project, project
+    from krovlab.viz import plan_view
+
+    garage = [(12.0, 0.0), (17.0, 0.0), (17.0, 6.0), (12.0, 6.0)]
+    result = project([Cell(RECTANGLE, 45.0), Cell(garage, 45.0)])
+    assert isinstance(result, Project)
+    fig = plan_view(result)
+    assert isinstance(fig, Figure)
+    assert fig.data
+    names = {trace.name for trace in fig.data}
+    for kind in GLOSSARY_ARC_KINDS:
+        assert kind in names
+
+
+def test_solid_view_builds_from_a_two_cell_project() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Project, project
+    from krovlab.viz import solid_view
+
+    garage = [(12.0, 0.0), (17.0, 0.0), (17.0, 6.0), (12.0, 6.0)]
+    result = project(
+        [
+            Cell(RECTANGLE, 45.0, eave_height=5.0),
+            Cell(garage, 45.0, eave_height=7.0),
+        ]
+    )
+    assert isinstance(result, Project)
+    fig = solid_view(result)
+    assert isinstance(fig, Figure)
+    mesh = next(trace for trace in fig.data if trace.type == "mesh3d")
+    assert list(mesh.z) == [node.height for node in result.nodes]
+    used = set(mesh.i) | set(mesh.j) | set(mesh.k)
+    for face in result.faces:
+        assert set(face.node_indices) <= used
+
+
+def test_plan_and_solid_build_from_concatenated_gables() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Project, project
+    from krovlab.viz import plan_view, solid_view
+
+    low = [(0.0, 0.0), (5.0, 0.0), (5.0, 6.0), (0.0, 6.0)]
+    high = [(5.0, 0.0), (10.0, 0.0), (10.0, 6.0), (5.0, 6.0)]
+    pitches: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
+    result = project(
+        [
+            Cell(low, pitches, eave_height=5.0),
+            Cell(high, pitches, eave_height=7.0),
+        ]
+    )
+    assert isinstance(result, Project)
+    plan = plan_view(result)
+    solid = solid_view(result)
+    assert isinstance(plan, Figure)
+    assert isinstance(solid, Figure)
+    fills = [trace for trace in plan.data if trace.name and "footprint" in trace.name]
+    assert len(fills) == 2
+    xs = [float(x) for trace in fills for x in trace.x if x == x]
+    assert min(xs) == pytest.approx(0.0)
+    assert max(xs) == pytest.approx(10.0)
+
+
+def test_solid_view_builds_from_a_project_with_a_dormer() -> None:
+    from plotly.graph_objects import Figure
+
+    from krovlab import Cell, Dormer, Project, project
+    from krovlab.viz import solid_view
+
+    ring = [(4.0, 0.5), (6.0, 0.5), (6.0, 2.0), (4.0, 2.0)]
+    pitches: list[Pitch] = [45.0, 90.0, 45.0, 90.0]
+    result = project([Cell(RECTANGLE, 45.0)], [Dormer(0, ring, pitches)])
+    assert isinstance(result, Project)
+    assert result.validity.is_terrain is False
+    fig = solid_view(result)
+    assert isinstance(fig, Figure)
+    mesh = next(trace for trace in fig.data if trace.type == "mesh3d")
+    assert list(mesh.z) == [node.height for node in result.nodes]
+    used = set(mesh.i) | set(mesh.j) | set(mesh.k)
+    for face in result.faces:
+        assert set(face.node_indices) <= used

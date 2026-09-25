@@ -2,7 +2,9 @@
 
 Give a building footprint in metres and a pitch in degrees. Get back
 the faces, hips, ridges, valleys and quantities of a hipped roof — or a
-named failure.
+named failure. Give several footprints as cells and get one project. An
+edge can carry a knee height or a gambrel; a dormer is a small ring on
+a host face.
 
 The roofs it generates are a strict subset of roofs you can build. Read
 [what it cannot represent](docs/limitations.md) before deciding whether
@@ -26,12 +28,13 @@ Optional extras:
 uv sync --extra viz         # Plotly, for plan / 3D / wavefront views
 uv sync --extra notebooks   # ipykernel + Plotly, to run the notebooks
 uv sync --extra web         # Flask form server wrapping roof
+uv sync --extra gnn         # PyTorch, for the face-adjacency checkpoint
 ```
 
 ## Quick start
 
 ```python
-from krovlab import Failure, Roof, roof, topology_hash
+from krovlab import Cell, Dormer, Failure, Roof, project, roof, topology_hash
 
 footprint = [(0, 0), (10, 0), (10, 6), (0, 6)]  # metres, either winding
 result = roof(footprint, 45)                    # degrees
@@ -45,8 +48,10 @@ else:
     print(topology_hash(result))        # combinatorial structure, not coordinates
 ```
 
-`roof` is the only entry point. Everything else — the wavefront, the event
-queue, the conversion of pitch to weight — stays behind it.
+`roof` roofs one footprint. `project` roofs a list of cells, optionally
+with dormers. Knee and gambrel live on the same two functions and on
+`Cell`. Everything else — the wavefront, the event queue, the
+conversion of pitch to weight — stays behind those two functions.
 
 ## Examples
 
@@ -76,12 +81,12 @@ and the neighbouring faces meet the wall at verges. Gabling every edge is
 Weight (`cot(pitch)`) is an internal wavefront speed. It never appears on
 the returned roof.
 
-### A rectangle, an L, a courtyard, a gable, an overhang
+### A rectangle, an L, a courtyard, a gable, an overhang, an eave height, two cells, a knee, a gambrel, a dormer
 
 ```python
 import math
 
-from krovlab import roof
+from krovlab import Cell, Dormer, project, roof
 
 rect = [(0, 0), (10, 0), (10, 6), (0, 6)]
 l_shape = [(0, 0), (10, 0), (10, 6), (3, 6), (3, 10), (0, 10)]
@@ -129,20 +134,75 @@ eaves = roof(rect, 45, overhang=0.5)
 # In the drawings, pass the original walls so they stay distinct from the eaves:
 #   plan_view(eaves, walls=rect)     # brown = walls, grey eave = roof edge
 #   solid_view(eaves, walls=rect)
+
+lifted = roof(rect, 45, eave_height=7)
+# Same roof on a 7 m plate. Ridge height 10 m. Plan areas unchanged.
+# Terrain is assessed at the eave plane, then every node is lifted.
+
+house = [(0, 0), (5, 0), (5, 6), (0, 6)]
+garage = [(8, 0), (13, 0), (13, 6), (8, 6)]
+lot = project(
+    [
+        Cell(house, 45, eave_height=5),
+        Cell(garage, 45, eave_height=7),
+    ]
+)
+# Two detached 5 × 6 m hips. Plan areas sum to 60 m². Project ridge
+# height is 9.5 m. Each face names its cell and that cell's edge.
+# Overlapping cells are a named Failure. An L drawn as one polygon is
+# still one cell — the library does not cut it.
+
+neighbour = [(5, 0), (10, 0), (10, 6), (5, 6)]
+gables = [45, 90, 45, 90]
+pair = project(
+    [
+        Cell(house, gables, eave_height=5),
+        Cell(neighbour, gables, eave_height=7),
+    ]
+)
+# Two concatenated gables sharing the party wall at x = 5. Each
+# ridge is 3 m above its eave, so the project ridge is 10 m. The
+# party wall is not counted twice as eaves. Two pitched eaves on that
+# wall at the same eave height meet as one valley. A gable against a
+# pitch, or pitched eaves at two heights, is a named Failure.
+
+gablet = roof(rect, 45, knee_height=[0, 3, 0, 0])
+# East short wall rises 3 m — the would-be full-hip ridge — then a
+# vertical gablet. Neighbours close as verges. Ridge height still 3 m.
+# Zero knee height is the same roof as omitting it. Gable plus knee on
+# the same edge is gable_versus_knee.
+
+barn = roof(
+    rect,
+    45,
+    gambrel=[(60, 30, 3**0.5), None, (60, 30, 3**0.5), None],
+)
+# Long walls 60° then 30°, break √3 m above the eave. Two faces per
+# long wall; plan areas still sum to 60 m². Gambrel plus knee, or
+# gambrel plus gable, on the same edge is a named Failure.
+
+dormered = project(
+    [Cell(rect, 45)],
+    [Dormer(0, [(4, 0.5), (6, 0.5), (6, 2), (4, 2)], [45, 90, 45, 90])],
+)
+# 2 × 1.5 m gable dormer on the south slope. Host sloped area loses
+# the opening; dormer faces add. Not a terrain; 3D still draws. A
+# dormer over two faces, or outside the host, is a named Failure.
 ```
 
 Either winding is accepted. A closed-ring spelling (first point repeated
 at the end) is accepted. Collinear extra vertices on a straight wall are
-accepted as input, but often fail the terrain check — leave them off.
+kept when they share a pitch — two faces of one plane, not one face
+spanning both. Differing pitches on those halves are `unsupported`.
 
 ### Reading a `Roof`
 
 | Attribute | What it is |
 |---|---|
-| `nodes` | Every vertex. Footprint corners have `height == 0`. |
-| `faces` | One face per non-gabled footprint edge. `edge_index` is the edge you passed in. |
+| `nodes` | Every vertex. Height is metres above datum. Footprint corners sit at the eave height (zero by default). |
+| `faces` | One face per non-gabled footprint edge, except a gambrel edge is two. `edge_index` is the edge you passed in. Faces from `roof` have no cell index. |
 | `arcs` | `kind` is `"eave"`, `"hip"`, `"valley"`, `"ridge"` or `"verge"`; `length` is 3D metres. |
-| `ridge_height` | Highest point above the eave plane. |
+| `ridge_height` | Highest point above datum. |
 | `total_sloped_area` | Sum of `face.sloped_area` — what covering is bought by. |
 | `validity` | Whether the roof is a terrain. Check `is_terrain` before using anything else. |
 
@@ -153,14 +213,16 @@ is applied.
 
 `Face.edge_index` `i` is the edge from `footprint[i]` to
 `footprint[(i + 1) % n]` on the outer ring, then continues through each
-hole in order, even if you passed a ring clockwise.
+hole in order, even if you passed a ring clockwise. A `Project` face
+adds `cell_index`: which cell that edge belongs to.
 
 A `Roof` is checked when it is built. If `validity.is_terrain` is false,
 `validity.reasons` names the invariant that broke. Simple convex, L and U
 footprints at uniform pitch typically pass. Crossing-arm plans, some
 T-shapes, mixed pitch on some L-shapes, and a gable on some reflex edges
 can come back as a `Roof` that is not a terrain — not as an exception,
-and not always as a `Failure`.
+and not always as a `Failure`. A project with dormers is also not a
+terrain; covering numbers still add up and 3D still draws.
 
 `topology_hash(roof)` is a stable hash of which faces meet which arcs at
 which nodes, not of their coordinates.
@@ -207,7 +269,7 @@ polygon at a chosen time (time is height).
 The core never imports this module. Without the extra, `import krovlab`
 still works.
 
-### When `roof` cannot start
+### When `roof` or `project` cannot start
 
 Bad input is a `Failure` with a `kind` you can branch on and a `reason`
 you can show. Nothing the entry point accepts raises.
@@ -221,15 +283,85 @@ you can show. Nothing the entry point accepts raises.
 | `hole_intersects` | A hole touches or crosses the outer ring, or another hole. |
 | `unsupported` | Adjacent parallel edges of differing pitch (no unique skeleton). |
 | `incomplete` | The wavefront stopped before the skeleton finished, including when every edge is a gable. |
+| `empty` | `project` was given no cells. |
+| `overlap` | Two cells overlap in plan. |
+| `gable_versus_pitch` | A shared edge is a gable on one cell and pitched on the other. |
+| `unequal_eave_height` | A pitched shared edge sits at two eave heights. |
+| `gable_versus_knee` | The same edge is a gable and has a knee height. |
+| `gambrel_versus_knee` | The same edge is a gambrel and has a knee height. |
+| `gambrel_versus_gable` | The same edge is a gambrel and a gable. |
+| `dormer_two_faces` | A dormer overlaps two host faces. |
+| `dormer_outside` | A dormer does not lie on a host face. |
 
 A `Failure` means no roof was produced. A `Roof` with
 `validity.is_terrain == False` means a roof was produced and then failed
-the checks — treat it as unusable. Units on a valid roof are metres and
-degrees.
+the checks — treat it as unusable, except a project whose only reason is
+dormers: the host has a hole, covering numbers still add up, and 3D
+still draws. Units on a valid roof are metres and degrees.
+
+## Experimental graph network
+
+A second way to roof one footprint, beside the skeleton. It takes a
+footprint, an optional overhang, an optional eave height, and an
+optional roof height in metres above the eaves. It does
+not take a pitch. It returns a `Roof` or a `Failure`. Import it from
+`krovlab.experimental`; `import krovlab` does not load it.
+
+Use it when the wanted roof is a face over several walls, or another
+ridge layout on the same footprint. Keep the skeleton when each wall
+has a pitch. Gable, knee, gambrel, holes, dormers, and extra cells are
+not inputs of this method.
+
+```python
+from krovlab import Failure, Roof, roof
+from krovlab.experimental import roof_from_face_graph
+
+l_shape = [(0, 0), (10, 0), (10, 6), (3, 6), (3, 10), (0, 10)]
+
+skeleton = roof(l_shape, 45)
+experimental = roof_from_face_graph(l_shape)
+# Same walls. The network predicts which faces share a boundary; a
+# planarity step then lifts that graph. Pitch is not an input.
+
+if isinstance(experimental, Failure):
+    print(experimental.kind, experimental.reason)
+    # unliftable — the graph could not be lifted into a roof
+    # no_face_graph — neither a face graph nor a checkpoint was given
+else:
+    print(experimental.validity.is_terrain)
+```
+
+A supplied face graph is a partition of wall indices. One group may
+name several walls: those walls become one face.
+
+```python
+spanning = roof_from_face_graph(l_shape, [[0], [1], [2, 3], [4], [5]])
+# Walls 2 and 3 (the inner corner) are one plane. The skeleton cannot
+# represent that: it puts one face per wall.
+
+eaves = roof_from_face_graph(l_shape, overhang=0.5)
+lifted = roof_from_face_graph(l_shape, eave_height=7)
+# Overhang and eave height keep the meanings they have on the skeleton.
+```
+
+When the graph is omitted, the shipped checkpoint predicts it. The
+web demo and the notebook load that checkpoint; they do not train.
+Shipping the checkpoint is what makes those run without the published
+pairs and without a GPU. To rebuild it from the pairs:
+
+```bash
+uv run --extra gnn python -m krovlab.ren_gnn
+```
+
+The pairs are CC BY-NC 4.0. The checkpoint is a derivative of that
+dataset, also CC BY-NC 4.0. Commercial use of those pairs or of the
+checkpoint needs the authors' permission. The held-out
+intersection-over-union is recorded beside the checkpoint in
+[`models/ren2021-face-adjacency.md`](models/ren2021-face-adjacency.md).
 
 ## Web demo
 
-A form page that wraps `roof` and the existing plan and 3D views. From the
+A demo that wraps `roof` / `project` and the existing plan and 3D views. From the
 repo root:
 
 ```bash
@@ -237,50 +369,109 @@ uv sync --extra web
 uv run --extra web python -m web
 ```
 
-Open http://127.0.0.1:5000 — the 10 × 6 m rectangle at 45° is already run.
-Pick a named footprint from the project's corpus and submit to see the
-matching roof, or a Failure with the input drawn.
+Open http://127.0.0.1:5000 — the 10 × 6 m hip rectangle at 45° is already run.
+The dropdown is a catalog of complete examples (gable, shed, knee, gambrel,
+courtyard, two-cell projects, a dormer, a named Failure). Each example is a
+template: its settings are on the page and can be changed. Unusual options
+(overhang, eave height, a courtyard hole) stay hidden until checked, or until
+the example already uses them. Changing the example goes to
+`/?example=gambrel` (and so on) and runs immediately. **Update roof** rebuilds
+after edits. Draw on the building plan: add a detached cell, or add a cell on a
+selected wall. There is no ring to close. Submit is still one form POST.
+
+Upload a DXF as the selected cell's footprint: one closed straight polyline
+in model space. Choose millimetres, centimetres, or metres — millimetres is
+the default; the file header is ignored.
+[`notebooks/hip-rectangle-mm.dxf`](notebooks/hip-rectangle-mm.dxf) is the
+10 × 6 m rectangle already on the page, drawn in millimetres. Arcs, text,
+dimensions, hatches, paper space, and block inserts are ignored. If the
+file is only a block insert, explode it in CAD and upload again. Choosing
+a file fills the form and leaves the drawings as they were; **Update roof**
+rebuilds, the same as after drawing. When the 3D solid is on the page,
+download it as `roof.obj` and `roof.glb`.
+
+### Help agent
+
+If `GEMINI_API_KEY` is set, a **Need help?** box appears beside the form.
+Ask about the current project (takeoff, why a Failure, what a hip or gable
+is) or have it fill the same knobs the form already has: wall type (hip,
+gable, knee, gambrel), pitch, overhang, and eave height. It can point at
+**Load DXF** and at the **roof.obj** / **roof.glb** downloads. It does not
+attach a file, fetch the mesh, add cells, draw a new footprint, or place a
+dormer. Click **Update roof** after it writes the form so the plan and 3D
+refresh.
+
+The model is Gemini 3.6 Flash. The key stays on the server. Copy
+[`.env_sample`](.env_sample) to `.env` and paste the key.
+`python -m web` loads `.env` on startup and does not override variables
+already in the environment. Do not commit `.env`.
 
 The same process is what a container runs. `Dockerfile` at the repo root
 starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
-image). Plotly.js still comes from a CDN.
+image). Plotly.js still comes from a CDN. Pass the Gemini key when you want
+help on that container:
 
 ```bash
 docker build -t krovlab .
-docker run --rm -p 8080:8080 krovlab
+docker run --rm -p 8080:8080 -e GEMINI_API_KEY krovlab
 ```
 
 To give it a URL, deploy that image to Cloud Run: region `europe-west1`,
-min instances 0, unauthenticated. No custom domain. Do not run this from
-CI — there is no live Google Cloud project in the test suite.
+min instances 0, unauthenticated. The image installs the `gnn` extra and
+copies the face-adjacency checkpoint, so the experimental method can run
+there. PyTorch does not fit in Cloud Run's default 512Mi, so the service
+is given 2Gi. No custom domain. Do not run this from
+CI — there is no live Google Cloud project in the test suite. Store the
+Gemini key as a secret; set a **project spend cap** of $10 in Google AI
+Studio so a leaked URL cannot run past that fuse.
 
 ```bash
 gcloud run deploy krovlab \
   --source . \
   --region europe-west1 \
+  --memory 2Gi \
   --min-instances 0 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest
 ```
 
 ## Worked numbers
 
 A 10 m square at 45° has apex height 5 m and four faces of 25 m² plan /
 `25 / cos(45°)` sloped. A 10 × 6 m rectangle at 45° has a 4 m ridge at
-height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. A 10 m square with pitches
+height 3 m, from `(3, 3, 3)` to `(7, 3, 3)`. The same roof at eave height
+7 m has ridge height 10 m. Two detached 5 × 6 m hips at eave heights 5 m
+and 7 m have project ridge height 9.5 m and plan area 60 m². Two 5 × 6 m
+gables sharing a party wall at those plate heights have project ridge
+height 10 m: each ridge is 3 m above its eave. A 10 m square with pitches
 `[60, 45, 60, 45]` has a 5 m ridge along `x = 5` of length `10 - 10/√3`.
 A 10 m square with a centred 4 m courtyard at 45° has ridge height 1.5 m
 and plan area 84 m²: four hips from the outer corners, four valleys from
 the courtyard corners, and a 7 m ridge square where the wavefronts meet.
+A 10 × 6 m rectangle at 45° with a 3 m knee on the east short edge is a
+vertical gablet: ridge height still 3 m, ridge length 7 m, two verges.
+The same rectangle with long edges gambrel 60° then 30° at break √3 m
+has two faces per long wall; plan areas still sum to 60 m². A 2 × 1.5 m
+gable dormer on the south slope of the rectangle is not a terrain; host
+sloped area loses the opening.
 
 ## Notebooks
 
 Step-through examples after `uv sync --extra notebooks`:
 
 - [`notebooks/getting-started.ipynb`](notebooks/getting-started.ipynb) —
-  call `roof`, read quantities, gables, holes, overhang, and the views.
+  call `roof`, read quantities, gables, holes, overhang, eave height,
+  a project of two cells, concatenated gables and a valley, knee
+  (gablet), gambrel, a dormer on a host face, those same examples
+  on the web demo, a DXF of the 10 × 6 m rectangle and mesh downloads,
+  and the views.
+- [`notebooks/experimental-gnn.ipynb`](notebooks/experimental-gnn.ipynb) —
+  the same footprint through the skeleton and through
+  `roof_from_face_graph`, a face over several walls, when to keep the
+  skeleton, and a named Failure. Needs `--extra gnn` as well.
 - [`notebooks/limitations.ipynb`](notebooks/limitations.ipynb) — plans
-  that fail the terrain check, inherent method limits, and how to read
-  `validity`.
+  that fail the terrain check, the dormer exception (not a terrain, 3D
+  still draws), inherent method limits, and how to read `validity`.
 
 ## Tests
 

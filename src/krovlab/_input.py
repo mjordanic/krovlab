@@ -24,6 +24,114 @@ def _failure(kind: FailureKind, reason: str) -> Failure:
     return Failure(kind=kind, reason=reason)
 
 
+def resolve_gambrels(
+    value: object, n_edges: int
+) -> list[tuple[float, float, float] | None] | Failure:
+    """Return one optional barn break per footprint edge, or name why not.
+
+    ``None`` or omitting the argument is no gambrel. A list must have
+    one entry per edge: ``None``, or ``(steep, shallow, break_height)``
+    with break height in metres above that cell's eave.
+    """
+    if value is None:
+        return [None] * n_edges
+    if isinstance(value, bool) or not isinstance(value, list):
+        return _failure(
+            "degenerate",
+            "gambrel must be a list with one entry per edge",
+        )
+    if len(value) != n_edges:
+        return _failure(
+            "degenerate",
+            f"gambrel list has {len(value)} values but the footprint has "
+            f"{n_edges} edges",
+        )
+    parsed: list[tuple[float, float, float] | None] = []
+    for item in value:
+        if item is None:
+            parsed.append(None)
+            continue
+        gambrel = _as_gambrel(item)
+        if not isinstance(gambrel, tuple):
+            return gambrel
+        parsed.append(gambrel)
+    return parsed
+
+
+def _as_gambrel(value: object) -> tuple[float, float, float] | Failure:
+    if not isinstance(value, tuple) or len(value) != 3:
+        return _failure(
+            "degenerate",
+            "a gambrel is a steep pitch, a shallow pitch, and a break height in metres",
+        )
+    steep = degrees_from_pitch(value[0])
+    if not isinstance(steep, float):
+        return steep
+    shallow = degrees_from_pitch(value[1])
+    if not isinstance(shallow, float):
+        return shallow
+    if isinstance(value[2], bool) or not isinstance(value[2], (int, float)):
+        return _failure(
+            "degenerate",
+            "break height must be a finite number of metres above the eave",
+        )
+    break_height = float(value[2])
+    if not math.isfinite(break_height) or break_height <= 0.0:
+        return _failure(
+            "degenerate",
+            "break height must be a finite number of metres above the eave",
+        )
+    return (steep, shallow, break_height)
+
+
+def resolve_knee_heights(value: object, n_edges: int) -> list[float] | Failure:
+    """Return one knee height in metres per footprint edge, or name why not.
+
+    A scalar is repeated for every edge. ``None`` or omitting the
+    argument is zero on every edge. A list must have one value per edge.
+    """
+    if value is None:
+        return [0.0] * n_edges
+    if isinstance(value, bool) or not isinstance(value, (int, float, list)):
+        return _failure(
+            "degenerate",
+            "knee height must be a finite number of metres, zero or positive",
+        )
+    if isinstance(value, list):
+        if len(value) != n_edges:
+            return _failure(
+                "degenerate",
+                f"knee height list has {len(value)} values but the footprint "
+                f"has {n_edges} edges",
+            )
+        parsed: list[float] = []
+        for item in value:
+            height = _as_knee_height(item)
+            if not isinstance(height, float):
+                return height
+            parsed.append(height)
+        return parsed
+    height = _as_knee_height(value)
+    if not isinstance(height, float):
+        return height
+    return [height] * n_edges
+
+
+def _as_knee_height(value: object) -> float | Failure:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _failure(
+            "degenerate",
+            "knee height must be a finite number of metres, zero or positive",
+        )
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        return _failure(
+            "degenerate",
+            "knee height must be a finite number of metres, zero or positive",
+        )
+    return parsed
+
+
 def resolve_pitches(pitch: object, n_edges: int) -> list[float] | Failure:
     """Return one pitch in degrees per footprint edge, or name why not.
 
@@ -286,9 +394,7 @@ def _ring_inside(
     return all(_point_in_ring(x, y, outer) == "in" for x, y in inner)
 
 
-def _point_in_ring(
-    x: float, y: float, ring: list[tuple[float, float]]
-) -> str:
+def _point_in_ring(x: float, y: float, ring: list[tuple[float, float]]) -> str:
     """``"in"``, ``"on"``, or ``"out"`` for a closed ring."""
     n = len(ring)
     for i in range(n):
@@ -385,11 +491,9 @@ def _segments_intersect(
     o3 = _orient(c, d, a)
     o4 = _orient(c, d, b)
     proper = (
-        (o1 > _ORIENT_M2 and o2 < -_ORIENT_M2)
-        or (o1 < -_ORIENT_M2 and o2 > _ORIENT_M2)
+        (o1 > _ORIENT_M2 and o2 < -_ORIENT_M2) or (o1 < -_ORIENT_M2 and o2 > _ORIENT_M2)
     ) and (
-        (o3 > _ORIENT_M2 and o4 < -_ORIENT_M2)
-        or (o3 < -_ORIENT_M2 and o4 > _ORIENT_M2)
+        (o3 > _ORIENT_M2 and o4 < -_ORIENT_M2) or (o3 < -_ORIENT_M2 and o4 > _ORIENT_M2)
     )
     if proper:
         return True

@@ -4,22 +4,58 @@ The roofs this library generates are a strict subset of roofs you can
 build. Read this before deciding whether the tool covers a given
 building.
 
-Three limits are inherent to the method. They will not go away by
-adding features. Other roofs — half-hips, gambrels, dormers — are
-simply not produced today; some of those stay reachable later.
+Four limits are inherent to the method. They will not go away by
+adding features. Other roofs — a butterfly, a mansard as a four-wall
+break — are simply not produced today; some of those stay reachable later.
 
-## One plane cannot cover several walls
+## One plane cannot cover several non-collinear walls
 
-Every roof face rises from exactly one wall. A single plane that
-continues across two or more consecutive walls — wrapping a corner
-without a hip, or treating a jogged wall as one slope — will not come
-out. The library puts a hip or a valley at each corner and gives you
-one face per wall.
+Every roof face still rises from one footprint edge. Two level eaves that
+are not collinear already define a horizontal plane; a pitched face is a
+different plane. Marking consecutive walls as one slope — wrapping a
+corner without a hip — is not in the library. A gable mask or a project
+of several cells remains the way to get another style on the same walls.
+Cutting the corner in the footprint is the way to roof the chamfered
+building.
 
-If two consecutive walls are collinear (the same wall, with a vertex in
-the middle), the method still wants two faces, not one plane spanning
-both. Today that extra vertex often fails the terrain check — leave
-straight walls as two endpoints.
+Collinear extra vertices on a straight wall, both halves the same pitch,
+are two combinatorial faces of one geometric plane, not one face spanning
+both. That is not a wrap.
+
+Tried constructions, and why they do not ship, are in
+[future work](future-work.md#6-one-plane-over-several-walls-wrap).
+
+## A dormer sits on a host face
+
+A dormer is a small footprint drawn on one host face, not a cell at eave
+height. `project` roofs every cell first, then locates each dormer by
+plan overlap onto exactly one face of that cell. The child is the
+one-footprint function on the dormer ring, lifted onto the host plane —
+the dormer's eave is the intersection with the host. Host sloped area
+loses the opening; dormer faces add. A project with dormers is not a
+single terrain; quantities remain usable and 3D still draws. A plus-shape
+or other broken skeleton still hides 3D. A dormer that overlaps two
+faces, or that lies outside the host, is a named Failure.
+
+## One straight wall cannot carry two pitches
+
+The dual of the limit above. Two collinear eaves share one supporting
+line at eave height. Two planes that contain that line and dip at
+different pitches only meet on the wall; inland they give two heights
+to the same plan point, so the surface is not a terrain.
+
+The weighted skeleton has no unique answer either: adjacent parallel
+edges of differing weight never meet (Biedl et al., 2015). Their
+suggested resolution is not two faces — the faster edge takes over and
+the slower face has zero area. The library refuses that input as
+`unsupported`. Give the wall one pitch, or make a corner in the
+footprint so the two eaves are no longer collinear.
+
+A midpoint on an otherwise straight eave, both halves the same pitch,
+is a different case: one geometric plane, two combinatorial faces. The
+extra vertex traces inland perpendicular to the wall. That roof is a
+terrain; it is still not one face spanning both halves. Leave a
+straight wall as two endpoints unless you want that split.
 
 ## Extra vertices that are not on the building
 
@@ -36,37 +72,31 @@ hip-and-gable roof when you make an edge a gable. A different
 arrangement of hips and ridges on the same footprint — one a builder
 could equally well put up — is not generated.
 
-Gable versus hip on an edge is a choice you do have. A Dutch gable, a
-barn break, or a different ridge layout on the same plan is not.
+Gable versus hip on an edge is a choice you do have. A Dutch gable
+(knee height) and a barn break (gambrel) are also choices on an edge.
+A different ridge layout on the same plan is not.
 
 ## Deferred: roofs that need more than one pitch per wall
 
 These are roofs a builder puts up, and that this library cannot make
-today. Half-hips, knee-walls and gablets need the wall to rise
-vertically for a stretch before it starts to slope. Gambrels and
-mansards need a break in the slope on the same wall — steep, then
-shallow. That is later work, not a closed door: the algorithm was
-written in-house so these stay reachable. An off-the-shelf skeleton
-library would have made them impossible permanently. The reasoning is
-in [future work](future-work.md).
+today. An off-the-shelf skeleton library would have made them
+impossible permanently. The reasoning is in [future work](future-work.md).
 
-- Half-hips
-- Knee-walls
-- Gablets
-- Gambrels
 - Mansards
+- Butterfly roofs
 
 ## Not in the model
 
 These are not a later version of the same construction. The model does
 not carry them:
 
-- Dormers, chimneys, rooflights, and any other penetration through the roof
+- Chimneys, rooflights, and any other penetration that is not a dormer
   (a courtyard hole is at eave height, with inward faces; a chimney would
   cut the slope above the eaves, which is a different thing)
 - Curved walls
-- Eaves at more than one height, and split-level buildings
-- Several disconnected wings in one call — roof each wing separately
+- Split-level eaves on one cell — each cell has one eave height; two
+  eave heights are two cells in a `project`. A pitched shared wall at
+  two heights, or a gable against a pitch, is a named Failure.
 
 ## A returned `Roof` can still be wrong
 
@@ -84,8 +114,6 @@ Cases that currently do this, rather than raising or returning
 - Mixed pitch on some L-shapes, especially a large gap between a
   shallow face and a steep neighbour
 - A gable on some edges of an L or a U — not every gable, only some
-- An extra vertex on an otherwise straight wall (the collinear case
-  above)
 
 Simple convex rectangles, L and U at one pitch, rectangular courtyards,
 and a gable on a rectangle are the shapes the tests exercise hardest.
