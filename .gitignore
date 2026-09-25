@@ -12,12 +12,29 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 
-# installed fresh, not vendored: npx skills@latest add mattpocock/skills
+# rest of mattpocock/skills is installed fresh: npx skills@latest add mattpocock/skills
+# the workflow set below is committed (same set as outdoors_destinations)
 .agents/skills/*
+!.agents/skills/code-review/
+!.agents/skills/code-review/**
+!.agents/skills/domain-modeling/
+!.agents/skills/domain-modeling/**
+!.agents/skills/grill-with-docs/
+!.agents/skills/grill-with-docs/**
+!.agents/skills/grilling/
+!.agents/skills/grilling/**
 !.agents/skills/implement-issues/
 !.agents/skills/implement-issues/**
 !.agents/skills/implement/
 !.agents/skills/implement/**
+!.agents/skills/setup-matt-pocock-skills/
+!.agents/skills/setup-matt-pocock-skills/**
+!.agents/skills/tdd/
+!.agents/skills/tdd/**
+!.agents/skills/to-spec/
+!.agents/skills/to-spec/**
+!.agents/skills/to-tickets/
+!.agents/skills/to-tickets/**
 .claude/skills/
 .cursor/*
 !.cursor/agents/

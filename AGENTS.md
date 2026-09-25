@@ -99,9 +99,8 @@ Canonical files live under `.agents/skills/implement-issues/` (the skill) and
   symlinks to the same canonical files. First run audits `.claude/settings.local.json`
   against the skill's permissions reference.
 
-Unlike mattpocock/skills (installed fresh, git-ignored), this orchestrator and `/implement`
-(`.agents/skills/implement/`) are committed. `.agents/commands/implement-issues.md` is a
-compatibility symlink to the skill.
+This orchestrator, `/implement`, and the workflow skills it depends on are committed.
+`.agents/commands/implement-issues.md` is a compatibility symlink to the skill.
 
 Questions are allowed only in Phases 0–1; from wave dispatch onward the run is unattended
 and resumable via `implementation_report.md`, git, and Task/Agent ids. Relies on the
@@ -109,24 +108,18 @@ issue-tracker layout, the five triage labels, and `/implement` → `/tdd` + `/co
 
 ## Agent skills (mattpocock/skills)
 
-The `mattpocock/skills` collection is installed **fresh** with the upstream
-installer, not vendored into this repo:
+Workflow skills are committed under `.agents/skills/`:
+`to-spec`, `to-tickets`, `grill-with-docs`, `grilling`, `domain-modeling`, `tdd`,
+`code-review`, `setup-matt-pocock-skills`, `implement`, `implement-issues`.
+
+`/to-spec` publishes a spec to the issue tracker. `/to-tickets` breaks it into
+issues. `/implement-issues` runs the `ready-for-agent` ones through `/implement`.
+
+The rest of the package stays installed fresh and git-ignored:
 
 ```bash
 npx skills@latest add mattpocock/skills
 ```
 
-That writes the skill bodies to `.agents/skills/`, symlinks each into
-`.claude/skills/` (so Claude Code discovers them as native `/`-invocable
-skills), drops Cursor copies under `.cursor/`, and records a `skills-lock.json`.
-All of those are git-ignored by default — re-run the command any time to pull
-the latest. To use a skill outside an agent, read `.agents/skills/<name>/SKILL.md`
-and follow it.
-
-Expected after install: diagnose, git-guardrails-claude-code, grill-me,
-grill-with-docs, handoff, improve-codebase-architecture, prototype,
-request-refactor-plan, setup-matt-pocock-skills, tdd, teach, to-issues, to-prd,
-triage, write-a-skill, writing-fragments, writing-shape, zoom-out.
-
-Note: `teach`, `zoom-out`, and `setup-matt-pocock-skills` are manual-only
-(`disable-model-invocation: true`) — invoke them explicitly.
+Re-run that to pull updates. Leave `.agents/skills/implement/SKILL.md` as committed:
+its orchestrated-run section is what `/implement-issues` depends on.
