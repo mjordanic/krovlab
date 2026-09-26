@@ -25,9 +25,6 @@ web = [
     "ezdxf>=1.4.4",
     "pygltflib>=1.16",
 ]
-gnn = [
-    "torch>=2.14.0",
-]
 
 [dependency-groups]
 dev = [
@@ -46,7 +43,6 @@ dev = [
     "python-dotenv>=1.2.3",
     "ezdxf>=1.4.4",
     "pygltflib>=1.16",
-    "torch>=2.14.0",
 ]
 
 [build-system]

@@ -13,14 +13,8 @@ from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from krovlab import Cell, Dormer, Failure, Pitch, Project, Roof, project, roof
-from krovlab.experimental import (
-    InteriorRoof,
-    PlacedRoof,
-    Placement,
-    reflection_axes,
-    roof_from_face_graph,
-    roof_from_interiors,
-)
+from krovlab.experimental import reflection_axes
+from krovlab.links import LinkPlan, roof_from_links
 from krovlab.viz import plan_view, solid_view
 from web.agent.loop import HelpModel, run_turn
 from web.agent.rate_limit import RateLimiter
@@ -39,9 +33,15 @@ from web.interior_form import (
     absolute_interiors,
     apply_interior_buttons,
     default_rows,
-    previous_rows,
     rows_from_form,
-    rows_from_used,
+)
+from web.link_form import (
+    LinkChoice,
+    LinkViews,
+    read_links,
+    shift_deleted,
+    skeleton_rows,
+    views_for,
 )
 from web.mesh import glb_bytes, obj_bytes
 
@@ -122,20 +122,17 @@ def create_app(
             slug = request.args.get("example") or default
             example = catalog.get(slug, catalog[default])
             result: Roof | Project | Failure
+            interiors = default_rows()
+            link_views: LinkViews | None = None
             if method == "experimental":
-                result = _run_experimental_example(example)
+                result, interiors, link_views, _note = _linked_state(
+                    _cell_views_from_cells(example.cells),
+                    interiors,
+                    {},
+                    fresh=True,
+                )
             else:
                 result = _run_cells(list(example.cells), list(example.dormers))
-            interiors = default_rows()
-            if isinstance(result, InteriorRoof) and example.cells:
-                ring = [(float(x), float(y)) for x, y in example.cells[0].footprint]
-                middle = _interior_middle(
-                    ring, _cell_views_from_cells(example.cells)[0]
-                )
-                if middle is not None:
-                    interiors = rows_from_used(
-                        result.apexes, result.ridges, middle, "apex-0"
-                    )
             return _render(
                 example,
                 _example_groups(catalog),
@@ -155,6 +152,7 @@ def create_app(
                 interiors=interiors,
                 placement_disabled=isinstance(result, Failure),
                 snap_on=True,
+                links=link_views,
             )
         method = _posted_method(request.form)
         catalog = _catalog(method, examples, experimental_examples)
@@ -236,15 +234,17 @@ def _mesh_response(form: Mapping[str, str], kind: str) -> Response:
 
 def _result_from_form(form: Mapping[str, str]) -> Roof | Project | Failure:
     if _posted_method(form) == "experimental":
-        catalog = load_experimental_examples()
-        slug = form.get("example") or DEFAULT_EXPERIMENTAL_EXAMPLE
-        example = catalog.get(slug, catalog[DEFAULT_EXPERIMENTAL_EXAMPLE])
-        placement = _placement_from_form(form)
-        if isinstance(placement, Failure):
-            return placement
-        return _run_experimental_from_form(
-            form, _posted_face_graph(form), example, placement=placement
+        views, parsed = _posted_cells(form, form.get("set_pitch") or "45")
+        if isinstance(parsed, Failure):
+            return parsed
+        fresh = _posted_links_are_absent(form)
+        result, _rows, _links, _note = _linked_state(
+            views,
+            default_rows() if fresh else rows_from_form(form),
+            form,
+            fresh=fresh,
         )
+        return result
     set_pitch = form.get("set_pitch") or "45"
     _, parsed = _posted_cells(form, set_pitch)
     _, parsed_dormers = _posted_dormers(form)
@@ -323,7 +323,19 @@ def _form_after_method_switch(form: Mapping[str, str], method: str) -> dict[str,
     while f"outer-x-{wall_count}" in form:
         wall_count += 1
     for key, value in form.items():
-        if key.startswith(("cell-", "dormer-", "apex-", "ridge-", "hold-", "was-")):
+        if key.startswith(
+            (
+                "cell-",
+                "dormer-",
+                "apex-",
+                "ridge-",
+                "hold-",
+                "was-",
+                "wall-",
+                "corner-",
+                "join-",
+            )
+        ):
             continue
         if key in {
             "use_overhang",
@@ -360,50 +372,105 @@ def _interior_card_disabled(
 ) -> bool:
     """Lock the card only when this footprint has nothing that can be placed.
 
-    A placement that does not roof stays editable, so the visitor can delete
-    the apex or move a ridge. A footprint that cannot be roofed at all stays
+    A link set that is not a terrain stays editable, so the visitor can change
+    a wall or move a ridge. A footprint that cannot be roofed at all stays
     locked.
     """
+    del form
     if not isinstance(result, Failure):
         return False
     if method != "experimental" or not views:
         return True
-    return isinstance(_run_interiors(form, views, default_rows(), True), Failure)
+    fresh, _rows, _links, _note = _linked_state(views, default_rows(), {}, fresh=True)
+    return isinstance(fresh, Failure)
 
 
-def _run_interiors(
-    form: Mapping[str, str],
+def _linked_state(
     views: list[CellView],
     rows: list[InteriorRow],
-    reset: bool,
-) -> Roof | Failure:
+    form: Mapping[str, str],
+    *,
+    fresh: bool,
+) -> tuple[Roof | Failure, list[InteriorRow], LinkViews | None, str]:
+    """Build the linked roof. A fresh plan uses the skeleton's links."""
     if not views:
-        return Failure(kind="degenerate", reason="a footprint needs an outer ring")
+        return (
+            Failure(kind="degenerate", reason="a footprint needs an outer ring"),
+            rows,
+            None,
+            "",
+        )
     ring = [(float(x), float(y)) for x, y in views[0].footprint]
     placed = _placed_ring(ring, views[0])
     if placed is None:
-        return Failure(
-            kind="unliftable",
-            reason="no interior point from which the faces can fan",
+        return (
+            Failure(kind="degenerate", reason="a footprint needs an outer ring"),
+            rows,
+            None,
+            "",
         )
     expanded, middle = placed
-    apexes, ridges = absolute_interiors(default_rows() if reset else rows, middle)
-    previous = None if reset else previous_rows(form)
-    previous_apexes = previous_ridges = None
-    if previous is not None:
-        previous_apexes, previous_ridges = absolute_interiors(previous, middle)
-    height_raw = (form.get("roof_height") or "").strip()
-    roof_height = float(height_raw) if height_raw else None
+    note = ""
+    if fresh:
+        got = skeleton_rows(expanded, middle)
+        if isinstance(got, Failure):
+            return got, rows, None, ""
+        rows, plan = got
+    else:
+        before = rows
+        rows, note = apply_interior_buttons(form, rows, expanded)
+        previous_apexes, previous_ridges = absolute_interiors(before, middle)
+        walls, corners, joins = read_links(
+            form,
+            len(expanded),
+            apexes=previous_apexes,
+            ridges=previous_ridges,
+        )
+        if form.get("delete_interior"):
+            selected = next((row for row in before if row.selected), None)
+            if selected is not None and _fewer(
+                rows, before, selected.kind
+            ):
+                walls, corners, joins = shift_deleted(
+                    walls, corners, joins, selected.kind, selected.index
+                )
+        apexes, ridges = absolute_interiors(rows, middle)
+        plan = LinkPlan(apexes, ridges, walls, corners, joins)
+    roof_height = _posted_roof_height(form)
+    if isinstance(roof_height, Failure):
+        return roof_height, rows, None, note
     eave = float(views[0].eave_height) if views[0].use_eave else 0.0
-    return roof_from_interiors(
+    result = roof_from_links(
         expanded,
-        apexes,
-        ridges,
-        eave_height=eave,
+        plan.apexes,
+        plan.ridges,
+        walls=plan.walls,
+        corners=plan.corners,
+        joins=plan.joins,
         roof_height=roof_height,
-        previous_apexes=previous_apexes,
-        previous_ridges=previous_ridges,
+        eave_height=eave,
     )
+    return (
+        result,
+        rows,
+        views_for(expanded, plan.walls, plan.corners, plan.joins, rows),
+        note,
+    )
+
+
+def _posted_links_are_absent(form: Mapping[str, str]) -> bool:
+    """A post with no links and no apex or ridge starts from the skeleton."""
+    if "wall-0-target" in form:
+        return False
+    return not any(key.startswith(("apex-", "ridge-")) for key in form)
+
+
+def _fewer(
+    rows: Sequence[InteriorRow], before: Sequence[InteriorRow], kind: str
+) -> bool:
+    kept = sum(row.kind == kind for row in rows)
+    had = sum(row.kind == kind for row in before)
+    return kept < had
 
 
 def _placed_ring(
@@ -427,15 +494,6 @@ def _placed_ring(
     if middle is None:
         return None
     return expanded, middle
-
-
-def _interior_middle(
-    ring: list[tuple[float, float]], cell: CellView
-) -> tuple[float, float] | None:
-    placed = _placed_ring(ring, cell)
-    if placed is None:
-        return None
-    return placed[1]
 
 
 def _render_post(
@@ -475,23 +533,13 @@ def _render_post(
     result: Roof | Project | Failure
     interior_rows = default_rows()
     symmetry_fit = ""
+    link_views: LinkViews | None = None
     if method == "experimental":
-        interior_rows = default_rows() if reset_offset else rows_from_form(form)
-        ring = [(float(x), float(y)) for x, y in views[0].footprint] if views else []
-        if not reset_offset:
-            interior_rows, symmetry_fit = apply_interior_buttons(
-                form, interior_rows, ring
-            )
-        result = _run_interiors(form, views, interior_rows, reset_offset)
-        if isinstance(result, InteriorRoof):
-            middle = _interior_middle(ring, views[0])
-            selected = next(
-                (row.key for row in interior_rows if row.selected), "apex-0"
-            )
-            if middle is not None:
-                interior_rows = rows_from_used(
-                    result.apexes, result.ridges, middle, selected
-                )
+        fresh = reset_offset or _posted_links_are_absent(form)
+        interior_rows = default_rows() if fresh else rows_from_form(form)
+        result, interior_rows, link_views, symmetry_fit = _linked_state(
+            views, interior_rows, form, fresh=fresh
+        )
     elif isinstance(parsed, Failure):
         result = parsed
     elif isinstance(parsed_dormers, Failure):
@@ -509,8 +557,6 @@ def _render_post(
     )
     if reset_offset:
         offset_x, offset_y = "0", "0"
-    elif isinstance(result, PlacedRoof):
-        offset_x, offset_y = _fmt_offset(result.used_dx), _fmt_offset(result.used_dy)
     else:
         offset_x, offset_y = _echo_offset(form)
     show_placement = method == "experimental" and bool(views)
@@ -537,7 +583,7 @@ def _render_post(
         show_placement=show_placement,
         keep_offset=method == "skeleton",
         snap_on=_snap_on(form, reset=reset_offset),
-        ridge_note=_ridge_note(form, result, reset=reset_offset),
+        ridge_note="",
         holds=_shown_holds(form, reset=reset_offset),
         symmetry_note=symmetry_fit or _symmetry_note(form, reset=reset_offset),
         echo_style=_echo_choice(form, "style", {"apex", "ridge"}),
@@ -546,6 +592,7 @@ def _render_post(
         interiors=interior_rows,
         placement_disabled=_interior_card_disabled(result, form, views, method),
         fallback_roof_height=(form.get("roof_height") or "").strip(),
+        links=link_views,
     )
 
 
@@ -642,6 +689,7 @@ def _render(
     interiors: list[InteriorRow] | None = None,
     placement_disabled: bool = False,
     fallback_roof_height: str = "",
+    links: LinkViews | None = None,
 ) -> str:
     extra_footprints = (
         [cell.footprint for cell in cells[1:]] if method != "experimental" else []
@@ -667,17 +715,10 @@ def _render(
         extra_footprints,
     )
     mid_x, mid_y, axes = _apex_frame(result, draw_footprint if show_placement else [])
-    show_ridge = (
-        show_placement and isinstance(result, PlacedRoof) and result.offers_ridge
-    )
+    show_ridge = False
     style = "apex"
     ridge_hx = "0"
     ridge_hy = "0"
-    if show_ridge and isinstance(result, PlacedRoof):
-        if result.style == "ridge":
-            style = "ridge"
-        ridge_hx = _fmt_offset(result.ridge_hx)
-        ridge_hy = _fmt_offset(result.ridge_hy)
     mesh_fields: dict[str, str] = {}
     if solid_html is not None:
         mesh_fields = _mesh_fields(
@@ -691,6 +732,8 @@ def _render(
             offset_x=offset_x if show_placement else None,
             offset_y=offset_y if show_placement else None,
             style=style if show_placement else None,
+            interiors=interiors,
+            links=links,
         )
     return render_template(
         "page.html",
@@ -733,6 +776,7 @@ def _render(
         echo_holds=echo_holds or [],
         interiors=interiors if interiors is not None else default_rows(),
         placement_disabled=placement_disabled,
+        links=links,
     )
 
 
@@ -799,15 +843,6 @@ def _default_example(method: str) -> str:
     return DEFAULT_EXAMPLE
 
 
-def _run_experimental_example(example: Example) -> Roof | Failure:
-    cell = example.cells[0]
-    return roof_from_interiors(
-        list(cell.footprint),
-        overhang=cell.overhang,
-        eave_height=cell.eave_height,
-    )
-
-
 def _shown_roof_height(
     method: str,
     cells: list[CellView],
@@ -840,9 +875,7 @@ def _snap_on(form: Mapping[str, str], *, reset: bool) -> bool:
     if reset:
         return True
     raw = form.get("snap")
-    if raw is None or raw.strip() == "" or raw.strip() == "on":
-        return True
-    return False
+    return raw is None or raw.strip() == "" or raw.strip() == "on"
 
 
 def _apex_frame(
@@ -867,26 +900,6 @@ def _apex_frame(
     if middle is None:
         return "", "", axes
     return _fmt_offset(middle[0]), _fmt_offset(middle[1]), axes
-
-
-def _placed_plan(result: PlacedRoof) -> tuple[float, float]:
-    ridges = [arc for arc in result.arcs if arc.kind == "ridge"]
-    if len(ridges) == 1:
-        start = result.nodes[ridges[0].start]
-        end = result.nodes[ridges[0].end]
-        return ((start.x + end.x) / 2.0, (start.y + end.y) / 2.0)
-    node = result.nodes[-1]
-    return (node.x, node.y)
-
-
-def _ridge_note(
-    form: Mapping[str, str], result: Roof | Project | Failure, *, reset: bool
-) -> str:
-    if reset or _posted_style(form) != "ridge":
-        return ""
-    if isinstance(result, PlacedRoof) and result.style == "ridge":
-        return ""
-    return "This footprint has no ridge. The apex stays."
 
 
 _HELD = {"on", "true", "1"}
@@ -982,31 +995,6 @@ def _symmetry_note(form: Mapping[str, str], *, reset: bool) -> str:
     return ""
 
 
-def _project_offset(
-    dx: float,
-    dy: float,
-    axes: list[tuple[float, float, float]],
-    mask: list[bool],
-) -> tuple[float, float]:
-    for axis, hold in zip(axes, mask, strict=True):
-        if not hold:
-            continue
-        nx, ny, _c = axis
-        signed = nx * dx + ny * dy
-        dx -= nx * signed
-        dy -= ny * signed
-    return dx, dy
-
-
-def _with_holds(form: Mapping[str, str], placement: Placement) -> Placement:
-    axes = reflection_axes(_form_points(form))
-    mask = [True] * len(axes) if form.get("make_symmetric") else _hold_flags(form, axes)
-    if not any(mask):
-        return placement
-    dx, dy = _project_offset(placement.dx, placement.dy, axes, mask)
-    return Placement(dx, dy, style=placement.style)
-
-
 def _echo_choice(form: Mapping[str, str], name: str, allowed: set[str]) -> str:
     raw = (form.get(name) or "").strip().lower()
     if raw in allowed:
@@ -1069,86 +1057,7 @@ def _echo_offset(form: Mapping[str, str]) -> tuple[str, str]:
     )
 
 
-_OFFSET_REASON = "placement offset must be finite metres from the clearance midpoint"
-
-
-def _offset_pair(
-    form: Mapping[str, str], x_name: str, y_name: str
-) -> tuple[float, float] | Failure:
-    values: list[float] = []
-    for name in (x_name, y_name):
-        raw = form.get(name)
-        if raw is None or raw.strip() == "":
-            values.append(0.0)
-            continue
-        try:
-            number = float(raw)
-        except ValueError:
-            return Failure(kind="degenerate", reason=_OFFSET_REASON)
-        if not math.isfinite(number):
-            return Failure(kind="degenerate", reason=_OFFSET_REASON)
-        values.append(number)
-    return (values[0], values[1])
-
-
-def _posted_style(form: Mapping[str, str]) -> str:
-    raw = (form.get("style") or "apex").strip().lower()
-    if raw == "ridge":
-        return "ridge"
-    return "apex"
-
-
-def _placement_from_form(form: Mapping[str, str]) -> Placement | Failure:
-    style = _posted_style(form)
-    if form.get("place_at_center"):
-        placement = Placement(0.0, 0.0, style=style)
-    else:
-        pair = _offset_pair(form, "offset_x", "offset_y")
-        if isinstance(pair, Failure):
-            return pair
-        placement = Placement(dx=pair[0], dy=pair[1], style=style)
-    return _with_holds(form, placement)
-
-
-def _run_experimental_from_form(
-    form: Mapping[str, str],
-    face_graph: list[list[int]] | None,
-    example: Example,
-    placement: Placement | None = None,
-) -> Roof | Failure:
-    posted_outer = _posted_ring(form, "outer")
-    if posted_outer is None:
-        return Failure(kind="degenerate", reason="a footprint needs an outer ring")
-    parsed_outer = _as_xy_ring(posted_outer, "footprint")
-    if isinstance(parsed_outer, Failure):
-        return parsed_outer
-    if form.get("use_overhang"):
-        overhang = _posted_overhang(form, 0.0)
-        if isinstance(overhang, Failure):
-            return overhang
-    else:
-        overhang = 0.0
-    if form.get("use_eave_height"):
-        eave_height = _posted_eave_height(form)
-        if isinstance(eave_height, Failure):
-            return eave_height
-    else:
-        eave_height = 0.0
-    roof_height = _posted_roof_height(form)
-    if isinstance(roof_height, Failure):
-        return roof_height
-    graph = face_graph if face_graph is not None else _example_face_graph(example)
-    return roof_from_face_graph(
-        parsed_outer,
-        graph,
-        overhang=overhang,
-        eave_height=eave_height,
-        roof_height=roof_height,
-        placement=placement,
-    )
-
-
-def _posted_roof_height(form: Mapping[str, str]) -> float | None | Failure:
+def _posted_roof_height(form: Mapping[str, str]) -> float | Failure | None:
     raw = form.get("roof_height")
     if raw is None or raw.strip() == "":
         return None
@@ -1841,6 +1750,13 @@ def _describe(result: Roof | Project | Failure) -> str:
     return "\n".join(lines)
 
 
+def _selected_choice(options: Sequence[LinkChoice]) -> str:
+    for option in options:
+        if option.selected:
+            return option.value
+    return ""
+
+
 def _mesh_fields(
     cells: list[CellView],
     dormers: list[DormerView],
@@ -1853,6 +1769,8 @@ def _mesh_fields(
     offset_x: str | None = None,
     offset_y: str | None = None,
     style: str | None = None,
+    interiors: list[InteriorRow] | None = None,
+    links: LinkViews | None = None,
 ) -> dict[str, str]:
     """Form fields that rebuild the solid currently drawn on the page."""
     fields: dict[str, str] = {"set_pitch": set_pitch, "method": method}
@@ -1865,6 +1783,24 @@ def _mesh_fields(
         fields["offset_y"] = offset_y
         if style:
             fields["style"] = style
+    if method == "experimental" and interiors:
+        for row in interiors:
+            fields[f"{row.kind}-{row.index}-x"] = row.x
+            fields[f"{row.kind}-{row.index}-y"] = row.y
+            fields[f"{row.kind}-{row.index}-height"] = row.height
+            if row.kind == "ridge":
+                fields[f"ridge-{row.index}-direction"] = row.direction
+                fields[f"ridge-{row.index}-length"] = row.length
+            if row.selected:
+                fields["selected_interior"] = row.key
+    if method == "experimental" and links is not None:
+        for link in links.walls:
+            fields[f"wall-{link.index}-target"] = _selected_choice(link.options)
+        for corner in links.corners:
+            fields[f"corner-{corner.index}-target"] = _selected_choice(corner.options)
+        for join in links.joins:
+            fields[f"join-{join.index}-a"] = _selected_choice(join.left)
+            fields[f"join-{join.index}-b"] = _selected_choice(join.right)
     if method == "experimental" and face_graph:
         for index, group in enumerate(face_graph):
             fields[f"face-{index}"] = ",".join(str(wall) for wall in group)

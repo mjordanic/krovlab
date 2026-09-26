@@ -4,7 +4,9 @@ Date: 2026-09-23
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0005](0005-linked-roof.md). The skeleton stays the
+default. The face-graph network described below is no longer the
+experimental method.
 
 ## Context
 

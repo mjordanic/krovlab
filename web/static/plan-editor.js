@@ -14,6 +14,15 @@
     gambrel: "Two pitches on this wall: steep below, shallower above, split at the break."
   };
 
+  function splitWallLinks(walls, corners, edge) {
+    var nextWalls = walls.slice();
+    var kept = edge >= 0 && edge < walls.length ? walls[edge] : "";
+    nextWalls.splice(edge + 1, 0, kept);
+    var nextCorners = corners.slice();
+    nextCorners.splice(edge + 1, 0, "");
+    return { walls: nextWalls, corners: nextCorners };
+  }
+
   function esc(value) {
     return String(value)
       .replace(/&/g, "&amp;")
@@ -167,6 +176,9 @@
     var interiors = [];
     var interiorMode = false;
     var dragging = null;
+    var pendingWall = null;
+    var pendingCorner = null;
+    var assignment = null;
 
     function allRings(cell) {
       var rings = [cell.vertices];
@@ -912,6 +924,20 @@
       releaseHolds();
     }
 
+    function linkValue(hit) {
+      var item = interiors[hit.index];
+      if (pendingCorner !== null) {
+        if (item.kind === "apex") {
+          return "apex-" + item.index;
+        }
+        if (hit.part === "end") {
+          return "ridge-" + item.index + "-end-" + hit.end;
+        }
+        return null;
+      }
+      return item.kind + "-" + item.index;
+    }
+
     function pointerDown(x, y) {
       var vert = hitVertex(x, y);
       var ringPt = null;
@@ -926,7 +952,24 @@
       var vertDist = ringPt ? Math.hypot(x - ringPt.x, y - ringPt.y) : Infinity;
       if (interiorMode && vertDist > 0.1) {
         var hit = hitInterior(x, y);
+        if (hit && (pendingWall !== null || pendingCorner !== null)) {
+          var linked = linkValue(hit);
+          if (linked) {
+            dragging = {
+              kind: "assign",
+              index: hit.index,
+              part: hit.part,
+              end: hit.end,
+              x: x,
+              y: y,
+              value: linked
+            };
+            return;
+          }
+        }
         if (hit) {
+          pendingWall = null;
+          pendingCorner = null;
           dragging = { kind: "interior", index: hit.index, part: hit.part, end: hit.end };
           selectedVertex = null;
           selectedEdge = null;
@@ -967,14 +1010,42 @@
         dragging = { kind: "dormer", dormer: selectedDormer, vertex: selectedDormerVertex };
       } else if (selectedVertex !== null) {
         dragging = { kind: "vertex", cell: selectedCell, vertex: selectedVertex };
+        if (selectedCell === 0) {
+          pendingCorner = selectedVertex;
+          pendingWall = null;
+        }
       } else {
         dragging = null;
+        if (selectedEdge !== null && selectedCell === 0) {
+          pendingWall = selectedEdge;
+          pendingCorner = null;
+        }
       }
     }
 
     function pointerMove(x, y) {
       if (!dragging) {
         return;
+      }
+      if (dragging.kind === "assign") {
+        if (Math.hypot(x - dragging.x, y - dragging.y) <= 0.15) {
+          return;
+        }
+        var hit = { index: dragging.index, part: dragging.part, end: dragging.end };
+        var at = hit.part === "end"
+          ? ridgeEndsOf(interiors[hit.index])[hit.end]
+          : interiorPoint(interiors[hit.index]);
+        grabDx = dragging.x - at[0];
+        grabDy = dragging.y - at[1];
+        pendingWall = null;
+        pendingCorner = null;
+        dragging = { kind: "interior", index: hit.index, part: hit.part, end: hit.end };
+        placeInterior(hit, x - grabDx, y - grabDy);
+        return;
+      }
+      if (dragging.kind === "vertex" || dragging.kind === "dormer") {
+        pendingWall = null;
+        pendingCorner = null;
       }
       if (dragging.kind === "interior") {
         placeInterior(dragging, x - grabDx, y - grabDy);
@@ -992,6 +1063,18 @@
     }
 
     function pointerUp() {
+      if (dragging && dragging.kind === "assign") {
+        assignment = {
+          name: pendingCorner !== null
+            ? "corner-" + pendingCorner + "-target"
+            : "wall-" + pendingWall + "-target",
+          value: dragging.value
+        };
+        pendingWall = null;
+        pendingCorner = null;
+        dragging = null;
+        return false;
+      }
       var submit = !!(dragging && (dragging.kind === "apex" || dragging.kind === "interior"));
       dragging = null;
       return submit;
@@ -1195,6 +1278,11 @@
       pointerDown: pointerDown,
       pointerMove: pointerMove,
       pointerUp: pointerUp,
+      takeAssign: function () {
+        var value = assignment;
+        assignment = null;
+        return value;
+      },
       draggingKind: function () { return dragging ? dragging.kind : null; },
       apex: apexPoint,
       ridge: ridgeEnds,
@@ -1281,6 +1369,35 @@
       index += 1;
       box = form.querySelector("input[type='checkbox'][name='hold-" + index + "']");
     }
+  }
+
+  function applyNamedFields(form, map) {
+    Object.keys(map).forEach(function (name) {
+      if (name.indexOf("was-") === 0) {
+        return;
+      }
+      var nodes = form.querySelectorAll("[name='" + name + "']");
+      if (!nodes.length) {
+        var hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = name;
+        hidden.value = map[name];
+        form.appendChild(hidden);
+        return;
+      }
+      var first = nodes[0];
+      if (first.type === "radio") {
+        Array.prototype.forEach.call(nodes, function (node) {
+          node.checked = node.value === map[name];
+        });
+        return;
+      }
+      if (first.type === "checkbox") {
+        first.checked = map[name] === "on";
+        return;
+      }
+      first.value = map[name];
+    });
   }
 
   function writeInteriors(form, editor) {
@@ -1650,6 +1767,81 @@
     });
   }
 
+  function namedTargets(form, kind) {
+    var values = [];
+    var index = 0;
+    var el = form.querySelector("[name='" + kind + "-" + index + "-target']");
+    while (el) {
+      values.push(el.value);
+      index += 1;
+      el = form.querySelector("[name='" + kind + "-" + index + "-target']");
+    }
+    return values;
+  }
+
+  function writeTargets(form, kind, values) {
+    var nodes = [];
+    var index = 0;
+    var el = form.querySelector("[name='" + kind + "-" + index + "-target']");
+    while (el) {
+      nodes.push(el);
+      index += 1;
+      el = form.querySelector("[name='" + kind + "-" + index + "-target']");
+    }
+    if (!nodes.length) {
+      return;
+    }
+    while (nodes.length < values.length) {
+      var copy = nodes[nodes.length - 1].cloneNode(true);
+      nodes[nodes.length - 1].insertAdjacentElement("afterend", copy);
+      nodes.push(copy);
+    }
+    nodes.forEach(function (node, at) {
+      node.name = kind + "-" + at + "-target";
+      node.value = values[at];
+    });
+  }
+
+  function rewriteSplitTargets(form, edge) {
+    var split = splitWallLinks(
+      namedTargets(form, "wall"),
+      namedTargets(form, "corner"),
+      edge
+    );
+    writeTargets(form, "wall", split.walls);
+    writeTargets(form, "corner", split.corners);
+  }
+
+  function writeOuterRing(form, ring) {
+    var body = form.querySelector("#outer-vertices");
+    if (!body || !ring) {
+      return;
+    }
+    var html = "";
+    ring.forEach(function (pt, index) {
+      html += "<tr><td><input name=\"outer-x-" + index + "\" value=\"" + pt[0] +
+        "\"></td><td><input name=\"outer-y-" + index + "\" value=\"" + pt[1] +
+        "\"></td></tr>";
+    });
+    body.innerHTML = html;
+  }
+
+  function toggleExtra(box, kind) {
+    var card = box.closest(".cell-card");
+    var extra = card ? card.querySelector(".js-extra[data-kind='" + kind + "']") : null;
+    if (!extra) {
+      return;
+    }
+    extra.hidden = !box.checked;
+    if (!box.checked) {
+      return;
+    }
+    var input = extra.querySelector("input");
+    if (input && (input.value === "" || input.value === "0")) {
+      input.value = kind === "overhang" ? "0.5" : input.value;
+    }
+  }
+
   function mount(svg, form) {
     if (!svg || !form) {
       return null;
@@ -1688,6 +1880,12 @@
 
     editor.applyFields = function (map) {
       editor.loadFields(map);
+      if (experimentalSelected()) {
+        applyNamedFields(form, map);
+        drawSvg(svg, editor);
+        highlightWalls(form, editor);
+        return;
+      }
       commit(true);
     };
 
@@ -1716,6 +1914,15 @@
         editor.pointerMove(raw.x, raw.y);
         writeOffset(form, editor);
         drawSvg(svg, editor);
+        return;
+      }
+      if (dragging === "assign") {
+        editor.pointerMove(raw.x, raw.y);
+        dragging = editor.draggingKind();
+        if (dragging === "interior") {
+          writeInteriors(form, editor);
+          drawSvg(svg, editor);
+        }
         return;
       }
       if (dragging === "interior") {
@@ -1753,6 +1960,22 @@
       if (dragging === "interior") {
         writeInteriors(form, editor);
       }
+      var linked = editor.takeAssign ? editor.takeAssign() : null;
+      if (!linked && dragging === "assign") {
+        editor.pointerUp();
+        linked = editor.takeAssign();
+      }
+      if (linked) {
+        var select = form.querySelector("[name='" + linked.name + "']");
+        if (select) {
+          select.value = linked.value;
+        }
+        dragging = null;
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+        }
+        return;
+      }
       var submit = editor.pointerUp();
       dragging = null;
       if (submit && typeof form.requestSubmit === "function") {
@@ -1779,6 +2002,19 @@
     }
     if (addVert) {
       addVert.addEventListener("click", function () {
+        if (experimentalSelected()) {
+          var edge = editor.selectedEdge();
+          if (edge === null || editor.selectedCell() !== 0) {
+            return;
+          }
+          editor.addVertexOnSelectedWall();
+          rewriteSplitTargets(form, edge);
+          writeOuterRing(form, editor.rings()[0]);
+          if (typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+          }
+          return;
+        }
         editor.applyForm(form);
         editor.addVertexOnSelectedWall();
         commit(true);
@@ -1854,6 +2090,10 @@
         return;
       }
       if (el.dataset && el.dataset.extra === "overhang") {
+        if (experimentalSelected()) {
+          toggleExtra(el, "overhang");
+          return;
+        }
         var cardO = el.closest(".cell-card");
         var idxO = cardO ? parseInt(cardO.getAttribute("data-cell"), 10) : 0;
         if (editor.cells()[idxO]) {
@@ -1866,6 +2106,10 @@
         return;
       }
       if (el.dataset && el.dataset.extra === "eave") {
+        if (experimentalSelected()) {
+          toggleExtra(el, "eave");
+          return;
+        }
         var cardE = el.closest(".cell-card");
         var idxE = cardE ? parseInt(cardE.getAttribute("data-cell"), 10) : 0;
         if (editor.cells()[idxE]) {
@@ -1903,5 +2147,9 @@
     return editor;
   }
 
-  return { createEditor: createEditor, mount: mount };
+  return {
+    createEditor: createEditor,
+    mount: mount,
+    splitWallLinks: splitWallLinks
+  };
 });

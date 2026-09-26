@@ -574,3 +574,78 @@ extra.releaseSubmits = editor.pointerUp();
         f"editor.loadFields({json.dumps({**RECT, 'roof_height': '2'})});"
     )
     assert result["fields"]["roof_height"] == "2"
+
+
+def test_clicking_a_wall_then_an_apex_sets_the_link_and_a_drag_does_not() -> None:
+    fields = _placement_rect()
+    del fields["offset_x"]
+    del fields["offset_y"]
+    fields["apex-0-x"] = "0"
+    fields["apex-0-y"] = "0"
+    clicked = _run_editor(
+        f"""
+editor.loadFields({json.dumps(fields)});
+editor.pointerDown(5, 0);
+editor.pointerUp();
+editor.pointerDown(5, 3);
+editor.pointerUp();
+extra.assign = editor.takeAssign();
+"""
+    )
+    assert clicked["extra"]["assign"] == {
+        "name": "wall-0-target",
+        "value": "apex-0",
+    }
+    assert clicked["fields"]["apex-0-x"] == "0"
+    dragged = _run_editor(
+        f"""
+editor.loadFields({json.dumps(fields)});
+editor.pointerDown(5, 0);
+editor.pointerUp();
+editor.pointerDown(5, 3);
+editor.pointerMove(7.2, 4.1);
+editor.pointerUp();
+extra.assign = editor.takeAssign();
+"""
+    )
+    assert dragged["extra"]["assign"] is None
+    assert float(dragged["fields"]["apex-0-x"]) == 2.0
+
+
+def test_splitting_a_wall_keeps_its_drain() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required to drive the plan editor")
+    script = f"""
+const {{ splitWallLinks }} = require({json.dumps(str(EDITOR_JS))});
+const split = splitWallLinks(
+  ["ridge-1", "ridge-1", "ridge-0", "ridge-0", "ridge-0", "ridge-0"],
+  ["ridge-1-end-0", "", "", "ridge-0-end-0", "", ""],
+  2
+);
+process.stdout.write(JSON.stringify(split));
+"""
+    proc = subprocess.run(
+        [node, "-e", script], capture_output=True, text=True, check=False
+    )
+    if proc.returncode != 0:
+        raise AssertionError(proc.stderr or proc.stdout)
+    split = json.loads(proc.stdout)
+    assert split["walls"] == [
+        "ridge-1",
+        "ridge-1",
+        "ridge-0",
+        "ridge-0",
+        "ridge-0",
+        "ridge-0",
+        "ridge-0",
+    ]
+    assert split["corners"] == [
+        "ridge-1-end-0",
+        "",
+        "",
+        "",
+        "ridge-0-end-0",
+        "",
+        "",
+    ]

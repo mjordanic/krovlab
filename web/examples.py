@@ -184,7 +184,7 @@ def load_experimental_examples() -> dict[str, Example]:
             label="Rectangle 10x6",
             group="Footprint",
             caption=(
-                "A 10x6 m footprint. The network chooses which faces meet. "
+                "A 10x6 m footprint. It opens on the skeleton's links. "
                 "Pitch is not an input."
             ),
             cells=(Cell(RECTANGLE, 45.0),),
@@ -193,7 +193,10 @@ def load_experimental_examples() -> dict[str, Example]:
             slug="l-shape",
             label="L-shape",
             group="Footprint",
-            caption="One L-shaped footprint. The network chooses which faces meet.",
+            caption=(
+                "One L-shaped footprint. It opens on the skeleton's links: "
+                "two ridges, the hips, and the valley."
+            ),
             cells=(Cell(L_SHAPE, 45.0),),
         ),
         Example(

@@ -76,7 +76,8 @@ _FUNCTION_DECLARATIONS = [
         description=(
             "Set overhang, eave height, or experimental roof height "
             "(metres above the eaves) on one cell. Roof height is only "
-            "for the experimental graph network."
+            "for the linked roof. It fills a new or blank row and does not "
+            "rewrite a height already typed."
         ),
         parameters_json_schema={
             "type": "object",

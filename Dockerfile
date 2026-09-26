@@ -11,12 +11,11 @@ ENV UV_PYTHON_DOWNLOADS=0
 COPY pyproject.toml uv.lock README.md CONTEXT.md ./
 COPY src src
 
-RUN uv sync --frozen --no-dev --extra web --extra gnn
+RUN uv sync --frozen --no-dev --extra web
 
 COPY web web
 COPY docs/limitations.md docs/limitations.md
 COPY tests/fixtures/footprints tests/fixtures/footprints
-COPY models/ren2021-face-adjacency.pt models/ren2021-face-adjacency.pt
 
 ENV PATH="/app/.venv/bin:$PATH"
 # Cloud Run injects PORT. The process binds 0.0.0.0 and honours it.

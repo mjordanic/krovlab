@@ -32,19 +32,7 @@ class InteriorRow:
         return f"{label} {self.index + 1}"
 
 
-def previous_rows(form: Mapping[str, str]) -> list[InteriorRow] | None:
-    """The positions shown before this post, when the page sent them."""
-    renamed: dict[str, str] = {}
-    for key, value in form.items():
-        if key.startswith("was-apex-") or key.startswith("was-ridge-"):
-            renamed[key.removeprefix("was-")] = value
-    if not renamed:
-        return None
-    return rows_from_form(renamed)
-
-
 def default_rows() -> list[InteriorRow]:
-    return [InteriorRow("apex", 0, "0", "0", selected=True)]
     return [InteriorRow("apex", 0, "0", "0", selected=True)]
 
 

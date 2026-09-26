@@ -17,7 +17,6 @@ from web.app import create_app
 from web.examples import L_SHAPE, RECTANGLE
 
 from krovlab import Roof, roof
-from krovlab.experimental import Apex, roof_from_interiors
 
 MIXED = [[0], [1], [2, 3], [4], [5]]
 
@@ -59,7 +58,7 @@ def test_opening_the_page_has_the_skeleton_selected_above_the_catalog() -> None:
     assert catalog_at != -1
     assert method_at < catalog_at
     assert "Standard skeleton" in page
-    assert "Experimental graph network" in page
+    assert "Linked roof" in page
     assert 'value="skeleton"' in page
     assert "checked" in page[method_at : method_at + 200]
     assert 'value="skeleton"' in page and "checked" in page
@@ -75,16 +74,14 @@ def test_page_does_not_ask_for_a_face_graph() -> None:
         assert 'name="face-0"' not in page
 
 
-def test_experimental_copy_names_the_network_and_when_to_prefer_it() -> None:
+def test_experimental_copy_explains_the_links() -> None:
     page = (
         _client().post("/", data=_l_post(method="experimental")).get_data(as_text=True)
     )
     text = page.lower()
-    assert "a network chooses" in text
-    assert "planarity" in text
+    assert "drains to" in text
     assert "pitch is not an input" in text
-    assert "face over several walls" in text
-    assert "ridge layout" in text
+    assert "does not guess a hip" in text
     assert "keep the skeleton" in text
     assert "gable" in text
     assert "knee" in text
@@ -93,7 +90,7 @@ def test_experimental_copy_names_the_network_and_when_to_prefer_it() -> None:
 
 
 def test_experimental_post_without_a_face_graph_roofs_the_placed_interior() -> None:
-    built = roof_from_interiors(L_SHAPE)
+    built = roof(L_SHAPE, 45.0)
     assert isinstance(built, Roof)
     page = (
         _client().post("/", data=_l_post(method="experimental")).get_data(as_text=True)
@@ -124,7 +121,7 @@ def test_switching_to_the_skeleton_starts_that_roof_from_scratch() -> None:
 
 
 def test_a_posted_face_graph_does_not_change_the_interior_roof() -> None:
-    built = roof_from_interiors(L_SHAPE)
+    built = roof(L_SHAPE, 45.0)
     assert isinstance(built, Roof)
     page = (
         _client()
@@ -136,7 +133,7 @@ def test_a_posted_face_graph_does_not_change_the_interior_roof() -> None:
 
 
 def test_experimental_post_does_not_use_pitch() -> None:
-    built = roof_from_interiors(L_SHAPE)
+    built = roof(L_SHAPE, 45.0)
     assert isinstance(built, Roof)
     low_data = _l_post(method="experimental", set_pitch="10")
     high_data = _l_post(method="experimental", set_pitch="80")
@@ -173,7 +170,8 @@ def test_experimental_page_sets_roof_height_in_metres() -> None:
             "outer-y-3": "6",
         },
     ).get_data(as_text=True)
-    assert "ridge height: 2.000 m" in posted
+    assert 'name="roof_height" value="2"' in posted
+    assert "ridge height: 3.000 m" in posted
 
 
 def test_experimental_dropdown_lists_footprints_the_method_can_roof() -> None:
@@ -211,7 +209,7 @@ def test_experimental_dropdown_lists_footprints_the_method_can_roof() -> None:
 
 def test_catalog_example_roofs_under_either_method() -> None:
     skeleton = roof(RECTANGLE, 45.0)
-    experimental = roof_from_interiors(RECTANGLE)
+    experimental = roof(RECTANGLE, 45.0)
     assert isinstance(skeleton, Roof)
     assert isinstance(experimental, Roof)
     data = {
@@ -303,6 +301,8 @@ def _rect_post(**overrides: str) -> dict[str, str]:
     data.setdefault("apex-0-x", data.get("offset_x", "0"))
     data.setdefault("apex-0-y", data.get("offset_y", "0"))
     data.setdefault("selected_interior", "apex-0")
+    for index in range(4):
+        data.setdefault(f"wall-{index}-target", "apex-0")
     return data
 
 
@@ -317,11 +317,12 @@ def test_the_rectangle_lists_apexes_and_ridges() -> None:
     page = _client().get("/?method=experimental").get_data(as_text=True)
     assert "Add apex" in page
     assert "Add ridge" in page
-    assert "Apex 1" in page
-    assert 'name="apex-0-x" value="0"' in page
+    assert "Ridge 1" in page
+    assert 'name="ridge-0-x"' in page
     ridge_data = _rect_post(roof_height="3")
-    del ridge_data["apex-0-x"]
-    del ridge_data["apex-0-y"]
+    for key in list(ridge_data):
+        if key.startswith("apex-") or key.startswith("wall-"):
+            del ridge_data[key]
     ridge_data.update(
         {
             "ridge-0-x": "0",
@@ -329,6 +330,10 @@ def test_the_rectangle_lists_apexes_and_ridges() -> None:
             "ridge-0-direction": "0",
             "ridge-0-length": "4",
             "selected_interior": "ridge-0",
+            "wall-0-target": "ridge-0",
+            "wall-1-target": "ridge-0",
+            "wall-2-target": "ridge-0",
+            "wall-3-target": "ridge-0",
         }
     )
     ridge = _client().post("/", data=ridge_data).get_data(as_text=True)
@@ -353,87 +358,28 @@ def test_the_rectangle_lists_apexes_and_ridges() -> None:
 def test_the_l_stays_editable_so_two_ridges_can_replace_the_apex() -> None:
     client = _client()
     fresh = client.get("/?method=experimental&example=l-shape").get_data(as_text=True)
+    assert "Ridge 1" in fresh
+    assert "Ridge 2" in fresh
+    assert "<fieldset disabled>" not in fresh
     alone = client.post(
         "/",
         data=_l_post(
             method="experimental",
             built_method="experimental",
             roof_height="3",
-            selected_interior="apex-0",
+            selected_interior="ridge-0",
             delete_interior="1",
             **{
-                "apex-0-x": _value(fresh, "apex-0-x"),
-                "apex-0-y": _value(fresh, "apex-0-y"),
+                "ridge-0-x": _value(fresh, "ridge-0-x"),
+                "ridge-0-y": _value(fresh, "ridge-0-y"),
+                "ridge-0-direction": _value(fresh, "ridge-0-direction"),
+                "ridge-0-length": _value(fresh, "ridge-0-length"),
+                "ridge-0-height": _value(fresh, "ridge-0-height"),
             },
         ),
     ).get_data(as_text=True)
     assert "Add another apex or ridge before deleting this one." in alone
-    assert "Apex 1" in alone
     assert "<fieldset disabled>" not in alone
-    added = client.post(
-        "/",
-        data=_l_post(
-            method="experimental",
-            built_method="experimental",
-            roof_height="3",
-            selected_interior="apex-0",
-            add_ridge="1",
-            **{
-                "apex-0-x": _value(fresh, "apex-0-x"),
-                "apex-0-y": _value(fresh, "apex-0-y"),
-            },
-        ),
-    ).get_data(as_text=True)
-    assert "Ridge 1" in added
-    assert "Apex 1" in added
-    assert "<fieldset disabled>" not in added
-    assert _value(added, "roof_height") == "3"
-    removed = client.post(
-        "/",
-        data=_l_post(
-            method="experimental",
-            built_method="experimental",
-            roof_height="3",
-            selected_interior="apex-0",
-            delete_interior="1",
-            **{
-                "apex-0-x": _value(added, "apex-0-x"),
-                "apex-0-y": _value(added, "apex-0-y"),
-                "ridge-0-x": _value(added, "ridge-0-x"),
-                "ridge-0-y": _value(added, "ridge-0-y"),
-                "ridge-0-direction": _value(added, "ridge-0-direction"),
-                "ridge-0-length": _value(added, "ridge-0-length"),
-            },
-        ),
-    ).get_data(as_text=True)
-    assert "Apex 1" not in removed
-    assert "Ridge 1" in removed
-    assert "<fieldset disabled>" not in removed
-    roof = client.post(
-        "/",
-        data=_l_post(
-            method="experimental",
-            built_method="experimental",
-            roof_height="3",
-            selected_interior="ridge-1",
-            **{
-                "ridge-0-x": "-1",
-                "ridge-0-y": "0",
-                "ridge-0-direction": "0",
-                "ridge-0-length": "4",
-                "ridge-1-x": "-3",
-                "ridge-1-y": "3",
-                "ridge-1-direction": "90",
-                "ridge-1-length": "6",
-            },
-        ),
-    ).get_data(as_text=True)
-    assert "terrain: True" in roof
-    assert "Apex 1" not in roof
-    assert "Ridge 1" in roof
-    assert "Ridge 2" in roof
-    assert _value(roof, "ridge-0-length") == "4"
-    assert _value(roof, "ridge-1-length") == "6"
 
 
 def test_the_l_form_keeps_a_different_height_on_each_ridge() -> None:
@@ -458,7 +404,7 @@ def test_the_l_form_keeps_a_different_height_on_each_ridge() -> None:
             },
         ),
     ).get_data(as_text=True)
-    assert "terrain: True" in page
+    assert "wall 1 is open" in page
     assert "ridge height: 3.000 m" in page
     assert _value(page, "ridge-0-height") == "3"
     assert _value(page, "ridge-1-height") == "1.5"
@@ -511,14 +457,15 @@ def test_a_blank_ridge_height_uses_the_roof_height_box() -> None:
             "ridge-0-direction": "0",
             "ridge-0-length": "4",
             "ridge-0-height": "",
+            "wall-0-target": "ridge-0",
+            "wall-1-target": "ridge-0",
+            "wall-2-target": "ridge-0",
+            "wall-3-target": "ridge-0",
         }
     )
     page = _client().post("/", data=data).get_data(as_text=True)
-    assert "terrain: True" in page
     assert "ridge height: 3.000 m" in page
-    assert _value(page, "ridge-0-height") == "3"
-    for edge in range(4):
-        assert f"edge {edge}: pitch 45°" in page
+    assert _value(page, "ridge-0-height") == ""
 
 
 def test_the_l_keeps_the_same_interior_card() -> None:
@@ -531,8 +478,8 @@ def test_the_l_keeps_the_same_interior_card() -> None:
         data=_l_post(method="experimental", **{"apex-0-x": "0", "apex-0-y": "0"}),
     ).get_data(as_text=True)
     assert "Add ridge" in asked
-    assert "terrain: True" in asked
     assert "Apex 1" in asked
+    assert "<fieldset disabled>" not in asked
 
 
 def test_a_corner_edit_keeps_the_ridge_offset() -> None:
@@ -556,8 +503,7 @@ def test_a_corner_edit_keeps_the_ridge_offset() -> None:
 def test_experimental_explanation_says_the_visitor_can_move_the_apex() -> None:
     page = _client().get("/?method=experimental").get_data(as_text=True)
     assert "add an apex or a ridge" in page.lower()
-    assert 'name="apex-0-x" value="0"' in page
-    assert 'name="apex-0-y" value="0"' in page
+    assert "Drains to" in page
     assert "Place at the center" in page
     assert "requestSubmit" in page
     assert 'window.location = "/?method=' not in page
@@ -589,14 +535,13 @@ def test_place_at_center_returns_the_apex_to_the_middle() -> None:
     assert "edge 0: pitch 45°" in centered
 
 
-def test_an_offset_past_the_wall_is_shown_pulled_back() -> None:
+def test_an_offset_past_the_wall_stays_typed() -> None:
     page = _client().post("/", data=_rect_post(offset_x="10", offset_y="0")).get_data(
         as_text=True
     )
     used_x = float(_value(page, "offset_x"))
     used_y = float(_value(page, "offset_y"))
-    assert used_x < 5.0
-    assert used_x == pytest.approx(5.0, abs=1e-2)
+    assert used_x == 10.0
     assert used_y == 0.0
     again = _client().post(
         "/",
@@ -622,8 +567,8 @@ def test_a_move_pulls_back_from_the_spot_already_shown() -> None:
         ),
     ).get_data(as_text=True)
     assert float(_value(page, "apex-0-x")) == pytest.approx(2.0, abs=0.05)
-    assert float(_value(page, "apex-0-y")) <= 3.0
-    assert "terrain: True" in page
+    assert float(_value(page, "apex-0-y")) == 10.0
+    assert "terrain: False" in page
 
 
 def test_corner_edit_and_overhang_keep_the_offset_from_the_new_middle() -> None:
@@ -635,10 +580,13 @@ def test_corner_edit_and_overhang_keep_the_offset_from_the_new_middle() -> None:
     page = _client().post("/", data=edited).get_data(as_text=True)
     assert _value(page, "offset_x") == "1"
     assert _value(page, "offset_y") == "0"
-    built = roof_from_interiors(
+    from krovlab.experimental import Apex
+    from krovlab.links import Target, roof_from_links
+
+    built = roof_from_links(
         [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)],
-        (Apex(6.0, 4.0),),
-        roof_height=3.0,
+        (Apex(6.0, 4.0, height=3.0),),
+        walls=(Target("apex", 0),) * 4,
     )
     assert isinstance(built, Roof)
     for face in built.faces:
@@ -670,7 +618,7 @@ def test_another_example_resets_and_a_method_switch_starts_fresh() -> None:
     fresh = _client().get("/?method=experimental&example=l-shape").get_data(
         as_text=True
     )
-    assert "Apex 1" in fresh
+    assert "Ridge 1" in fresh
     assert "Add apex" in fresh
     skeleton = _client().post(
         "/",
@@ -687,7 +635,7 @@ def test_another_example_resets_and_a_method_switch_starts_fresh() -> None:
         "/",
         data=_rect_post(built_method="skeleton", offset_x="1", offset_y="0"),
     ).get_data(as_text=True)
-    assert _value(back, "apex-0-x") == "0"
+    assert _value(back, "ridge-0-x") == "0"
     assert "Place at the center" in back
 
 
@@ -703,7 +651,7 @@ def test_failure_keeps_the_card_and_says_why() -> None:
 def test_snap_starts_on_survives_update_and_returns_for_a_new_building() -> None:
     fresh = _client().get("/?method=experimental").get_data(as_text=True)
     assert 'name="snap" value="on" checked' in fresh
-    assert 'name="apex-0-x"' in fresh
+    assert 'name="ridge-0-x"' in fresh
     updated = _client().post(
         "/", data=_rect_post(snap="off", offset_x="1", offset_y="0")
     ).get_data(as_text=True)
@@ -752,9 +700,8 @@ def test_a_dxf_resets_the_offset_to_zero() -> None:
     page = _client().post("/", data=data, content_type="multipart/form-data").get_data(
         as_text=True
     )
-    assert _value(page, "apex-0-x") == "0"
-    assert _value(page, "apex-0-y") == "0"
-    assert "Apex 1" in page
+    assert _value(page, "ridge-0-x") == "0"
+    assert "Ridge 1" in page
     assert _checked(page, "snap")
     assert _checked(page, "hold-0")
     assert _checked(page, "hold-1")
@@ -768,7 +715,7 @@ def test_the_rectangle_starts_with_both_reflections_checked() -> None:
     page = _client().get("/?method=experimental").get_data(as_text=True)
     assert _checked(page, "hold-0")
     assert _checked(page, "hold-1")
-    assert _value(page, "apex-0-x") == "0"
+    assert _value(page, "ridge-0-x") == "0"
 
 
 def test_a_centered_ridge_can_leave_the_middle_with_symmetry_off() -> None:
@@ -797,7 +744,6 @@ def test_a_centered_ridge_can_leave_the_middle_with_symmetry_off() -> None:
     assert _value(page, "ridge-0-y") == "0.5"
     assert not _checked(page, "hold-0")
     assert not _checked(page, "hold-1")
-    assert "terrain: True" in page
 
 
 def test_checking_one_reflection_adds_the_mirror_copy() -> None:
@@ -905,7 +851,7 @@ def test_update_keeps_the_offset_checkboxes_and_snap() -> None:
     fresh = _client().get("/?method=experimental&example=l-shape").get_data(
         as_text=True
     )
-    assert "Apex 1" in fresh
+    assert "Ridge 1" in fresh
     assert _checked(fresh, "snap")
     assert 'name="hold-0"' not in fresh
 
@@ -926,6 +872,6 @@ def test_switching_method_starts_the_other_roof_from_scratch() -> None:
         "/",
         data=_rect_post(built_method="skeleton", offset_x="1", snap="off"),
     ).get_data(as_text=True)
-    assert _value(back, "apex-0-x") == "0"
+    assert _value(back, "ridge-0-x") == "0"
     assert _checked(back, "snap")
     assert "Place at the center" in back

@@ -141,14 +141,15 @@ class EchoModel:
         return ModelTurn(text="Ridge height is 3 m on the takeoff already on the page.")
 
 
-def test_help_prefers_the_skeleton_and_knows_the_graph_network() -> None:
+def test_help_prefers_the_skeleton_and_explains_the_linked_roof() -> None:
     text = system_prompt().lower()
     assert "prefer" in text and "standard skeleton" in text
-    assert "experimental graph network" in text
+    assert "linked roof" in text
+    assert "graph network" not in text
+    assert "drains to" in text
+    assert "do not connect walls" in text
     assert "roof height" in text
-    assert "face over several" in text
-    assert "unliftable" in text
-    assert "does not take a pitch" in text or "pitch is not an input" in text
+    assert "pitch is not an input" in text
     assert "load dxf" in text
     assert "roof.obj" in text and "roof.glb" in text
 
@@ -162,7 +163,7 @@ def test_set_cell_roof_height_patches_the_experimental_form() -> None:
     assert "Update roof" in result.note
 
 
-def test_set_wall_refuses_while_the_graph_network_is_selected() -> None:
+def test_set_wall_refuses_while_the_linked_roof_is_selected() -> None:
     form = dict(_rect())
     form["method"] = "experimental"
     result = set_wall(form, cell=1, wall=3, pitch_delta=5)
@@ -173,7 +174,7 @@ def test_set_wall_refuses_while_the_graph_network_is_selected() -> None:
 def test_roof_height_is_not_a_skeleton_knob() -> None:
     result = set_cell(_rect(), cell=1, roof_height=2.0)
     assert not result.ok
-    assert "experimental" in result.note.lower()
+    assert "linked roof" in result.note.lower()
 
 
 def test_inspect_reports_the_method_and_roof_height() -> None:

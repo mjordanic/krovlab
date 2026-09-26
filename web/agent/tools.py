@@ -7,11 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from krovlab import Failure
-from krovlab._input import degrees_from_pitch
-from krovlab.experimental import (
-    reflection_axes,
-    roof_from_interiors,
-)
+from krovlab._input import check_footprint, degrees_from_pitch
+from krovlab.experimental import reflection_axes
 
 DEFAULT_PITCH = 45.0
 DEFAULT_PITCH_DELTA = 5.0
@@ -71,8 +68,9 @@ def set_wall(
             ok=False,
             note=(
                 "pitch, gable, knee, and gambrel are not inputs of the "
-                "experimental graph network. Select Standard skeleton when "
-                "each wall has a pitch. Roof height is metres above the eaves."
+                "linked roof. Select Standard skeleton when each wall has a "
+                "pitch. On the linked roof, choose which wall drains to "
+                "which apex or ridge."
             ),
         )
     snapshot = _cell(form, cell)
@@ -240,8 +238,9 @@ def set_cell(
         return ToolResult(
             ok=False,
             note=(
-                "roof height is only on the experimental graph network. "
-                "On the skeleton, pitch sets how steep the roof is."
+                "roof height is only on the linked roof. "
+                "On the skeleton, pitch sets how steep the roof is. "
+                "On the linked roof the box fills a new or blank row."
             ),
         )
     if roof_height is not None and roof_height <= 0:
@@ -351,14 +350,13 @@ def _placement_patch(
             ok=False,
             note=(
                 "The apex, the ridge, the offset, snap, and symmetry are on "
-                "the experimental graph network. " + _UNCHANGED
+                "the linked roof. " + _UNCHANGED
             ),
         )
     ring = _ring(form, "outer")
     if len(ring) < 3:
         return ToolResult(ok=False, note=_NO_INTERIOR)
-    built = roof_from_interiors(ring)
-    if isinstance(built, Failure):
+    if isinstance(check_footprint(ring), Failure):
         return ToolResult(ok=False, note=_NO_INTERIOR)
     axes = reflection_axes(ring)
     style_word = (style or "").strip().lower()

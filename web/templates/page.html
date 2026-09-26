@@ -219,9 +219,16 @@
       </p>
       <ul>
         {% if method == "experimental" %}
-        <li>Load an example this method can roof: a rectangle, an L, an overhang, an eave height, or a plan that crosses itself.</li>
+        <li>Load an example. It opens on the straight skeleton's links: each wall already drains to a ridge or an apex.</li>
+        <li>On each wall, choose <strong>Drains to</strong>: one apex, one whole ridge, or Open. Open leaves that wall without a face, and the takeoff names it.</li>
+        <li>A corner lists only the ends its two walls allow. Automatic uses the nearer end when both walls share a target. Choose an end before either wall draws when the walls disagree.</li>
+        <li>Add an apex or a ridge. A new one starts with nothing attached. Move it by an offset, in metres, from the middle, or drag it on the plan. Dragging does not change which wall uses it.</li>
+        <li>Select a wall, then add a vertex to split it. Both pieces keep that wall's drain. The new corner is automatic when they share a target.</li>
+        <li>On the plan, click a wall or a corner, then click the apex or ridge end it should use. A drag does not change the link. Connect a ridge end from the link rows.</li>
+        <li>No line appears only when the two walls already lie on one straight line. That corner then has no hip, and the two walls stay separate.</li>
+        <li>Height is metres above the eaves: one height for an apex, one height for a whole ridge. The roof-height box fills a new or blank row. It does not rewrite a height you already typed.</li>
+        <li>Connect a ridge end to another ridge end, or to an apex, with a link row. A gap stays open, and the takeoff says the plan is not covered.</li>
         <li>Roof height, overhang, and eave height still apply. Pitch, gable, knee, gambrel, holes, dormers, and extra cells do not.</li>
-        <li>Add an apex or a ridge, then move it by typing an offset, in metres, from the middle of the footprint.</li>
         {% else %}
         <li>Load a catalog example (hip, gable, shed, mixed pitches, knee, gambrel, L-shape, courtyard, overhang, two cells, a dormer, a named failure).</li>
         <li>Select a wall or corner on the plan, drag vertices, add a detached cell, add a cell on a selected wall, split a wall with a vertex, or delete a cell.</li>
@@ -250,15 +257,16 @@
       </label>
       <label>
         <input form="roof-form" type="radio" name="method" value="experimental"{% if method == "experimental" %} checked{% endif %}>
-        Experimental graph network
+        Linked roof
       </label>
     </fieldset>
     <p class="caption" id="experimental-copy"{% if method != "experimental" %} hidden{% endif %}>
-      A network chooses which faces share a boundary. A planarity step then
-      makes those faces planar. Pitch is not an input. Use this method for a
-      face over several walls or for another ridge layout. You can move the
-      apex and, where a ridge is offered, choose it. Keep the skeleton when each wall has a pitch. Gable, knee,
-      gambrel, holes, dormers, and extra cells are not part of this method.
+      You connect each wall to one apex or one ridge, and each corner to an
+      end those walls allow. The page draws the faces those links describe
+      and leaves the offsets and heights you typed. It does not guess a hip,
+      and it does not move a ridge back to an older spot. A new example starts
+      from the straight skeleton's links. Pitch is not an input. Keep the skeleton when each wall has a pitch. Gable, knee, gambrel, holes,
+      dormers, and extra cells are not part of this method.
     </p>
   </div>
   <form class="example-bar" method="get" action="/">
@@ -324,9 +332,11 @@
       <div class="toolbar skeleton-only"{% if method == "experimental" %} hidden{% endif %}>
         <button type="button" id="add-detached-cell">Add detached cell</button>
         <button type="button" id="add-cell-on-wall" disabled>Add cell on selected wall</button>
-        <button type="button" id="add-vertex" disabled>Add vertex on selected wall</button>
         <button type="button" id="delete-cell">Delete cell</button>
       </div>
+      <p{% if method != "experimental" %} class="skeleton-only"{% endif %}>
+        <button type="button" id="add-vertex" disabled>Add vertex on selected wall</button>
+      </p>
       <p class="hint skeleton-only" id="wall-action-hint"{% if method == "experimental" %} hidden{% endif %}>Select a wall on the building plan to attach a cell or split a vertex.</p>
       <p class="pitch-all skeleton-only"{% if method == "experimental" %} hidden{% endif %}>
         <label>
@@ -452,6 +462,42 @@
             {% if symmetry_note %}
             <p class="hint" id="symmetry-note">{{ symmetry_note }}</p>
             {% endif %}
+            {% if links %}
+            <p class="hint">A corner uses an end its two walls allow. Automatic picks the nearer end when they share a target.</p>
+            {% for corner in links.corners %}
+            <p>
+              <label>
+                Corner {{ corner.index + 1 }}
+                <select name="corner-{{ corner.index }}-target">
+                  {% for option in corner.options %}
+                  <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </p>
+            {% endfor %}
+            <p class="hint">Link a ridge end to another ridge end, or to an apex. An open row is ignored.</p>
+            {% for join in links.joins %}
+            <p>
+              <label>
+                From
+                <select name="join-{{ join.index }}-a">
+                  {% for option in join.left %}
+                  <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                to
+                <select name="join-{{ join.index }}-b">
+                  {% for option in join.right %}
+                  <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </p>
+            {% endfor %}
+            {% endif %}
             <p>
               <button type="submit" name="make_symmetric" value="1">Make it symmetric</button>
             </p>
@@ -480,6 +526,18 @@
           {% for wall in cell.walls %}
           <div class="wall" data-cell="{{ cell.index }}" data-wall="{{ wall.index }}">
             <div class="wall-head"><span>Wall {{ wall.number }}</span></div>
+            {% if links and cell.index == 0 %}
+            <p>
+              <label>
+                Drains to
+                <select name="wall-{{ wall.index }}-target">
+                  {% for option in links.walls[wall.index].options %}
+                  <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </p>
+            {% endif %}
             <div class="wall-types skeleton-only" role="radiogroup" aria-label="Wall {{ wall.number }} type"{% if method == "experimental" %} hidden{% endif %}>
               {% for kind, label in [("hip", "Hip"), ("gable", "Gable"), ("knee", "Knee"), ("gambrel", "Gambrel")] %}
               <label>

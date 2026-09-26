@@ -51,11 +51,8 @@ FailureKind = Literal[
     "gambrel_versus_gable",
     "dormer_two_faces",
     "dormer_outside",
-    "no_face_graph",
-    "unliftable",
 ]
-"""Why :func:`roof`, :func:`krovlab.project.project`, or the experimental
-entry point refused.
+"""Why :func:`roof` or :func:`krovlab.project.project` refused.
 
 ``invalid_pitch`` — unreadable spelling, or outside ``0 < pitch <= 90``.
 ``pitch_count`` — a pitch list whose length is not the number of edges.
@@ -76,9 +73,6 @@ entry point refused.
 ``gambrel_versus_gable`` — the same edge is a gambrel and a gable.
 ``dormer_two_faces`` — a dormer overlaps two host faces.
 ``dormer_outside`` — a dormer does not lie on a host face.
-``no_face_graph`` — the experimental method was called with neither a
-    supplied face graph nor a checkpoint.
-``unliftable`` — a face graph could not be lifted into a roof.
 """
 
 

@@ -89,8 +89,9 @@ def test_dockerfile_starts_the_same_app_on_python_313() -> None:
     assert '"python", "-m", "web"' in text
     assert "CONTEXT.md" in text
     assert "docs/limitations.md" in text
-    assert "--extra gnn" in text
-    assert "models/ren2021-face-adjacency.pt" in text
+    assert "--extra web" in text
+    assert "--extra gnn" not in text
+    assert "ren2021-face-adjacency" not in text
 
 
 def test_readme_documents_localhost_and_cloud_run_flags() -> None:

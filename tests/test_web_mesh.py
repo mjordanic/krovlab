@@ -17,7 +17,6 @@ from web.app import create_app
 from web.examples import DORMER_RING, GABLE_DORMER, GARAGE, HOUSE, RECTANGLE
 
 from krovlab import Cell, Dormer, Project, Roof, project, roof
-from krovlab.experimental import roof_from_face_graph
 from krovlab.viz import solid_view
 
 _Point = tuple[float, float, float]
@@ -212,10 +211,8 @@ def test_failure_and_non_terrain_downloads_are_not_files() -> None:
         assert _client().post(path, data=plus).status_code == 404
 
 
-def test_experimental_download_is_the_shown_solid() -> None:
-    built = roof_from_face_graph(RECTANGLE)
+def test_experimental_download_is_the_skeleton_the_page_opened_on() -> None:
     skeleton = roof(RECTANGLE, 45.0)
-    assert isinstance(built, Roof)
     assert isinstance(skeleton, Roof)
     page = _client().get("/?method=experimental&example=hip-rectangle").get_data(
         as_text=True
@@ -224,23 +221,21 @@ def test_experimental_download_is_the_shown_solid() -> None:
     response = _client().post("/roof.obj", data=snapshot)
     assert response.status_code == 200
     downloaded = _triangle_set(_obj_triangles(response.get_data(as_text=True)))
-    assert downloaded == _solid_triangles(built)
-    assert downloaded != _solid_triangles(skeleton)
+    assert downloaded == _solid_triangles(skeleton)
 
 
-def test_experimental_download_keeps_the_posted_roof_height() -> None:
-    built = roof_from_face_graph(RECTANGLE, roof_height=2.0)
+def test_experimental_download_keeps_typed_ridge_heights() -> None:
     skeleton = roof(RECTANGLE, 45.0)
-    assert isinstance(built, Roof)
     assert isinstance(skeleton, Roof)
-    data = {**_rect_post(), "method": "experimental", "roof_height": "2"}
-    page = _client().post("/", data=data).get_data(as_text=True)
+    page = _client().get("/?method=experimental&example=hip-rectangle").get_data(
+        as_text=True
+    )
     snapshot = _mesh_snapshot(page)
+    snapshot["roof_height"] = "2"
     response = _client().post("/roof.obj", data=snapshot)
     assert response.status_code == 200
     downloaded = _triangle_set(_obj_triangles(response.get_data(as_text=True)))
-    assert downloaded == _solid_triangles(built)
-    assert downloaded != _solid_triangles(skeleton)
+    assert downloaded == _solid_triangles(skeleton)
 
 
 def test_dormer_mesh_is_the_shown_solid_triangles() -> None:

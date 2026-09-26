@@ -48,10 +48,10 @@ may give each cell its own eave height.
 folds back over itself. A geometry that violates this is not a roof, and saying
 so is how we reject bad output.
 
-**Face** — one planar piece of the roof, rising from one footprint edge at
-that edge's pitch. Every face is a plane, never curved, never warped.
-That one-wall rule is the skeleton's; an experimental face may span several
-walls.
+**Face** — one planar piece of the roof. On the skeleton it rises from one
+footprint edge at that edge's pitch. On the linked roof it rises from the
+wall the visitor connected, along the chain of ridges between that wall's
+corners. Every face is a plane, never curved, never warped.
 
 **Pitch** — the angle of a face from horizontal, in degrees, `0 < pitch < 90`.
 The single most important design variable. _Not: slope, inclination, fall, rise
