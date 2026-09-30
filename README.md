@@ -414,19 +414,25 @@ docker build -t krovlab .
 docker run --rm -p 8080:8080 -e GEMINI_API_KEY krovlab
 ```
 
-To give it a URL, deploy that image to Cloud Run: region `europe-west1`,
-min instances 0, unauthenticated. The image installs the `web` extra.
-No custom domain. Do not run this from
+To give it a URL, deploy that image to Cloud Run in project `krovlab`,
+region `europe-west1`. The service scales to zero, so idle time is not
+billed. Memory is 512 MiB and CPU is 1, which is enough once PyTorch is
+out of the image. At most 2 instances can run, so a public URL cannot
+scale up a large bill. No custom domain. Do not run this from
 CI — there is no live Google Cloud project in the test suite. Store the
 Gemini key as a secret; set a **project spend cap** of $10 in Google AI
 Studio so a leaked URL cannot run past that fuse.
 
 ```bash
 gcloud run deploy krovlab \
+  --project krovlab \
   --source . \
   --region europe-west1 \
-  --memory 2Gi \
+  --memory 512Mi \
+  --cpu 1 \
   --min-instances 0 \
+  --max-instances 2 \
+  --no-cpu-boost \
   --allow-unauthenticated \
   --set-secrets=GEMINI_API_KEY=gemini-api-key:latest
 ```

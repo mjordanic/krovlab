@@ -98,8 +98,11 @@ def test_readme_documents_localhost_and_cloud_run_flags() -> None:
     text = (Path(__file__).resolve().parents[1] / "README.md").read_text()
     assert "uv run --extra web python -m web" in text
     assert "europe-west1" in text
+    assert "--project krovlab" in text
     assert "--min-instances 0" in text
-    assert "--memory 2Gi" in text
+    assert "--max-instances 2" in text
+    assert "--memory 512Mi" in text
+    assert "--no-cpu-boost" in text
     assert "--allow-unauthenticated" in text
     assert "GEMINI_API_KEY" in text
     assert "--set-secrets=GEMINI_API_KEY" in text
