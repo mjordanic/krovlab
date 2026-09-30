@@ -359,6 +359,20 @@ the example already uses them. Changing the example goes to
 after edits. Draw on the building plan: add a detached cell, or add a cell on a
 selected wall. There is no ring to close. Submit is still one form POST.
 
+**Linked roof**, beside **Standard skeleton** at the top of the page, is the
+experimental method. Choose it when you want to decide which wall drains to
+which apex or ridge. An example opens on the straight skeleton's links. On
+each wall, set **Drains to** to one apex, one whole ridge, or Open. A corner
+lists only the ends its two walls allow; automatic uses the nearer end when
+they share a target, and you choose an end when they disagree. Add an apex
+or a ridge, then move it by an offset in metres from the middle, or drag it
+on the plan. A drag does not change the link. Height is metres above the
+eaves: one height for an apex, one height for a whole ridge. Connect a ridge
+end to another ridge end, or to an apex, from a link row. On the plan, click
+a wall or a corner, then click the apex or ridge end it should use. **Update
+roof** rebuilds. Pitch is not an input. Open leaves that wall without a face,
+and the takeoff names it. Keep the skeleton when each wall has a pitch.
+
 Upload a DXF as the selected cell's footprint: one closed straight polyline
 in model space. Choose millimetres, centimetres, or metres — millimetres is
 the default; the file header is ignored.
@@ -375,7 +389,10 @@ download it as `roof.obj` and `roof.glb`.
 If `GEMINI_API_KEY` is set, a **Need help?** box appears beside the form.
 Ask about the current project (takeoff, why a Failure, what a hip or gable
 is) or have it fill the same knobs the form already has: wall type (hip,
-gable, knee, gambrel), pitch, overhang, and eave height. It can point at
+gable, knee, gambrel), pitch, overhang, and eave height. On **Linked roof**
+it can add an apex or a ridge and set roof height, offset, snap, and
+symmetry. It does not connect walls, corners, or ridge ends, and it does
+not fill pitch or wall type while that method is selected. It can point at
 **Load DXF** and at the **roof.obj** / **roof.glb** downloads. It does not
 attach a file, fetch the mesh, add cells, draw a new footprint, or place a
 dormer. Click **Update roof** after it writes the form so the plan and 3D
@@ -388,7 +405,8 @@ already in the environment. Do not commit `.env`.
 
 The same process is what a container runs. `Dockerfile` at the repo root
 starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
-image). Plotly.js still comes from a CDN. Pass the Gemini key when you want
+image). The image installs the `web` extra only. It does not install
+PyTorch. Plotly.js still comes from a CDN. Pass the Gemini key when you want
 help on that container:
 
 ```bash
