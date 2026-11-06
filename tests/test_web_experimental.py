@@ -875,3 +875,26 @@ def test_switching_method_starts_the_other_roof_from_scratch() -> None:
     assert _value(back, "ridge-0-x") == "0"
     assert _checked(back, "snap")
     assert "Place at the center" in back
+
+
+def test_a_carried_over_outline_is_not_labelled_as_the_rectangle_example() -> None:
+    # House and garage's 5x6 house cell, switched to the Linked roof.
+    house = {
+        "example": "house-and-garage",
+        "set_pitch": "45",
+        "method": "experimental",
+        "built_method": "skeleton",
+    }
+    for i, (x, y) in enumerate([(0, 0), (5, 0), (5, 6), (0, 6)]):
+        house[f"outer-x-{i}"] = str(x)
+        house[f"outer-y-{i}"] = str(y)
+    page = _client().post("/", data=house).get_data(as_text=True)
+    assert '<option value="" selected>Your plan</option>' in page
+    assert "A 10x6 m footprint" not in page
+    assert 'value="hip-rectangle" selected' not in page
+
+
+def test_the_rectangle_example_keeps_its_label_when_unchanged() -> None:
+    page = _client().post("/", data=_rect_post()).get_data(as_text=True)
+    assert 'value="hip-rectangle" selected' in page
+    assert "Your plan" not in page

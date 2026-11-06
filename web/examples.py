@@ -156,8 +156,10 @@ def load_examples() -> dict[str, Example]:
             label="Dormer on a hip",
             group="On the slope",
             caption=(
-                "A small gable dormer on the south slope. "
-                "Not a terrain; 3D still draws."
+                "A small gable dormer on the south slope. Its two faces are in "
+                "the takeoff and replace the opening they cut in the slope. At "
+                "the same 45° pitch they cover the same area, so the total "
+                "matches the plain hip. The cheeks are walls, not roof."
             ),
             cells=(Cell(RECTANGLE, 45.0),),
             dormers=(Dormer(0, DORMER_RING, GABLE_DORMER),),
