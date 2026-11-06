@@ -13,7 +13,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # rest of mattpocock/skills is installed fresh: npx skills@latest add mattpocock/skills
-# the workflow set below is committed (same set as outdoors_destinations)
+# the workflow set below is committed
 .agents/skills/*
 !.agents/skills/code-review/
 !.agents/skills/code-review/**
@@ -36,18 +36,10 @@ __pycache__/
 !.agents/skills/to-tickets/
 !.agents/skills/to-tickets/**
 .claude/skills/
-.cursor/*
-!.cursor/agents/
-!.cursor/agents/**
-!.cursor/skills/
-!.cursor/skills/implement-issues/
-!.cursor/skills/implement-issues/**
-!.cursor/environment.json
-!.cursor/Dockerfile
-!.cursor/worktrees.json
 skills-lock.json
 
 # local agent config
+.scratch/
 .claude/settings.local.json
 .claude/worktrees/
 .agents/worktrees/
