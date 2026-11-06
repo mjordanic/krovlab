@@ -1,5 +1,14 @@
 # krovlab
 
+krovlab works out a roof from the outline of a building. You draw or
+upload the walls, say how steep each side is, and it gives back the roof
+shape and its quantities: surface area, and the lengths of eaves, hips,
+ridges and valleys. It is a demo of a Python library, not a finished
+product.
+
+**Try it online:** <https://krovlab.lamis-technologies.hr> (nothing to
+install).
+
 Give a building footprint in metres and a pitch in degrees. Get back
 the faces, hips, ridges, valleys and quantities of a hipped roof — or a
 named failure. Give several footprints as cells and get one project. An
@@ -349,7 +358,11 @@ uv sync --extra web
 uv run --extra web python -m web
 ```
 
-Open http://127.0.0.1:5000 — the 10 × 6 m hip rectangle at 45° is already run.
+Open http://127.0.0.1:8000 — the 10 × 6 m hip rectangle at 45° is already run.
+The server listens on this machine only. Set `PORT` to use another port
+(`PORT=8123 uv run --extra web python -m web`); set `HOST=0.0.0.0` only if
+you mean to let other machines on your network reach it. Port 5000 is not
+the default because macOS AirPlay Receiver uses it.
 The dropdown is a catalog of complete examples (gable, shed, knee, gambrel,
 courtyard, two-cell projects, a dormer, a named Failure). Each example is a
 template: its settings are on the page and can be changed. Unusual options
@@ -380,8 +393,9 @@ the default; the file header is ignored.
 10 × 6 m rectangle already on the page, drawn in millimetres. Arcs, text,
 dimensions, hatches, paper space, and block inserts are ignored. If the
 file is only a block insert, explode it in CAD and upload again. Choosing
-a file fills the form and leaves the drawings as they were; **Update roof**
-rebuilds, the same as after drawing. When the 3D solid is on the page,
+a file and clicking **Load DXF** fills the form and rebuilds the drawings.
+After any other edit the takeoff is marked out of date until you click
+**Update roof**. When the 3D solid is on the page,
 download it as `roof.obj` and `roof.glb`.
 
 ### Help agent
@@ -404,9 +418,9 @@ The model is Gemini 3.6 Flash. The key stays on the server. Copy
 already in the environment. Do not commit `.env`.
 
 The same process is what a container runs. `Dockerfile` at the repo root
-starts it on Python 3.13, binds `0.0.0.0`, and honours `PORT` (8080 in the
-image). The image installs the `web` extra only. It does not install
-PyTorch. Plotly.js still comes from a CDN. Pass the Gemini key when you want
+starts it on Python 3.13, binds `0.0.0.0` (the image sets `HOST`), and
+honours `PORT` (8080 in the image). The image installs the `web` extra
+only. Plotly.js still comes from a CDN. Pass the Gemini key when you want
 help on that container:
 
 ```bash
@@ -416,8 +430,7 @@ docker run --rm -p 8080:8080 -e GEMINI_API_KEY krovlab
 
 To give it a URL, deploy that image to Cloud Run in project `krovlab`,
 region `europe-west1`. The service scales to zero, so idle time is not
-billed. Memory is 512 MiB and CPU is 1, which is enough once PyTorch is
-out of the image. At most 2 instances can run, so a public URL cannot
+billed. Memory is 512 MiB and CPU is 1. At most 2 instances can run, so a public URL cannot
 scale up a large bill. No custom domain. Do not run this from
 CI — there is no live Google Cloud project in the test suite. Store the
 Gemini key as a secret; set a **project spend cap** of $10 in Google AI

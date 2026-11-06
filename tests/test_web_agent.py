@@ -399,7 +399,9 @@ def test_agent_sets_roof_height_on_the_experimental_form() -> None:
     response = client.post(
         "/agent",
         json={
-            "messages": [{"role": "user", "content": "make the roof 2 m above the eaves"}],
+            "messages": [
+                {"role": "user", "content": "make the roof 2 m above the eaves"}
+            ],
             "fields": fields,
         },
     )
