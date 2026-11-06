@@ -113,6 +113,16 @@ def test_overlapping_cells_are_a_named_failure() -> None:
     assert "overlap" in result.reason.lower()
 
 
+def test_cells_sharing_top_and_bottom_lines_and_partly_overlapping_overlap() -> None:
+    # Every vertex lies on the other cell's boundary and neither centroid
+    # falls inside the other cell, yet the cells share a 2x5 m strip.
+    left = [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0)]
+    right = [(3.0, 0.0), (8.0, 0.0), (8.0, 5.0), (3.0, 5.0)]
+    result = project([Cell(left, 45.0), Cell(right, 45.0)])
+    assert isinstance(result, Failure)
+    assert result.kind == "overlap"
+
+
 def test_cells_that_only_share_a_wall_are_not_an_overlap() -> None:
     result = project([Cell(RECT_5X6, 45.0), Cell(NEIGHBOUR_5X6, 45.0)])
     assert isinstance(result, Project)

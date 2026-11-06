@@ -6,7 +6,7 @@ import math
 import os
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request
@@ -517,7 +517,6 @@ def _render_post(
     if dxf_units not in {"mm", "cm", "m"}:
         dxf_units = "mm"
     dxf_message = ""
-    needs_update = False
     selected_cell = form.get("selected_cell") or ""
     reset_offset = False
     if is_upload:
@@ -527,9 +526,26 @@ def _render_post(
         else:
             index = _selected_cell_index(form, len(views))
             views = _apply_dxf_to_cell(views, index, loaded, set_pitch)
-            needs_update = True
+            # Rebuild from the loaded outline so the takeoff matches the plan.
+            _views, parsed = _posted_cells(
+                _mesh_fields(views, dormer_views, set_pitch), set_pitch
+            )
             selected_cell = str(index)
             reset_offset = True
+    if [_numeric_ring(view.footprint) for view in views] != [
+        list(cell.footprint) for cell in example.cells
+    ]:
+        # The drawn outline is no longer this example's, so do not show its name.
+        example = replace(
+            example,
+            slug="",
+            label="Your plan",
+            caption=(
+                "Your own plan: the outline is no longer the example's. "
+                "Pick an example to start again from its footprint."
+            ),
+            face_graph=None,
+        )
     result: Roof | Project | Failure
     interior_rows = default_rows()
     symmetry_fit = ""
@@ -572,7 +588,6 @@ def _render_post(
         method=method,
         dxf_units=dxf_units,
         dxf_message=dxf_message,
-        needs_update=needs_update,
         selected_cell=selected_cell,
         mesh_cells=shown_cells,
         mesh_dormers=shown_dormers,
@@ -597,11 +612,9 @@ def _render_post(
 
 
 def _load_dxf(files: Mapping[str, Any] | None, units: str) -> DxfFootprint | str:
-    if files is None:
-        return rings_from_dxf(b"", units)
-    storage = files.get("dxf")
+    storage = files.get("dxf") if files is not None else None
     if storage is None or not getattr(storage, "filename", None):
-        return rings_from_dxf(b"", units)
+        return "Choose a DXF file first, then click Load DXF."
     data = storage.read()
     if not isinstance(data, (bytes, bytearray)):
         data = bytes(data)
@@ -669,7 +682,6 @@ def _render(
     method: str = "skeleton",
     dxf_units: str = "mm",
     dxf_message: str = "",
-    needs_update: bool = False,
     selected_cell: str = "",
     mesh_cells: list[CellView] | None = None,
     mesh_dormers: list[DormerView] | None = None,
@@ -753,7 +765,6 @@ def _render(
         roof_height=fallback_roof_height or _shown_roof_height(method, cells, result),
         dxf_units=dxf_units,
         dxf_message=dxf_message,
-        needs_update=needs_update,
         selected_cell=selected_cell,
         mesh_fields=mesh_fields,
         offset_x=offset_x,
@@ -1883,13 +1894,36 @@ def _draw(
         plan_html = _embed(plan_view(result), include_js=True)
         solid_html: str | None = None
         if _shows_solid(result):
-            solid_html = _embed(solid_view(result), include_js=False)
+            solid_html = _embed(_framed(solid_view(result)), include_js=False)
         return plan_html, solid_html, None
     plan_html = _embed(plan_view(result, **walls), include_js=True)
     solid_html = None
     if _shows_solid(result):
-        solid_html = _embed(solid_view(result, **walls), include_js=False)
+        solid_html = _embed(_framed(solid_view(result, **walls)), include_js=False)
     return plan_html, solid_html, None
+
+
+def _framed(fig: Any) -> Any:
+    """Shrink the 3D box so Plotly's default camera shows the whole roof.
+
+    Plotly's "Reset camera to default" ignores a figure camera, so the
+    default view itself has to frame the roof. True proportions are kept.
+    """
+    spans = []
+    for axis in ("x", "y", "z"):
+        values = [
+            v for trace in fig.data for v in (getattr(trace, axis, None) or ())
+            if v is not None
+        ]
+        spans.append(max(values) - min(values) if values else 0.0)
+    if min(spans) <= 0.0:
+        return fig
+    scale = 0.75 / (spans[0] * spans[1] * spans[2]) ** (1.0 / 3.0)
+    fig.update_layout(
+        scene_aspectmode="manual",
+        scene_aspectratio={k: v * scale for k, v in zip("xyz", spans, strict=True)},
+    )
+    return fig
 
 
 def _numeric_ring(ring: list[tuple[Any, Any]]) -> list[tuple[float, float]]:
@@ -1912,5 +1946,9 @@ def _numeric_holes(
 
 def _embed(fig: Any, *, include_js: bool) -> str:
     js: bool | str = "cdn" if include_js else False
-    html: str = fig.to_html(full_html=False, include_plotlyjs=js)
+    # A fixed height: at 100% the 3D scene grew tall and narrow and cut the
+    # roof off at the sides, and Reset camera returned to that same view.
+    html: str = fig.to_html(
+        full_html=False, include_plotlyjs=js, default_height="520px"
+    )
     return html

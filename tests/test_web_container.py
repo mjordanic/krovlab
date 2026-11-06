@@ -1,7 +1,8 @@
 """Container contract for the form server.
 
-The process that runs on localhost is the one Cloud Run starts: bind
-0.0.0.0 and honour PORT. No live Google Cloud project.
+The process that runs on localhost is the one Cloud Run starts. Locally it
+binds 127.0.0.1; the container sets HOST=0.0.0.0. PORT is honoured
+either way. No live Google Cloud project.
 """
 
 from __future__ import annotations
@@ -14,40 +15,43 @@ import pytest
 from web import __main__ as serve
 
 
-def test_when_PORT_is_set_the_process_binds_all_interfaces(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _served(monkeypatch: pytest.MonkeyPatch, **env: str) -> dict[str, object]:
     recorded: dict[str, object] = {}
 
     def fake_run(*args: object, **kwargs: object) -> None:
         recorded["host"] = kwargs["host"]
         recorded["port"] = kwargs["port"]
 
-    monkeypatch.setenv("PORT", "8080")
+    for name in ("PORT", "HOST"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
     monkeypatch.setattr(serve, "load_repo_env", lambda: None)
     monkeypatch.setattr(
         serve, "create_app", lambda: SimpleNamespace(run=fake_run)
     )
     serve.main()
-    assert recorded == {"host": "0.0.0.0", "port": 8080}
+    return recorded
 
 
-def test_without_PORT_the_process_listens_on_localhost_5000(
+def test_the_container_env_binds_all_interfaces_on_its_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    recorded: dict[str, object] = {}
+    served = _served(monkeypatch, PORT="8080", HOST="0.0.0.0")
+    assert served == {"host": "0.0.0.0", "port": 8080}
 
-    def fake_run(*args: object, **kwargs: object) -> None:
-        recorded["host"] = kwargs["host"]
-        recorded["port"] = kwargs["port"]
 
-    monkeypatch.delenv("PORT", raising=False)
-    monkeypatch.setattr(serve, "load_repo_env", lambda: None)
-    monkeypatch.setattr(
-        serve, "create_app", lambda: SimpleNamespace(run=fake_run)
-    )
-    serve.main()
-    assert recorded == {"host": "127.0.0.1", "port": 5000}
+def test_setting_only_PORT_stays_on_localhost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    served = _served(monkeypatch, PORT="5057")
+    assert served == {"host": "127.0.0.1", "port": 5057}
+
+
+def test_without_PORT_the_process_listens_on_localhost_8000(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _served(monkeypatch) == {"host": "127.0.0.1", "port": 8000}
 
 
 def test_load_repo_env_fills_unset_keys_from_dotenv(
@@ -86,6 +90,7 @@ def test_dockerfile_starts_the_same_app_on_python_313() -> None:
     text = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text()
     assert "python:3.13" in text
     assert "ENV PORT=8080" in text
+    assert "ENV HOST=0.0.0.0" in text
     assert '"python", "-m", "web"' in text
     assert "CONTEXT.md" in text
     assert "docs/limitations.md" in text

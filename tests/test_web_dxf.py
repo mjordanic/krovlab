@@ -124,13 +124,13 @@ def test_get_offers_a_dxf_control_defaulting_to_millimetres() -> None:
     assert "polyline" in page.lower()
 
 
-def test_millimetre_polyline_fills_the_first_cell_without_rebuilding() -> None:
+def test_millimetre_polyline_fills_the_first_cell_and_rebuilds_the_roof() -> None:
     posted = [(0.0, 0.0), (8.0, 0.0), (8.0, 4.0), (0.0, 4.0)]
-    shown = roof(posted, 45.0)
-    assert isinstance(shown, Roof)
+    previous = roof(posted, 45.0)
+    assert isinstance(previous, Roof)
     rebuilt = roof(RECTANGLE, 45.0)
     assert isinstance(rebuilt, Roof)
-    assert shown.ridge_height != rebuilt.ridge_height
+    assert previous.ridge_height != rebuilt.ridge_height
     form = {"example": "hip-rectangle", "set_pitch": "45"}
     form.update(_ring_fields(posted))
     dxf = _closed_lw([(0, 0), (10000, 0), (10000, 6000), (0, 6000)])
@@ -147,8 +147,9 @@ def test_millimetre_polyline_fills_the_first_cell_without_rebuilding() -> None:
     assert page.count('value="hip" checked') >= 4
     for i in range(4):
         assert f'name="pitch-{i}" value="45"' in page
-    assert f"ridge height: {shown.ridge_height:.3f} m" in page
-    assert f"ridge height: {rebuilt.ridge_height:.3f} m" not in page
+    assert f"ridge height: {rebuilt.ridge_height:.3f} m" in page
+    assert f"total sloped area: {rebuilt.total_sloped_area:.3f}" in page
+    assert f"ridge height: {previous.ridge_height:.3f} m" not in page
     assert "3D solid" in page
     assert "Roof plan" in page
 
@@ -248,7 +249,8 @@ def test_repeated_vertex_winding_collinear_and_z_are_kept() -> None:
 
 
 def test_inner_polylines_become_holes() -> None:
-    shown = roof(RECTANGLE, 45.0)
+    hole = [(2.0, 2.0), (8.0, 2.0), (8.0, 4.0), (2.0, 4.0)]
+    shown = roof(RECTANGLE, 45.0, holes=[hole])
     assert isinstance(shown, Roof)
 
     def one_hole(doc: Any) -> None:
@@ -290,8 +292,10 @@ def test_inner_polylines_become_holes() -> None:
 
 
 def test_selected_cell_is_replaced_and_the_other_cell_stays() -> None:
-    shown = project([Cell(HOUSE, GABLES), Cell(GARAGE, GABLES)])
-    assert isinstance(shown, Project)
+    # The loaded 10x6 garage now covers the house, and the rebuilt takeoff says so.
+    shown = project([Cell(HOUSE, GABLES), Cell(RECTANGLE, 45.0)])
+    assert not isinstance(shown, Project)
+    assert shown.kind == "overlap"
     form: dict[str, str] = {
         "example": "hip-rectangle",
         "set_pitch": "45",
@@ -311,7 +315,7 @@ def test_selected_cell_is_replaced_and_the_other_cell_stays() -> None:
     assert 'value="gable" checked' in page
     _assert_metre_rectangle(page, prefix="cell-1-")
     assert 'name="cell-1-pitch-0" value="45"' in page
-    assert f"ridge height: {shown.ridge_height:.3f} m" in page
+    assert "cells overlap in plan" in page
 
     without_selection = {k: v for k, v in form.items() if k != "selected_cell"}
     first = _upload(_client(), dxf, without_selection)
@@ -382,6 +386,13 @@ def test_arcs_are_ignored_and_a_bulged_polyline_is_skipped() -> None:
     assert 'name="outer-x-1" value="10.0"' in page
     assert 'name="outer-x-1" value="20.0"' not in page
     assert f"ridge height: {shown.ridge_height:.3f} m" in page
+
+
+def test_load_dxf_with_no_file_asks_for_a_file() -> None:
+    data = {**_rect_post(), "dxf_units": "mm", "upload_dxf": "1"}
+    page = _client().post("/", data=data).get_data(as_text=True)
+    assert "Choose a DXF file first" in page
+    assert "not a DXF" not in page
 
 
 def test_refusals_leave_the_posted_fields_and_show_a_message() -> None:

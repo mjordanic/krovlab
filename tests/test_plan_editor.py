@@ -361,7 +361,7 @@ def _placement_rect(**overrides: str) -> dict[str, str]:
     return fields
 
 
-def test_dragging_the_interior_handle_writes_the_offset_and_leaves_the_corners() -> None:
+def test_dragging_the_interior_handle_writes_the_offset_keeps_the_corners() -> None:
     result = _run_editor(
         f"""
 editor.loadFields({json.dumps(_placement_rect())});
@@ -474,9 +474,10 @@ editor.pointerUp();
 
 
 def test_snap_on_lets_a_symmetry_axis_win_inside_a_quarter_metre() -> None:
+    fields = json.dumps(_placement_rect(**{"axis-1": "0,1,2.6", "mid_y": "2.6"}))
     result = _run_editor(
         f"""
-editor.loadFields({json.dumps(_placement_rect(**{"axis-1": "0,1,2.6", "mid_y": "2.6"}))});
+editor.loadFields({fields});
 editor.pointerDown(5, 2.6);
 editor.pointerMove(6.2, 2.75);
 editor.pointerUp();

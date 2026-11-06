@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 from krovlab._input import (
     _ORIENT_M2,
@@ -431,6 +432,10 @@ def _roofed_regions_overlap(
         return True
     if _any_vertex_inside(outer_b, holes_b, outer_a, holes_a):
         return True
+    if _any_edge_piece_inside(outer_a, holes_a, outer_b, holes_b):
+        return True
+    if _any_edge_piece_inside(outer_b, holes_b, outer_a, holes_a):
+        return True
     sample_a = _interior_point(outer_a, holes_a)
     if sample_a is not None and _in_roofed(*sample_a, outer_b, holes_b) == "in":
         return True
@@ -451,6 +456,42 @@ def _any_vertex_inside(
         for x, y in hole:
             if _in_roofed(x, y, other_outer, other_holes) == "in":
                 return True
+    return False
+
+
+def _any_edge_piece_inside(
+    outer: list[tuple[float, float]],
+    holes: list[list[tuple[float, float]]],
+    other_outer: list[tuple[float, float]],
+    other_holes: list[list[tuple[float, float]]],
+) -> bool:
+    """True if a stretch of one region's boundary runs through the other.
+
+    Each edge is split where the other region's vertices touch it, and
+    each piece's midpoint is tested. This catches cells that share lines
+    and overlap with every vertex on the other's boundary.
+    """
+    others = other_outer + [p for hole in other_holes for p in hole]
+    for ring in [outer, *holes]:
+        n = len(ring)
+        for i in range(n):
+            a, b = ring[i], ring[(i + 1) % n]
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            length2 = dx * dx + dy * dy
+            if length2 < 1e-24:
+                continue
+            cuts = [0.0, 1.0]
+            for p in others:
+                if _point_on_segment(p, a, b):
+                    cuts.append(((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2)
+            cuts.sort()
+            for t0, t1 in pairwise(cuts):
+                if t1 - t0 < 1e-9:
+                    continue
+                t = (t0 + t1) / 2.0
+                x, y = a[0] + t * dx, a[1] + t * dy
+                if _in_roofed(x, y, other_outer, other_holes) == "in":
+                    return True
     return False
 
 

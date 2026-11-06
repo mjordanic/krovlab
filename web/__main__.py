@@ -21,8 +21,10 @@ def load_repo_env(env_file: Path | None = None) -> None:
 def main() -> None:
     load_repo_env()
     app = create_app()
-    port = int(os.environ.get("PORT", "5000"))
-    host = "0.0.0.0" if "PORT" in os.environ else "127.0.0.1"
+    # Loopback unless HOST says otherwise; the container sets HOST=0.0.0.0.
+    # 8000, not 5000: macOS AirPlay Receiver owns port 5000.
+    port = int(os.environ.get("PORT", "8000"))
+    host = os.environ.get("HOST", "127.0.0.1")
     app.run(host=host, port=port)
 
 

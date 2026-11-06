@@ -173,6 +173,14 @@
     button[type="submit"].needs-update {
       box-shadow: 0 0 0 3px var(--accent-soft);
     }
+    .stale-note {
+      border: 1px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 0.5rem 0.75rem;
+      margin: 0.5rem 0;
+    }
+    .results.is-stale .takeoff,
+    .results.is-stale .plotly-graph-div { opacity: 0.35; }
     .help-box {
       border: 1px solid var(--line);
       padding: 0.75rem;
@@ -206,8 +214,11 @@
   <header>
     <h1>krovlab</h1>
     <p class="lede">
-      Give a building footprint in metres and a pitch in degrees. Get back a
-      hipped roof, or a named failure. Units: metres and degrees.
+      Draw a building outline and choose how each wall is roofed: hip, gable,
+      knee, or gambrel. Get back the roof and its quantities (faces, hips,
+      ridges, valleys, area), or a plain reason it cannot be built. Lengths
+      are in metres and pitch in degrees; a DXF upload is read in millimetres
+      unless you choose another unit.
       <a href="https://github.com/mjordanic/krovlab">Source on GitHub</a>.
     </p>
     <div class="about">
@@ -275,6 +286,9 @@
     <label>
       Example
       <select name="example" onchange="this.form.submit()">
+        {% if not example.slug %}
+        <option value="" selected>{{ example.label }}</option>
+        {% endif %}
         {% for group, items in groups %}
         <optgroup label="{{ group }}">
           {% for item in items %}
@@ -291,7 +305,7 @@
     <input type="hidden" name="selected_cell" value="{{ selected_cell }}">
     <aside class="settings">
       <p>
-        <button type="submit"{% if needs_update %} class="needs-update"{% endif %}>Update roof</button>
+        <button type="submit" id="update-roof">Update roof</button>
       </p>
       <p>
         <label>
@@ -664,6 +678,11 @@
         {% endfor %}
       </svg>
       <h2>Takeoff</h2>
+      <p class="stale-note" id="stale-note" hidden>
+        Out of date: you changed the building since this roof was built. The
+        takeoff, roof plan, and 3D below are for the previous roof. Click
+        <strong>Update roof</strong> to rebuild them.
+      </p>
       <div class="takeoff"><pre>{{ describe }}</pre></div>
       {% if plan_html %}
       <h2>Roof plan</h2>
@@ -702,6 +721,37 @@
       document.getElementById("plan-editor"),
       document.querySelector("form[method='post']")
     );
+    (function () {
+      // Mark the results out of date whenever the form no longer matches
+      // the roof the server built. Choosing a file or a selection is not a change.
+      var form = document.getElementById("roof-form");
+      var note = document.getElementById("stale-note");
+      var results = form && form.querySelector(".results");
+      var button = document.getElementById("update-roof");
+      if (!form || !note || !results) return;
+      var ignored = {
+        dxf: 1, dxf_units: 1, set_pitch: 1, edit_coordinates: 1,
+        selected_cell: 1, selected_interior: 1
+      };
+      function state() {
+        var parts = [];
+        new FormData(form).forEach(function (value, name) {
+          if (ignored[name] || typeof value !== "string") return;
+          parts.push(name + "=" + value);
+        });
+        return parts.join("&");
+      }
+      var built = state();
+      function check() {
+        var stale = state() !== built;
+        note.hidden = !stale;
+        results.classList.toggle("is-stale", stale);
+        if (button) button.classList.toggle("needs-update", stale);
+      }
+      ["input", "change", "click", "pointerup"].forEach(function (type) {
+        form.addEventListener(type, function () { window.setTimeout(check, 0); });
+      });
+    })();
     (function () {
       var radios = document.querySelectorAll('input[name="method"]');
       radios.forEach(function (radio) {

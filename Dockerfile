@@ -18,7 +18,8 @@ COPY docs/limitations.md docs/limitations.md
 COPY tests/fixtures/footprints tests/fixtures/footprints
 
 ENV PATH="/app/.venv/bin:$PATH"
-# Cloud Run injects PORT. The process binds 0.0.0.0 and honours it.
+# Cloud Run injects PORT. HOST makes the process bind all interfaces.
 ENV PORT=8080
+ENV HOST=0.0.0.0
 
 CMD ["python", "-m", "web"]
