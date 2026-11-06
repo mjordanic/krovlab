@@ -16,5 +16,3 @@ Behavioral rules and the skill/agent registry live in `AGENTS.md` — keep them 
   install the skills, then `/setup-matt-pocock-skills` once to regenerate
   docs/agents/{issue-tracker,triage-labels,domain}.md for this repo's conventions.
 -->
-
-> **TODO:** describe this project here.

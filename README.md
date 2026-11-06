@@ -500,3 +500,7 @@ algorithm choice is recorded in
 [`docs/adr/0001-own-weighted-straight-skeleton-in-python.md`](docs/adr/0001-own-weighted-straight-skeleton-in-python.md).
 What the library cannot represent — including which plans currently
 fail the terrain check — is in [`docs/limitations.md`](docs/limitations.md).
+
+## Licence
+
+KrovLab is released under the [MIT licence](LICENSE). An earlier commit contained a model checkpoint trained on CC BY-NC 4.0 data; it has been removed and is not covered by the MIT licence.
