@@ -111,6 +111,10 @@ Cases that currently do this, rather than raising or returning
 - A plus-shaped plan, where several split events collide at once
 - Some T-shapes at some pitches (the same T at 45° can pass and at 30°
   fail)
+- A symmetric E-shape: a 5 × 7 m outline with a 2 m spine and three 1 m
+  wide wings fails at 30°, 45° and 60°. The faces cover 16.75 m² of the
+  23 m² footprint; the rest is on no face. Not every E fails — the same
+  outline with 2 m wide wings is a valid terrain at all three pitches
 - Mixed pitch on some L-shapes, especially a large gap between a
   shallow face and a steep neighbour
 - A gable on some edges of an L or a U — not every gable, only some
